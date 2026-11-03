@@ -422,6 +422,34 @@ Key names: `"a"` to `"z"`, `"0"` to `"9"`, `"left"`, `"right"`, `"up"`,
 Use `key_down` for smooth movement, and `key_pressed` for things that
 should happen once per press, like jumping or firing.
 
+On phones and tablets (in Flaux Studio on the web), a finger works like the
+mouse.
+
+### Game controllers
+
+Xbox, PlayStation, Switch and most other game controllers work, plugged in
+or wireless (and VR controllers, see [VR and AR](#vr-and-ar)).
+
+| Function | Gives back |
+|---|---|
+| `button_down(name)` | true while the button is held |
+| `button_pressed(name)` | true only on the frame it goes down |
+| `stick_x()`, `stick_y()` | the left stick, from -1 to 1 (right and up are positive) |
+| `stick_x("right")`, `stick_y("right")` | the right stick |
+
+Button names: `"a"`, `"b"`, `"x"`, `"y"`, `"start"`, `"back"`, `"lb"`,
+`"rb"` (bumpers), `"lt"`, `"rt"` (triggers), `"l3"`, `"r3"` (pressing a
+stick), `"up"`, `"down"`, `"left"`, `"right"` (the D-pad). These work too:
+`"select"`, `"menu"`, `"l1"`, `"r1"`, `"l2"`, `"r2"`, `"trigger"`, `"grip"`.
+With no controller, every button is up and the sticks are 0.
+
+### Time
+
+| Function | Gives back |
+|---|---|
+| `seconds()` | seconds since the window opened (a decimal) |
+| `fps()` | how many frames a second are being drawn right now |
+
 ### Pictures
 
 ```
@@ -490,7 +518,144 @@ These settings help when running graphics programs in automated tests:
 | `FLAUX_FAST=1` | don't wait between frames |
 | `FLAUX_SCREENSHOT=last.bmp` | save the last frame when stopping |
 | `FLAUX_HOLD_KEYS=left,space` | pretend these keys are held down |
-| `SDL_VIDEODRIVER=offscreen` | draw without a real screen |
+| `FLAUX_HOLD_BUTTONS=a,stick=1` | pretend controller buttons are held (and the left stick pushed) |
+| `SDL_VIDEODRIVER=offscreen` | draw without a real screen (3D uses Mesa's software OpenGL there) |
+| `FLAUX_SOFTWARE_GL=1` | Windows: draw 3D with Mesa instead of the graphics card |
+
+## 3D
+
+Programs that use 3D draw with the graphics card (OpenGL 3.3 on the desktop,
+WebGL 2 in a browser). On a PC whose graphics are too old, the Windows app
+switches to Mesa, which draws with the processor instead: slower, but
+everything still works.
+
+In 3D, `x` goes right, `y` goes **up** and `z` comes **towards you**. Sizes
+are in "steps": a cube of size 1 is one step wide. Every shape is placed by
+its **middle**.
+
+### Shapes
+
+| Function | Draws |
+|---|---|
+| `cube(x, y, z, size, paint)` | a cube |
+| `box(x, y, z, width, height, depth, paint)` | a box |
+| `ball(x, y, z, radius, paint)` | a ball |
+| `cylinder(x, y, z, radius, height, paint)` | a cylinder, standing up |
+| `cone(x, y, z, radius, height, paint)` | a cone, point up |
+| `plane(x, y, z, width, depth, paint)` | a flat, level surface (seen from both sides) |
+| `model("file.obj", x, y, z, size, paint)` | a 3D model; it's resized to fit in a box `size` big |
+
+The **paint** can be left out (white), or be:
+
+- a colour: `"red"`, `"#ff8800"`, `rgb(255, 136, 0)`
+- a picture: `"crate.png"`. On a `plane` it repeats every step. Pictures 64
+  pixels or smaller keep sharp pixels (for pixel art); bigger ones are smooth.
+  See-through parts of a PNG are cut out.
+- a shader's name: `cube(0, 0, 0, 1, stripes)`. See [Shaders](#shaders).
+
+Shapes are drawn for one frame, like 2D drawing: draw them every time round
+the game loop, then `show()`.
+
+**Models** are `.obj` files (in Blender: File, Export, Wavefront (.obj)).
+If there's a `.mtl` file with it, its colours are used; the paint is
+multiplied by them, so leave it out (white) to see the model's own colours.
+
+### The scene
+
+| Function | Does |
+|---|---|
+| `camera(x, y, z, look_x, look_y, look_z)` | where you see from, and the point you look at |
+| `camera(x, y, z, look_x, look_y, look_z, degrees)` | ...and how wide you see (60 if left out) |
+| `sky(colour)` | the sky (also what `clear(colour)` does in 3D) |
+| `sky(top, horizon)` | a sky fading from one colour at the top to another at the horizon |
+| `sun(x, y, z)` / `sun(x, y, z, colour)` | the direction sunlight comes from; it makes shadows |
+| `sun(0, 0, 0)` | no sun (night): only the sky's glow and your lamps |
+| `light(x, y, z, colour, reach)` | a lamp for this frame (reach 10 if left out; up to 8 lamps) |
+| `fog(distance)` / `fog(distance, colour)` | things fade into the sky (or the colour) until they're gone at `distance` |
+| `turn(x, y, z)` | turns the shapes drawn after it by these degrees (around x, then y, then z); back to normal each frame |
+
+With no `camera(...)`, you look from `0, 3, 10` at `0, 0, 0`. With no
+`sky(...)`, 3D programs get a blue sky. The sun shines from above by default.
+`clear(colour)` in a 3D window also rubs out everything drawn so far that
+frame.
+
+**2D in a 3D window:** `rect`, `circle`, `write`, `image` and the rest are
+drawn on top of the 3D world, with smooth edges.
+
+**Speed:** shapes of the same kind with the same picture or shader are all
+drawn together in one go on the graphics card, so a program can draw
+thousands every frame. `fps()` tells you how many frames a second you get.
+
+## Shaders
+
+A shader is a small program that runs on the graphics card, once for every
+pixel. It's written in Flaux, outside any function, and gives back a colour:
+
+```
+shader glow
+    set brightness to sin(time * 3) * 0.5 + 0.5
+    return rgb(255 * brightness, 120, 40)
+end
+```
+
+Use it in place of a colour on a shape, or for the whole screen with
+`effect(name)` (once a frame, before `show()`).
+
+| Numbers a shader knows | On shapes | In `effect(...)` |
+|---|---|---|
+| `x`, `y` | the point being painted (in the world) | the pixel (from the top-left, like 2D) |
+| `z` | the point being painted | |
+| `u`, `v` | where on the face, 0 to 1 | |
+| `nx`, `ny`, `nz` | which way the face points | |
+| `width`, `height` | | the window's size |
+| `red`, `green`, `blue` | | the pixel's colour, 0 to 255 |
+| `time` | seconds since the window opened | seconds since the window opened |
+
+In `effect(...)`, `red_at(x, y)`, `green_at(x, y)` and `blue_at(x, y)` give
+the colour of any other pixel (for blurs, waves and so on).
+
+**What a shader can use:** numbers, true/false, colours (`"red"` or
+`rgb(...)`), `set`, `add`, `subtract`, `if`, `repeat ... times`,
+`repeat with ... from ... to`, `repeat while`, `stop`, `skip`, `return`,
+and `sqrt`, `sin`, `cos`, `tan`, `log`, `abs`, `floor`, `ceil`, `round`,
+`min`, `max`, `distance`. Not lists, text, `say`, or your own functions:
+the graphics card can't run those, and Flaux says so if you try.
+
+**Numbers from your program:** any other name a shader uses comes from
+where the shader is used. If `glow` uses `power`, then
+`cube(0, 0, 0, 1, glow)` uses the `power` from that line, so a loop can
+paint each cube differently. Up to 4 such numbers on shapes, 8 in effects.
+
+Lights, shadows and fog are added after a shape's shader, so painted shapes
+still look 3D. A loop in a shader stops after 10,000 times, so a mistake
+can't freeze the computer.
+
+## VR and AR
+
+3D programs work in VR headsets:
+
+- **Flaux Studio on the web** (WebXR): 3D programs get an **Enter VR**
+  button, and **Enter AR** on devices that can show the room around you
+  (in AR, the sky isn't drawn). Works in the Meta Quest browser, on Android
+  phones, and on PCs with a headset.
+- **The desktop app** (OpenXR): a program that uses `in_vr()` or the hands
+  looks for a headset when its window opens (SteamVR, Meta Quest Link,
+  Windows Mixed Reality, or Monado on Linux), and opens in it if there is
+  one. The window keeps showing the normal view. `FLAUX_VR=0` turns this off.
+
+In VR, `camera(x, y, z, ...)` is where your eyes are when you stand in the
+middle of your room, facing towards the point it looks at. Your head moves
+the view from there.
+
+| Function | Gives back |
+|---|---|
+| `in_vr()` | true while the program is in a headset |
+| `hand_x(side)`, `hand_y(side)`, `hand_z(side)` | where your `"left"` or `"right"` hand is (right if left out); the camera's position when there's no headset |
+
+VR controllers work like game controllers: the triggers are `"lt"` and
+`"rt"`, the grips `"lb"` and `"rb"`, the buttons `"a"`, `"b"` (right hand)
+and `"x"`, `"y"` (left hand), and the sticks are `stick_x(...)` and
+`stick_y(...)`.
 
 ## Comments
 
@@ -539,9 +704,13 @@ message instead of crashing.
    uses an optimising C compiler (gcc or clang) to make machine code. There
    is no interpreter, virtual machine or garbage collector.
 
+4. **It writes code the processor likes.** For example, an `if` that sets a
+   whole number one way or another becomes code without a jump, so the
+   processor never guesses wrong about which way it goes.
+
 Flaux still checks list positions and division by zero, which costs very
 little. See [benchmarks/RESULTS.md](../benchmarks/RESULTS.md) for how it
-compares with C++, C# and Python.
+compares with Rust, C++, C# and Python.
 
 ## Special words
 
@@ -549,6 +718,9 @@ These words have special meanings, so they can't be used as names:
 
 `add` `and` `else` `end` `false` `function` `if` `is` `mod` `not` `or`
 `repeat` `return` `say` `set` `skip` `stop` `subtract` `true`
+
+`shader` starts a shader when it begins a line on its own, like
+`shader glow` (it can still be used as a name elsewhere).
 
 Built-in function names (like `window`, `circle` or `random`) can be used
 for variables, but not for your own functions.

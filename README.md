@@ -3,7 +3,8 @@
 # Flaux
 
 **Flaux is a coding language that reads like English and runs super fast.
-You can even make games with it.**
+You can make games with it: 2D, 3D with real shadows and shaders, and even
+VR.**
 
 ```
 say "Hello, world!"
@@ -11,7 +12,7 @@ say "Hello, world!"
 
 That's a whole program. No semicolons, no curly brackets, nothing to set up
 first. Flaux programs read almost like a sentence, but they run as fast as
-C++, one of the fastest languages there is. Type your program in words, or
+C++ and Rust, the fastest languages there are. Type your program in words, or
 build it by snapping blocks together.
 
 **[&#11015; Download Flaux for Windows](https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe)**, or
@@ -24,15 +25,17 @@ build it by snapping blocks together.
 1. [Install Flaux on Windows](#install-flaux-on-windows) (or [put it on your website](#flaux-studio-on-your-website))
 2. [Flaux Studio](#flaux-studio)
 3. [Run your program with a batch file](#run-your-program-with-a-batch-file)
-4. [Learn Flaux in 12 lessons](#learn-flaux-in-12-lessons)
-5. [Your first game](#your-first-game)
-6. [Example games](#example-games)
-7. [Cheat sheet](#cheat-sheet)
-8. [When something goes wrong](#when-something-goes-wrong)
-9. [Already know another language?](#already-know-another-language)
-10. [How fast is it?](#how-fast-is-it)
-11. [Mac and Linux](#mac-and-linux)
-12. [For people who want to help build Flaux](#for-people-who-want-to-help-build-flaux)
+4. [Learn Flaux in 14 lessons](#learn-flaux-in-14-lessons) (13 is 3D, 14 is shaders)
+5. [VR and AR](#vr-and-ar)
+6. [Game controllers](#game-controllers)
+7. [Your first game](#your-first-game)
+8. [Example games](#example-games)
+9. [Cheat sheet](#cheat-sheet)
+10. [When something goes wrong](#when-something-goes-wrong)
+11. [Already know another language?](#already-know-another-language)
+12. [How fast is it?](#how-fast-is-it)
+13. [Mac and Linux](#mac-and-linux)
+14. [For people who want to help build Flaux](#for-people-who-want-to-help-build-flaux)
 
 ---
 
@@ -201,7 +204,7 @@ Flaux. If your game has graphics, share the `SDL2.dll` file next to it too.
 
 ---
 
-## Learn Flaux in 12 lessons
+## Learn Flaux in 14 lessons
 
 Every lesson is in Flaux Studio's **Learn** tab (and in
 [`examples/lessons/`](examples/lessons/)), so you can open it, run it, and
@@ -641,6 +644,183 @@ pixel-art website), and save them as PNG.
 > **Tip:** small pixel-art pictures (like 16 by 16) look great made bigger,
 > because Flaux keeps the pixels sharp instead of blurry.
 
+### Lesson 13: 3D
+
+![A 3D world made with Flaux: a floor, a turning cube and a ball, with shadows](docs/images/first_3d.png)
+
+In 3D, every place has three numbers: **x** goes right, **y** goes **up**,
+and **z** comes **towards you**. The graphics card does the drawing, with
+real light, shadows and smooth edges.
+
+```
+window(800, 600, "My first 3D world")
+
+set angle to 0
+
+repeat forever
+    sky("sky", "white")                # blue at the top, white at the horizon
+    camera(0, 3, 8, 0, 1, 0)           # stand at 0, 3, 8 and look at 0, 1, 0
+
+    plane(0, 0, 0, 30, 30, "green")    # a flat green floor
+
+    turn(0, angle, 0)                  # turn the next shapes...
+    cube(-2, 1, 0, 1.5, "red")         # ...like this cube
+    turn(0, 0, 0)                      # (stop turning)
+
+    ball(2, 1, 0, 1, "orange")
+    add 1 to angle
+    show()
+end
+```
+
+| Write | Draws |
+|---|---|
+| `cube(x, y, z, size, "red")` | a cube, with its middle at x, y, z |
+| `box(x, y, z, width, height, depth, "brown")` | a box (a stretched cube) |
+| `ball(x, y, z, radius, "orange")` | a ball |
+| `cylinder(x, y, z, radius, height, "gray")` | a cylinder, standing up |
+| `cone(x, y, z, radius, height, "green")` | a cone, point up (great for trees) |
+| `plane(x, y, z, width, depth, "green")` | a flat floor |
+| `model("tree.obj", x, y, z, size)` | a 3D model file, with its own colours |
+
+And to set the scene:
+
+| Write | Does |
+|---|---|
+| `camera(x, y, z, look_x, look_y, look_z)` | where you see from, and the point you look at |
+| `sky("blue")` or `sky("blue", "white")` | the sky's colour (top, then horizon) |
+| `sun(1, 2, 1)` | the direction sunlight comes from (`sun(0, 0, 0)` for night) |
+| `light(x, y, z, "yellow")` | a lamp, for this frame |
+| `fog(50)` | things fade into the sky until 50 steps away |
+| `turn(x, y, z)` | turns the shapes drawn after it (in degrees) |
+
+**Pictures on shapes:** use a picture's name instead of a colour:
+`cube(0, 0, 0, 1, "crate.png")`. On a `plane`, the picture repeats every
+step, so a small grass picture covers a whole field.
+
+**Models:** make them in Blender (or download free ones, like Kenney's) and
+save them as `.obj`, next to your program. Their `.mtl` colours come too.
+
+**2D on top:** `write`, `rect`, `image` and the other 2D drawing still work
+in a 3D window, drawn on top, so scores and messages are easy.
+
+> **Fast with thousands of things:** Flaux draws all the cubes (or balls)
+> of the same kind together, in one go on the graphics card. The block world
+> example draws 6,400 blocks every frame.
+
+### Lesson 14: Shaders
+
+![A striped cube and a rainbow ball, painted by shaders written in Flaux](docs/images/shaders.png)
+
+A **shader** is a little program that runs on the graphics card, once for
+every pixel, millions of times a second. In Flaux you write shaders in Flaux:
+
+```
+shader stripes
+    if floor(x * 4) mod 2 = 0
+        return "white"
+    end
+    return "red"
+end
+
+window(800, 600)
+repeat forever
+    sky("navy")
+    cube(0, 1, 0, 2, stripes)       # a shader goes where a colour would
+    show()
+end
+```
+
+A shader works out a colour and gives it back with `return`. It already
+knows some numbers:
+
+| On a shape | |
+|---|---|
+| `x`, `y`, `z` | the point being painted, in the world |
+| `u`, `v` | where on the face (0 to 1 across) |
+| `nx`, `ny`, `nz` | which way the face points (`ny` is 1 on top) |
+| `time` | seconds since the window opened, for moving patterns |
+
+Light, shadows and fog are added afterwards, so painted shapes still look 3D.
+
+**Screen effects** put the whole window through a shader with `effect(...)`.
+There, `x` and `y` are the pixel, `red`, `green` and `blue` are its colour
+(0 to 255), and `red_at(x, y)` (and green, blue) look at other pixels:
+
+```
+shader dark_corners
+    set d to distance(x, y, width / 2, height / 2) / width
+    set light to 1 - d * d
+    return rgb(red * light, green * light, blue * light)
+end
+
+...
+effect(dark_corners)      # once a frame, before show()
+```
+
+**Numbers from your program:** a shader can use your variables too. If it
+uses a name it doesn't set itself, like `health`, it gets the `health` from
+where it's used: `cube(0, 0, 0, 1, glow)` passes in `health` from that line.
+
+A shader can use numbers, true/false, colours, `if`, `repeat` and maths
+(`sin`, `cos`, `sqrt`, `floor`, `min`, `max`, `distance`, `abs`, ...). It
+can't use lists, text or `say`, because the graphics card can't. If you try,
+Flaux explains why and what to do instead.
+
+---
+
+## VR and AR
+
+![The same 3D program seen by both eyes in a VR headset](docs/images/vr_two_eyes.png)
+
+Your 3D programs work in VR headsets too.
+
+- **In Flaux Studio on the web** (on a Meta Quest's browser, an Android
+  phone, or a PC with a headset), 3D programs get an **Enter VR** button
+  (and **Enter AR** on devices that can show the room around you).
+- **In the Windows app**, programs that use `in_vr()` or your hands open in
+  the headset by themselves, if one is connected (SteamVR, Meta Quest Link
+  or Windows Mixed Reality).
+
+`camera(...)` becomes where you stand, and you look around by moving your
+head. Your hands:
+
+| Write | Gives back |
+|---|---|
+| `in_vr()` | true while the program is in a headset |
+| `hand_x("right")`, `hand_y("right")`, `hand_z("right")` | where your right hand is (or `"left"`) |
+| `button_down("rt")` | the right trigger (`"lt"` is the left; the grips are `"rb"` and `"lb"`) |
+| `stick_x("left")`, `stick_y("left")` | the controller's stick |
+
+Try [`examples/3d/vr_garden.flx`](examples/3d/vr_garden.flx): hold the
+trigger to grow flowers where your hand is.
+
+---
+
+## Game controllers
+
+Plug in an Xbox, PlayStation or Switch controller, and your games can use it:
+
+```
+if button_down("a")
+    say "jump!"
+end
+add stick_x() * 5 to x        # the left stick: -1 (left) to 1 (right)
+```
+
+| Write | Gives back |
+|---|---|
+| `button_down("a")` | true while the button is held |
+| `button_pressed("start")` | true only on the frame it goes down |
+| `stick_x()`, `stick_y()` | the left stick, from -1 to 1 (up is positive) |
+| `stick_x("right")`, `stick_y("right")` | the right stick |
+
+Buttons: `"a"`, `"b"`, `"x"`, `"y"`, `"start"`, `"back"`, `"lb"`, `"rb"`
+(the bumpers), `"lt"`, `"rt"` (the triggers), `"l3"`, `"r3"` (pressing a
+stick) and `"up"`, `"down"`, `"left"`, `"right"` (the D-pad). VR
+controllers use the same names, and on phones and tablets a finger works
+like the mouse.
+
 ---
 
 ## Your first game
@@ -691,6 +871,19 @@ command line:
 | **Picture**: a drawing with no loop at all | `./flaux examples/games/picture.flx` |
 | **Space Dodge**: steer a spaceship past falling rocks (uses pictures) | `./flaux examples/games/space_dodge.flx` |
 
+And in 3D:
+
+![3D Runner, a 3D game made with Flaux](docs/images/runner_3d.png)
+
+| 3D | Run it with |
+|---|---|
+| **3D Runner**: dodge the blocks on a shader-painted road (keys or a controller) | `./flaux examples/3d/runner.flx` |
+| **Block world**: fly over 6,400 blocks with grass, dirt and stone | `./flaux examples/3d/block_world.flx` |
+| **VR garden**: grow flowers with your hands in a VR headset | `./flaux examples/3d/vr_garden.flx` |
+| **Model viewer**: a rocket loaded from a 3D model file | `./flaux examples/3d/model_viewer.flx` |
+
+![A world of 6,400 blocks drawn every frame](docs/images/block_world.png)
+
 Open them up, read them, and change things. Make the stars fall faster,
 change the colours, add a second basket. That's the best way to learn.
 
@@ -724,6 +917,11 @@ change the colours, add a second basket. That's the best way to learn.
 | make a game loop | `repeat forever` ... `show()` ... `end` |
 | check a key | `if key_down("left")` |
 | draw a picture | `image("ship.png", x, y, 64, 64)` |
+| draw in 3D | `cube(x, y, z, 1, "red")`, `ball(...)`, `plane(...)`, `model(...)` |
+| set up a 3D scene | `camera(...)`, `sky(...)`, `sun(...)`, `light(...)`, `fog(...)` |
+| paint with a shader | `shader name` ... `return colour` ... `end`, then `cube(0, 0, 0, 1, name)` |
+| use a game controller | `button_down("a")`, `stick_x()` |
+| check for VR | `if in_vr()` ... `hand_x("right")` |
 
 Built-in helpers: `ask`, `random`, `length`, `contains`, `text`, `number`,
 `whole`, `is_number`, `round`, `floor`, `ceil`, `abs`, `min`, `max`, `sqrt`,
@@ -731,7 +929,11 @@ Built-in helpers: `ask`, `random`, `length`, `contains`, `text`, `number`,
 Graphics: `window`, `clear`, `rect`, `circle`, `triangle`, `line`, `dot`,
 `write`, `show`, `key_down`, `key_pressed`, `mouse_x`, `mouse_y`,
 `mouse_down`, `mouse_clicked`, `beep`, `text_width`, `screenshot`, `image`,
-`image_width`, `image_height`.
+`image_width`, `image_height`, `fps`, `seconds`, `button_down`,
+`button_pressed`, `stick_x`, `stick_y`.
+3D: `camera`, `sky`, `sun`, `light`, `fog`, `turn`, `cube`, `box`, `ball`,
+`cylinder`, `cone`, `plane`, `model`, `effect`, `in_vr`, `hand_x`,
+`hand_y`, `hand_z`.
 Every one is explained in the [full guide](docs/LANGUAGE.md).
 
 ---
@@ -799,18 +1001,22 @@ a quick translation:
 
 ## How fast is it?
 
-We raced the same programs in Flaux, C++, C# and Python. Smaller is faster:
+We raced the same programs in Flaux, Rust, C++, C# and Python. Smaller is
+faster:
 
-| Test | Flaux | C++ | C# | Python |
-|---|---|---|---|---|
-| Lots of function calls | **0.17s** | 0.17s | 0.57s | 12.15s |
-| Finding prime numbers | **0.29s** | 0.30s | 0.34s | 11.18s |
-| Whole-number maths | **0.73s** | 0.79s | 0.92s | 54.09s |
-| Decimal maths | **0.26s** | 0.27s | 0.28s | 16.47s |
-| Building a big list | **0.21s** | 0.35s | 0.46s | 5.58s |
+| Test | Flaux | Rust | C++ | C# | Python |
+|---|---|---|---|---|---|
+| Lots of function calls | **0.16s** | 0.31s | 0.16s | 0.46s | 10.73s |
+| Finding prime numbers | **0.33s** | 0.38s | 0.37s | 0.40s | 11.48s |
+| Whole-number maths | 0.58s | **0.45s** | 0.71s | 0.90s | 44.42s |
+| Decimal maths | **0.20s** | 0.21s | 0.22s | 0.25s | 18.78s |
+| Building a big list | **0.15s** | 0.17s | 0.31s | 0.48s | 5.55s |
 
-Flaux keeps up with C++, beats C# on every test, and is 25 to 70 times
-faster than Python. ([Details and how to run the race yourself](benchmarks/RESULTS.md).)
+Flaux beat Rust on 4 of the 5 tests (Rust won the whole-number maths one),
+matched or beat C++ on every test, beat C# on every test, and was 34 to 94
+times faster than Python. Every language was built with its normal
+fast settings (Rust like `cargo build --release`). ([Details, and how to run
+the race yourself](benchmarks/RESULTS.md).)
 
 **How can something so easy be so fast?** Flaux figures out what kind of
 value is in every variable *before* your program runs, then turns your
@@ -917,3 +1123,6 @@ release, which is what the download button gives you.
 - [x] A Windows installer and a beginner code editor (Flaux Studio)
 - [x] A drag-and-drop block editor that writes Flaux for you
 - [x] Flaux Studio as a website, for your own web host
+- [x] 3D on the graphics card: shapes, models, lights, shadows, fog and sky
+- [x] Shaders written in Flaux, for shapes and the whole screen
+- [x] VR and AR headsets (WebXR on the web, OpenXR on Windows) and game controllers

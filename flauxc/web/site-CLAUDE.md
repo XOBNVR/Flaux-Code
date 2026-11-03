@@ -15,7 +15,8 @@ are **built from that repository**, so make lasting changes there and rebuild
 |---|---|
 | `index.html` | the page: Flaux Studio (editor, Blocks mode, output, lessons) |
 | `web.js` | the page's helper: loads Python, runs programs, keeps files in the browser |
-| `fx.js` | the runtime that compiled Flaux programs use (maths, text, graphics, keys, sound) |
+| `fx.js` | the runtime that compiled Flaux programs use (maths, text, 2D graphics, keys, controllers, sound) |
+| `fx3d.js` | 3D, shaders and VR/AR: the same engine as the Windows app, drawn with WebGL 2 and WebXR |
 | `blocks.js`, `blockly/` | the block editor (built on Google's Blockly) |
 | `pyodide/` | Python for web pages (Pyodide 314.0.7). It runs Flaux's real compiler in the browser |
 | `flaux-files.json` | the Flaux compiler's Python source files, loaded into Pyodide |
@@ -32,8 +33,12 @@ are **built from that repository**, so make lasting changes there and rebuild
 2. Checking code, the "Apply fix" button and Blocks mode all use that real
    compiler, so the error messages are exactly the same as the desktop app's.
 3. To run a program, the compiler turns it into JavaScript, and it runs in
-   the page on `fx.js`. Games draw on a `<canvas>` above the output.
-4. People's programs and pictures are kept in their own browser
+   the page on `fx.js`. Games draw on a `<canvas>` above the output. 3D
+   programs and shaders draw with WebGL 2 (`fx3d.js`); the GPU code
+   (GLSL) comes from the compiler (`engine.glsl`, inside `flaux-files.json`).
+4. A 3D program gets **Enter VR** / **Enter AR** buttons above the game when
+   the browser has WebXR and a headset (or an AR phone) is there.
+5. People's programs and pictures are kept in their own browser
    (`localStorage` keys `flaux-web-programs` and `flaux-web-pictures`).
    Nothing is sent anywhere.
 
@@ -50,6 +55,12 @@ or an ordinary web server (Apache, nginx).
 - **`.wasm` files must be served as `application/wasm`.** Almost every host
   does this already; `.htaccess` sets it for Apache.
 - **No special headers are needed** (no COOP/COEP, no SharedArrayBuffer).
+- **VR and AR need https://.** Browsers only allow WebXR on secure pages
+  (or localhost). Without https the Enter VR button doesn't appear;
+  everything else still works. If you put the Studio inside an `<iframe>`,
+  give it `allow="xr-spatial-tracking"` too.
+- **3D needs WebGL 2**, which every current browser has (Chrome, Edge,
+  Firefox, Safari 15+, the Meta Quest browser).
 - **It can live in a subfolder**, like `https://example.com/flaux/`. Every
   path in the site is relative.
 - **Size:** about 15 MB in total. The first visit downloads about 10 MB
@@ -98,6 +109,7 @@ Where things come from, if you want to change them:
 | the page, its look and its text | `flauxc/studio/index.html` (shared with the desktop app) |
 | the block editor | `flauxc/studio/blocks.js`, `flauxc/studio/blocks_table.json` |
 | what happens in the browser | `flauxc/web/web.js`, `flauxc/web/fx.js` |
+| 3D, VR and AR in the browser | `flauxc/web/fx3d.js` (and `flauxc/engine.glsl`, shared with the Windows app) |
 | Flaux to JavaScript | `flauxc/jsgen.py` |
 | this file | `flauxc/web/site-CLAUDE.md` |
 
@@ -112,7 +124,10 @@ node tests/web_studio_test.js http://127.0.0.1:8790/   # the whole web Studio, i
 ## Things to know
 
 - **Speed:** programs run as JavaScript, which is fine for learning and games
-  but slower than the Windows app (which compiles to machine code).
+  but slower than the Windows app (which compiles to machine code). 3D is
+  drawn by the graphics card in both, so 3D games run well in the browser.
+- **Models:** `.obj` and `.mtl` files can be added with the Pictures button,
+  like pictures.
 - **Saving:** programs are saved per browser and per website address. If
   the site moves to a new address, people should download their programs
   first (Open, then Download this program).

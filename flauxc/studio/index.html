@@ -314,13 +314,14 @@ const $ = (id) => document.getElementById(id);
 const code = $("code"), hi = $("highlight-inner"), gutter = $("gutter-inner");
 
 const KEYWORDS = new Set(("set to add subtract from say if then else end repeat times while until with in by " +
-  "forever function return and or not is true false mod stop skip copies of more less than at least most " +
+  "forever function shader return and or not is true false mod stop skip copies of more less than at least most " +
   "equal greater fewer bigger smaller").split(" "));
 const BUILTINS = new Set(("sqrt sin cos tan log abs floor ceil round min max random text number whole ask " +
   "is_number clock length contains uppercase lowercase distance rgb window show clear rect circle line " +
   "triangle dot write key_down key_pressed mouse_x mouse_y mouse_down mouse_clicked beep screenshot " +
-  "text_width image image_width image_height").split(" "));
-const BLOCK_START = /^\s*(if|else|repeat|function)\b/;
+  "text_width image image_width image_height fps seconds button_down button_pressed stick_x stick_y camera sky " +
+  "sun light fog turn cube box ball cylinder cone plane model effect in_vr hand_x hand_y hand_z").split(" "));
+const BLOCK_START = /^\s*(if|else|repeat|function|shader)\b/;
 
 const SNIPPETS = [
   ["Say something", 'say "Hello!"'],
@@ -339,6 +340,12 @@ const SNIPPETS = [
    'triangle(500, 200, 550, 100, 600, 200, "orange")\nwrite("Hello!", 20, 20, "white", 3)'],
   ["A picture", 'image("ship.png", 100, 200, 64, 64)'],
   ["A beep", "beep(440, 0.2)"],
+  ["3D world", 'window(800, 600, "3D")\nset angle to 0\n\nrepeat forever\n    sky("sky", "white")\n' +
+   '    camera(0, 3, 8, 0, 1, 0)\n    plane(0, 0, 0, 30, 30, "green")\n    turn(0, angle, 0)\n' +
+   '    cube(0, 1, 0, 1.5, "red")\n    add 1 to angle\n    show()\nend'],
+  ["A shader", 'shader stripes\n    if floor(x * 4) mod 2 = 0\n        return "white"\n    end\n    return "red"\nend\n\n' +
+   'cube(0, 1, 0, 2, stripes)'],
+  ["Game controller", 'if button_down("a")\n    say "jump!"\nend\nadd stick_x() * 5 to x'],
 ];
 
 const state = { mode: "code", genIds: [], blocksEdited: false, codeBeforeBlocks: undefined,
@@ -472,7 +479,7 @@ code.addEventListener("input", () => {
   if (m && m[1].length >= 4) {
     const prev = code.value.slice(lineStart(start - 1), start - 1);
     const prevIndent = /^\s*/.exec(prev)[0].length;
-    if (m[1].length >= prevIndent && !/^\s*(if|else|repeat|function)\b/.test(prev)) {
+    if (m[1].length >= prevIndent && !/^\s*(if|else|repeat|function|shader)\b/.test(prev)) {
       code.setSelectionRange(start, start + 4); insertText(""); code.setSelectionRange(s - 4, s - 4);
     }
   }
