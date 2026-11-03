@@ -23,6 +23,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from . import blocks
 from .. import cli
 from ..compiler import compile_source
 from ..errors import FlauxError
@@ -280,6 +281,16 @@ class Studio:
         for run in self.runs.values():
             run.stop()
 
+    def blocks(self, content):
+        """The program as blocks, for the block editor."""
+        try:
+            return {"ok": True, "workspace": blocks.to_blocks(content)}
+        except FlauxError as e:
+            return {"ok": False, "error": e.to_dict("untitled.flx", content)}
+        except RecursionError:
+            return {"ok": False, "error": {"message": "This program is nested too deeply to show as blocks.",
+                                           "line": None, "text": ""}}
+
     def show_folder(self, path=None):
         folder = self.program_dir(path) if path else self.home
         if cli.WINDOWS:
@@ -321,6 +332,21 @@ def make_handler(studio):
                 if parse_qs(url.query).get("t", [""])[0] != studio.token:
                     return self.send(403, "<h1>Please open Flaux Studio from its shortcut.</h1>", "text/html")
                 return self.send(200, page.replace("@@TOKEN@@", studio.token), "text/html")
+            if url.path.startswith("/blockly/"):
+                # the block editor's files (Blockly)
+                base = os.path.realpath(os.path.join(HERE, "blockly"))
+                file = os.path.realpath(os.path.join(base, url.path[len("/blockly/"):]))
+                kinds = {".js": "text/javascript", ".svg": "image/svg+xml", ".mp3": "audio/mpeg",
+                         ".gif": "image/gif", ".png": "image/png", ".cur": "image/x-icon", ".ogg": "audio/ogg",
+                         ".wav": "audio/wav"}
+                kind = kinds.get(os.path.splitext(file)[1])
+                if file.startswith(base + os.sep) and kind and os.path.isfile(file):
+                    with open(file, "rb") as fh:
+                        return self.send(200, fh.read(), kind)
+                return self.send(404, "Not found", "text/plain")
+            if url.path == "/blocks.js":
+                with open(os.path.join(HERE, "blocks.js"), "rb") as fh:
+                    return self.send(200, fh.read(), "text/javascript")
             if url.path == "/picture":
                 # Pictures for the Learn tab and the logo
                 name = os.path.basename(parse_qs(url.query).get("name", [""])[0])
@@ -369,6 +395,10 @@ def make_handler(studio):
                 return studio.stop(str(d.get("run")))
             if path == "/api/folder":
                 return studio.show_folder(d.get("path"))
+            if path == "/api/blocks":
+                return studio.blocks(d.get("content", ""))
+            if path == "/api/blockinfo":
+                return blocks.info()
             return None
 
     return Handler
@@ -401,7 +431,7 @@ def open_window(url):
         webbrowser.open(url)
 
 
-def main(open_file=None, port=0, show=True, quiet=False):
+def main(open_file=None, port=0, show=True, quiet=False, keep_running=False):
     studio = Studio(open_file)
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(studio))
     url = f"http://127.0.0.1:{server.server_address[1]}/?t={studio.token}"
@@ -421,7 +451,8 @@ def main(open_file=None, port=0, show=True, quiet=False):
                 server.shutdown()
                 return
 
-    threading.Thread(target=watchdog, daemon=True).start()
+    if not keep_running:
+        threading.Thread(target=watchdog, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

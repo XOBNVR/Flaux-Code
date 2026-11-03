@@ -24,6 +24,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc libsdl2-dev
       - name: Run all tests
         run: python3 tests/run_tests.py
+      - name: Install a browser for the block editor test
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright
+          npx --prefix "$RUNNER_TEMP/pw" playwright install --with-deps chromium
+      - name: Test the block editor (every program through blocks and back)
+        env:
+          NODE_PATH: ${{ runner.temp }}/pw/node_modules
+        run: python3 tests/blocks_roundtrip.py
 
   windows:
     name: Tests and installer on Windows

@@ -52,7 +52,9 @@ header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; backg
          border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; margin-right: 10px; }
 .logo { width: 32px; height: 32px; border-radius: 8px; display: block; }
-#filename { color: var(--muted); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#filename { color: var(--muted); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+             min-width: 0; flex: 0 1 auto; }
+header button, .brand { white-space: nowrap; flex: none; }
 #filename b { color: var(--text); }
 .spacer { flex: 1; }
 .run { background: var(--run); border-color: var(--run); color: #fff; font-weight: 700; padding: 8px 22px;
@@ -65,6 +67,15 @@ header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; backg
 main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr); gap: 12px; padding: 12px;
        min-height: 0; }
 #left { display: grid; grid-template-rows: 1fr auto; gap: 12px; min-height: 0; min-width: 0; }
+.mode { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-left: 6px; }
+.mode button { border: 0; border-radius: 0; padding: 7px 14px; background: var(--panel); color: var(--muted); font-weight: 600; }
+.mode button.active { background: var(--accent); color: #fff; }
+#blocks-area { display: grid; grid-template-rows: 1fr auto; gap: 8px; min-height: 0; }
+#blockly { min-height: 260px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px var(--shadow); }
+#blocks-code { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; }
+#blocks-code summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+#blocks-code pre { margin: 6px 0 2px; max-height: 150px; overflow: auto; background: var(--ed-bg); color: var(--ed-text);
+                   border-radius: 8px; padding: 8px 12px; font-family: var(--mono); font-size: 13.5px; }
 #editor { position: relative; display: flex; background: var(--ed-bg); border-radius: 12px; overflow: hidden;
           min-height: 0; box-shadow: 0 2px 10px var(--shadow); }
 #gutter { width: 52px; flex: none; background: var(--ed-gutter); color: var(--ed-muted); text-align: right;
@@ -166,6 +177,10 @@ dialog::backdrop { background: rgba(20, 22, 40, .45); }
   <button id="btn-new" title="New program (Ctrl+N)">New</button>
   <button id="btn-open" title="Open a program (Ctrl+O)">Open</button>
   <button id="btn-save" title="Save (Ctrl+S)">Save</button>
+  <div class="mode" role="group" aria-label="Write with code or blocks">
+    <button id="mode-code" class="active" title="Write your program as text">&#9998; Code</button>
+    <button id="mode-blocks" title="Build your program from blocks">&#9638; Blocks</button>
+  </div>
   <span id="filename"></span>
   <div class="spacer"></div>
   <button id="btn-theme" class="small" title="Night mode / day mode"></button>
@@ -184,6 +199,13 @@ dialog::backdrop { background: rgba(20, 22, 40, .45); }
         <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"
                   aria-label="Your Flaux program"></textarea>
       </div>
+    </div>
+    <div id="blocks-area" hidden>
+      <div id="blockly"></div>
+      <details id="blocks-code" open>
+        <summary>Your blocks as Flaux code</summary>
+        <pre id="blocks-code-view"></pre>
+      </details>
     </div>
     <div id="problem" hidden>
       <div class="p-head"><span class="p-icon">!</span><b id="p-title"></b></div>
@@ -252,6 +274,10 @@ dialog::backdrop { background: rgba(20, 22, 40, .45); }
   </div>
 </dialog>
 
+<script src="/blockly/blockly_compressed.js"></script>
+<script src="/blockly/blocks_compressed.js"></script>
+<script src="/blockly/msg/en.js"></script>
+<script src="/blocks.js"></script>
 <script>
 "use strict";
 const TOKEN = "@@TOKEN@@";
@@ -286,7 +312,8 @@ const SNIPPETS = [
   ["A beep", "beep(440, 0.2)"],
 ];
 
-const state = { path: null, example: false, dirty: false, run: null, from: 0, problem: null, checkTimer: null,
+const state = { mode: "code", genIds: [], blocksEdited: false, codeBeforeBlocks: undefined,
+                path: null, example: false, dirty: false, run: null, from: 0, problem: null, checkTimer: null,
                 lastChecked: null, runtimeLine: null, info: null };
 
 // ------------------------------------------------------------------ server
@@ -452,17 +479,26 @@ async function check() {
   } catch (err) { status(err.message, "bad"); }
 }
 
+function problemBlock(p) {
+  return p && (p.blockId || (p.line && state.genIds[p.line - 1]));
+}
+
 function showProblem(p, fromRun = false) {
   state.problem = p;
   render();
   const box = $("problem");
+  const blocks = state.mode === "blocks";
   if (!p) {
     box.hidden = true;
+    if (blocks) FlauxBlocks.clearWarnings();
     status("No problems found", "good");
     return;
   }
   box.hidden = false; box.classList.remove("good");
-  $("p-title").textContent = p.line ? `Problem on line ${p.line}` : "Problem";
+  $("p-title").textContent = blocks ? "Problem in a block (it has a \u26a0 sign)" :
+    p.line ? `Problem on line ${p.line}` : "Problem";
+  $("p-goto").textContent = blocks ? "Show me the block" : "Show me the line";
+  if (blocks) FlauxBlocks.showProblem(problemBlock(p), p.message);
   $("p-message").textContent = p.message;
   $("p-hint").textContent = p.hint || (p.fixed ? "Change it to:" : "");
   const fixed = $("p-fixed");
@@ -478,20 +514,29 @@ function showProblem(p, fromRun = false) {
   see.hidden = !p.see;
   if (p.see) see.textContent = `${p.see.words}  line ${p.see.line}: ${p.see.text.trim()}`;
   $("p-apply").hidden = !p.fixed_source;
-  $("p-goto").hidden = !p.line;
-  status(p.line ? `Problem on line ${p.line}` : "Problem", "bad");
+  $("p-goto").hidden = blocks ? !problemBlock(p) : !p.line;
+  status(blocks ? "Problem in a block" : p.line ? `Problem on line ${p.line}` : "Problem", "bad");
 }
 
-$("p-apply").addEventListener("click", () => {
+$("p-apply").addEventListener("click", async () => {
   const p = state.problem;
   if (!p || !p.fixed_source) return;
+  if (state.mode === "blocks") {
+    const r = await toBlocks(p.fixed_source);
+    if (r.ok) { refreshFromBlocks(); setDirty(true); state.blocksEdited = true; status("Fix applied. Press Run to try it.", "good"); }
+    return;
+  }
   const line = p.line;
   code.focus(); code.select(); insertText(p.fixed_source);   // keeps Ctrl+Z working
   setDirty(true); render(); check();
   if (line) goToLine(line);
   status("Fix applied. Press Run to try it.", "good");
 });
-$("p-goto").addEventListener("click", () => state.problem && goToLine(state.problem.line, state.problem.col || 1));
+$("p-goto").addEventListener("click", () => {
+  if (!state.problem) return;
+  if (state.mode === "blocks") FlauxBlocks.showProblem(problemBlock(state.problem), state.problem.message);
+  else goToLine(state.problem.line, state.problem.col || 1);
+});
 
 // ---------------------------------------------------------------- running
 const cons = $("console");
@@ -506,6 +551,7 @@ function print(text, cls = "") {
 async function run() {
   if (state.run) await stop();
   showTab("output");
+  if (state.mode === "blocks" && refreshFromBlocks().problems.length) return;
   if (state.path && !state.example && state.dirty) await save(true);
   cons.textContent = "";
   status("Getting ready...");
@@ -534,7 +580,11 @@ async function poll() {
     print(text.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, ""), stream === "err" ? "err" : "");
     if (stream === "err") {
       const m = /Problem while running [^,]*, line (\d+)/.exec(cons.textContent);
-      if (m) { state.runtimeLine = Number(m[1]); render(); }
+      if (m) {
+        state.runtimeLine = Number(m[1]); render();
+        if (state.mode === "blocks")
+          FlauxBlocks.showProblem(state.genIds[state.runtimeLine - 1], "The program stopped at this block. The Output panel says why.");
+      }
     }
   }
   state.from += r.chunks.length;
@@ -580,6 +630,7 @@ async function openFile(path) {
   if (r.ok === false) { status(r.message, "bad"); return false; }
   state.path = r.path; state.example = r.example; state.lastChecked = null;
   setContent(r.content); setDirty(false);
+  if (state.mode === "blocks") await showAsBlocks();
   try { localStorage.setItem("flaux-last", r.path); } catch (e) {}
   if ($("open-dialog").open) $("open-dialog").close();
   return true;
@@ -654,8 +705,97 @@ function newFile() {
   if (!confirmLose()) return;
   state.path = null; state.example = false; state.lastChecked = null;
   setContent('say "Hello!"\n'); setDirty(false);
-  goToLine(1, 13);
+  if (state.mode === "blocks") showAsBlocks();
+  else goToLine(1, 13);
 }
+
+// ------------------------------------------------------------ blocks mode
+let blocksReady = null, blocksTimer = null;
+function ensureBlocks() {
+  if (!blocksReady) blocksReady = (async () => {
+    const info = await api("/api/blockinfo");
+    FlauxBlocks.init($("blockly"), info, { dark: isDark(), onChange: blocksChanged });
+  })();
+  return blocksReady;
+}
+
+function blocksChanged() {
+  state.blocksEdited = true;
+  clearTimeout(blocksTimer);
+  blocksTimer = setTimeout(() => { refreshFromBlocks(); setDirty(true); }, 250);
+}
+
+// Blocks -> code: keeps the (hidden) code editor up to date, so Save, Run
+// and checking work exactly as in Code mode.
+function refreshFromBlocks() {
+  const gen = FlauxBlocks.generate();
+  state.genIds = gen.ids;
+  code.value = gen.code;
+  $("blocks-code-view").innerHTML = gen.code.split("\n").map((l) => lineHTML(l)).join("\n");
+  if (gen.problems.length) {
+    state.lastChecked = null;
+    showProblem({ message: gen.problems[0].message, blockId: gen.problems[0].id, line: null,
+                  hint: "Every space in a block needs something in it before the program can run." });
+  } else {
+    clearTimeout(state.checkTimer);
+    state.checkTimer = setTimeout(check, 300);
+  }
+  return gen;
+}
+
+// Code -> blocks (done by Flaux Studio's helper, which understands Flaux)
+async function toBlocks(text) {
+  const r = await api("/api/blocks", { content: text });
+  if (!r.ok) return r;
+  await ensureBlocks();
+  FlauxBlocks.load(r.workspace);
+  return r;
+}
+
+async function showAsBlocks() {
+  const r = await toBlocks(code.value);
+  if (!r.ok) {
+    showMode("code");
+    showProblem(r.error);
+    status("This program has a problem, so it's shown as code. Fix it, then switch to Blocks.", "bad");
+    return false;
+  }
+  state.codeBeforeBlocks = code.value;
+  state.blocksEdited = false;
+  const dirty = state.dirty;
+  refreshFromBlocks();
+  setDirty(dirty);
+  return true;
+}
+
+function showMode(mode) {
+  state.mode = mode;
+  $("editor").hidden = mode === "blocks";
+  $("blocks-area").hidden = mode !== "blocks";
+  $("mode-code").classList.toggle("active", mode === "code");
+  $("mode-blocks").classList.toggle("active", mode === "blocks");
+  if (mode === "blocks") FlauxBlocks.resize();
+}
+
+async function setMode(mode) {
+  if (mode === state.mode) return;
+  if (mode === "blocks") {
+    await ensureBlocks();
+    showMode("blocks");
+    if (!(await showAsBlocks())) return;
+  } else {
+    refreshFromBlocks();
+    // nothing was changed in the blocks: keep the code exactly as it was
+    if (!state.blocksEdited && state.codeBeforeBlocks !== undefined) code.value = state.codeBeforeBlocks;
+    FlauxBlocks.clearWarnings();
+    showMode("code");
+    state.lastChecked = null; render(); check();
+  }
+  try { localStorage.setItem("flaux-mode", state.mode); } catch (e) {}
+}
+$("mode-code").addEventListener("click", () => setMode("code"));
+$("mode-blocks").addEventListener("click", () => setMode("blocks"));
+window.addEventListener("resize", () => { if (state.mode === "blocks") FlauxBlocks.resize(); });
 
 // ------------------------------------------------------------------ learn
 function buildLearn(info) {
@@ -671,7 +811,12 @@ function buildLearn(info) {
     div.className = "snippet";
     div.innerHTML = `<div class="snippet-head"><span>${esc(title)}</span><button>Add to my code</button></div>` +
       `<pre>${snippet.split("\n").map((l) => lineHTML(l)).join("\n")}</pre>`;
-    div.querySelector("button").addEventListener("click", () => {
+    div.querySelector("button").addEventListener("click", async () => {
+      if (state.mode === "blocks") {
+        const r = await api("/api/blocks", { content: snippet });
+        if (r.ok) FlauxBlocks.append(r.workspace);
+        return;
+      }
       const s = code.selectionStart, start = lineStart(s);
       const atLineStart = code.value.slice(start, s).trim() === "";
       const indent = /^\s*/.exec(code.value.slice(start, s))[0];
@@ -707,11 +852,15 @@ function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
   try { localStorage.setItem("flaux-theme", theme); } catch (e) {}
   showThemeButton();
+  if (blocksReady) FlauxBlocks.setDark(isDark());
 }
 $("btn-theme").addEventListener("click", () => setTheme(isDark() ? "light" : "dark"));
 try { const t = localStorage.getItem("flaux-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 showThemeButton();
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", showThemeButton);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  showThemeButton();
+  if (blocksReady) FlauxBlocks.setDark(isDark());
+});
 
 function setSize(px) {
   px = Math.max(12, Math.min(28, px));
@@ -720,8 +869,8 @@ function setSize(px) {
   render();
 }
 function codeSize() { return parseInt(getComputedStyle(document.documentElement).getPropertyValue("--code-size")); }
-$("btn-bigger").addEventListener("click", () => setSize(codeSize() + 2));
-$("btn-smaller").addEventListener("click", () => setSize(codeSize() - 2));
+$("btn-bigger").addEventListener("click", () => state.mode === "blocks" ? FlauxBlocks.zoom(1) : setSize(codeSize() + 2));
+$("btn-smaller").addEventListener("click", () => state.mode === "blocks" ? FlauxBlocks.zoom(-1) : setSize(codeSize() - 2));
 
 $("btn-run").addEventListener("click", run);
 $("btn-stop").addEventListener("click", stop);
@@ -752,7 +901,10 @@ window.addEventListener("beforeunload", (e) => { if (state.dirty) { e.preventDef
   let opened = false;
   if (first) { try { opened = await openFile(first); } catch (e) {} }
   if (!opened) newFile();
-  code.focus();
+  let mode = "code";
+  try { mode = localStorage.getItem("flaux-mode") || "code"; } catch (e) {}
+  if (mode === "blocks") await setMode("blocks");
+  else code.focus();
 })();
 </script>
 </body>

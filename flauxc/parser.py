@@ -248,10 +248,17 @@ class Parser:
         tok = self.peek()
         if not self.at_word("end"):
             raise self.missing_end(opener, kind)
-        self.next()
+        self.last_end_line = self.next().line
         if self.at_word(kind):  # optional: `end if`, `end repeat`, `end function`
             self.next()
         self.end_of_line()
+
+    def ended(self, node, else_lines=()):
+        """Remember where a block's `end` (and any `else`) lines are. The
+        block editor uses this to keep # notes in the right places."""
+        node.end_line = self.last_end_line
+        node.else_lines = list(else_lines)
+        return node
 
     def parse_function(self):
         start = self.next()  # 'function'
@@ -301,11 +308,21 @@ class Parser:
         body = self.parse_block(start, {"end"}, "function")
         self.in_function = False
         self.finish_block(start, "function")
-        return N.FuncDef(name_tok.value, params, body, **pos)
+        return self.ended(N.FuncDef(name_tok.value, params, body, **pos))
 
     # ---------------------------------------------------------- statements
 
     def parse_statement(self):
+        node = self.parse_statement_inner()
+        # remember the statement's last line (it can go over several lines,
+        # e.g. inside brackets), for the block editor
+        last = self.toks[max(self.i - 1, 0)]
+        if last.kind in ("newline", "eof") and self.i >= 2:
+            last = self.toks[self.i - 2]
+        node.last_line = max(last.line, node.line)
+        return node
+
+    def parse_statement_inner(self):
         tok = self.peek()
         if tok.kind == "name":
             handler = getattr(self, "stmt_" + tok.value, None)
@@ -538,8 +555,10 @@ class Parser:
         body = self.parse_block(start, {"end", "else"}, "if")
         branches.append((cond, body))
         else_body = None
+        else_lines = []
         while self.at_word("else"):
             else_tok = self.next()
+            else_lines.append(else_tok.line)
             if self.at_word("if"):
                 self.next()
                 cond = self.condition("else if")
@@ -558,7 +577,7 @@ class Parser:
                                              "    say \"Good\"\nelse\n    say \"Keep trying\"\nend")
         pos = {"line": start.line, "col": start.col, "length": 2}
         self.finish_block(start, "if")
-        return N.If(branches, else_body, **pos)
+        return self.ended(N.If(branches, else_body, **pos), else_lines)
 
     def stmt_repeat(self):
         start = self.next()
@@ -567,13 +586,13 @@ class Parser:
             self.next()
             self.end_of_line()
             body = self.loop_body(start)
-            return N.RepeatForever(body, **pos)
+            return self.ended(N.RepeatForever(body, **pos))
         if self.at_word("while") or self.at_word("until"):
             until = self.next().value == "until"
             cond = self.condition("repeat until" if until else "repeat while")
             self.end_of_line()
             body = self.loop_body(start)
-            return N.RepeatWhile(cond, body, until, **pos)
+            return self.ended(N.RepeatWhile(cond, body, until, **pos))
         if self.at_word("with"):
             self.next()
             var = self.name_token("`repeat with` needs a name for the counter.", example=EXAMPLES["repeat"])
@@ -583,7 +602,7 @@ class Parser:
                 iterable = self.parse_expression()
                 self.end_of_line()
                 body = self.loop_body(start)
-                return N.RepeatEach(var_node, iterable, body, **pos)
+                return self.ended(N.RepeatEach(var_node, iterable, body, **pos))
             if self.at_op("="):
                 raise self.error(self.peek(), "`repeat with` uses `from` and `to` to count.",
                                  hint="Change the line to:", example="repeat with i from 1 to 10\n    say i\nend",
@@ -599,7 +618,7 @@ class Parser:
                 step = self.parse_expression()
             self.end_of_line()
             body = self.loop_body(start)
-            return N.RepeatRange(var_node, first, last, step, body, **pos)
+            return self.ended(N.RepeatRange(var_node, first, last, step, body, **pos))
         if self.at_line_end():
             raise self.error(start, "`repeat` needs to know how many times, or until when.",
                              hint="Here are the kinds of `repeat`:", example=EXAMPLES["repeat"] +
@@ -608,7 +627,7 @@ class Parser:
         self.expect_word("times", "A counted repeat ends with `times`.", "repeat 10 times\n    say \"hi\"\nend")
         self.end_of_line()
         body = self.loop_body(start)
-        return N.RepeatTimes(count, body, **pos)
+        return self.ended(N.RepeatTimes(count, body, **pos))
 
     def loop_body(self, start):
         body = self.parse_block(start, {"end"}, "repeat")

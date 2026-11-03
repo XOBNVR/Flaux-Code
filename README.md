@@ -11,7 +11,8 @@ say "Hello, world!"
 
 That's a whole program. No semicolons, no curly brackets, nothing to set up
 first. Flaux programs read almost like a sentence, but they run as fast as
-C++, one of the fastest languages there is.
+C++, one of the fastest languages there is. Type your program in words, or
+build it by snapping blocks together.
 
 ---
 
@@ -93,6 +94,27 @@ Flaux Studio is where you write and run your programs. Open it from the
 
 You can also double-click any `.flx` file to open it in Flaux Studio, or
 right-click it and choose **Run with Flaux**.
+
+### Blocks or code
+
+Click **&#9638; Blocks** at the top to build your program from blocks
+instead of typing it. Drag blocks out of the menus on the left (**Say & Ask**,
+**Variables**, **Control**, **Drawing** and more) and snap them together.
+
+![Flaux Studio in Blocks mode, with the code the blocks make underneath](docs/images/blocks.png)
+
+Under the blocks, **Your blocks as Flaux code** shows the real Flaux code
+your blocks make, so you learn the language as you build. Click
+**&#9998; Code** to switch back at any time: it's the same program either way,
+saved as a normal `.flx` file, and every lesson and game opens as blocks too.
+
+- **Mistakes** put a &#9888; sign on the block, and **Apply fix** works here too.
+- **Variables:** click **Make a variable** in the Variables menu.
+- **Functions:** the Functions menu makes your own blocks.
+- **Notes:** your `# notes` become note blocks, and a **code** block (in the
+  Notes menu) holds any line of Flaux you want to type yourself.
+- **Right-click** a block to copy it, add a comment, or delete it. Or drag
+  it to the bin.
 
 ---
 
@@ -828,6 +850,7 @@ your .flx file → lexer → parser → type checker → C code → gcc/clang �
 | [`flauxc/errors.py`](flauxc/errors.py) | turns problems into friendly, teaching messages |
 | [`flauxc/cli.py`](flauxc/cli.py) | the `flaux` command |
 | [`flauxc/studio/`](flauxc/studio/) | Flaux Studio: a tiny local web server and the editor page |
+| [`flauxc/studio/blocks.py`](flauxc/studio/blocks.py), [`blocks.js`](flauxc/studio/blocks.js) | the block editor: code to blocks, and blocks to code (built on [Blockly](https://developers.google.com/blockly)) |
 | [`installer/`](installer/) | the Windows installer (Inno Setup), `flaux.exe`, and its build scripts |
 | [`assets/`](assets/) | the Flaux icon, and the script that makes every size of it |
 
@@ -838,6 +861,7 @@ Useful commands:
 ./flaux build game.flx          # make a program you can share
 ./flaux c game.flx              # see the C code Flaux makes
 python3 tests/run_tests.py      # run all the tests
+python3 tests/blocks_roundtrip.py   # every program through the block editor and back
 python3 benchmarks/run.py       # race Flaux against C++, C# and Python
 ./flaux studio                  # open Flaux Studio
 ```
@@ -859,4 +883,4 @@ release, which is what the download button gives you.
 - [x] Graphics and sound for making games
 - [x] Pictures from files (sprites) for games
 - [x] A Windows installer and a beginner code editor (Flaux Studio)
-- [ ] A drag-and-drop block editor that writes Flaux for you
+- [x] A drag-and-drop block editor that writes Flaux for you

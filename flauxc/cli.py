@@ -201,7 +201,7 @@ def cmd_c(args):
 
 def cmd_studio(args):
     from .studio import server
-    server.main(args.file, port=args.port, show=not args.no_window)
+    server.main(args.file, port=args.port, show=not args.no_window, keep_running=args.keep_running)
 
 
 def main(argv=None):
@@ -243,6 +243,7 @@ def main(argv=None):
     p.add_argument("file", nargs="?")
     p.add_argument("--port", type=int, default=0, help=argparse.SUPPRESS)
     p.add_argument("--no-window", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--keep-running", action="store_true", help=argparse.SUPPRESS)  # for tests
     p.set_defaults(func=cmd_studio)
 
     args = parser.parse_args(argv)
