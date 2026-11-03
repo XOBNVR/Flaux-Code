@@ -587,7 +587,10 @@ Run it, and the arrow keys move the ball. Close the window to stop.
 (press it again to go back). In Flaux Studio on the web, click
 **&#9974; Fullscreen** under the game. Your game doesn't need to change: it's
 made bigger to fit, and the mouse still gives places in your window's own
-pixels. To start a game fullscreen, put `fullscreen()` after `window(...)`.
+pixels. In fullscreen (and on sharp screens) games are drawn at the screen's
+full resolution, so triangles, circles and lines come out smooth and sharp,
+while your program still uses its `window(...)` coordinates. To start a game
+fullscreen, put `fullscreen()` after `window(...)`.
 
 **Mouse look:** for a 3D game, `lock_mouse()` hides the pointer and lets the
 mouse turn the view: `set turn to turn + mouse_moved_x() * 0.004`. Esc gives

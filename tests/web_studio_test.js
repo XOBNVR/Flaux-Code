@@ -7,7 +7,8 @@
 // Checks: Flaux starts in the page, a program runs and asks a question, a
 // problem while running is explained, Apply fix, Blocks mode, saving in the
 // browser, the graphics pixel tests from tests/graphics, pictures, keys,
-// fullscreen (size, keys and mouse positions), Export, the Stop button, and
+// fullscreen (size, keys and mouse positions, drawn at the screen's resolution,
+// triangles without seams), Export, the Stop button, and
 // mouse look (lock_mouse() asks for pointer lock, again on a click; mouse
 // movement; the pointer is let go at Stop), in the Studio and an exported game.
 "use strict";
@@ -40,8 +41,12 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
     await page.waitForFunction((t) => document.getElementById("console").textContent.includes(t), text, { timeout: 60000 });
     return consoleText();
   };
+  // the colour of program pixel (x, y): the canvas can have more pixels than the program's own,
+  // so this looks at the middle of that pixel
   const pixel = (x, y) => page.evaluate(([x, y]) => {
-    const d = document.getElementById("game-canvas").getContext("2d").getImageData(x, y, 1, 1).data;
+    const c = document.getElementById("game-canvas"), g = FlauxWeb.gameSize();
+    const d = c.getContext("2d").getImageData(Math.floor((x + 0.5) * c.width / g.w),
+                                              Math.floor((y + 0.5) * c.height / g.h), 1, 1).data;
     return "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
   }, [x, y]);
   const pixelChecks = async (src, what) => {
@@ -111,8 +116,9 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.keyboard.up("ArrowRight");
   await page.waitForTimeout(200);
   const x = await page.evaluate(() => {
-    const d = document.getElementById("game-canvas").getContext("2d").getImageData(0, 100, 300, 1).data;
-    for (let i = 0; i < 300; i++) if (d[i * 4] > 200) return i;
+    const c = document.getElementById("game-canvas"), k = c.width / FlauxWeb.gameSize().w;
+    const d = c.getContext("2d").getImageData(0, Math.floor(100.5 * c.height / FlauxWeb.gameSize().h), c.width, 1).data;
+    for (let i = 0; i < c.width; i++) if (d[i * 4] > 200) return Math.floor(i / k);
     return -1;
   });
   check(x > 80, `holding the right arrow moves the square (from x=50 to x=${x})`);
@@ -131,12 +137,72 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.waitForTimeout(100);
   const mouse = await page.evaluate(() => FlauxWeb.mouse());
   check(mouse && Math.abs(mouse.x - 75) <= 1 && Math.abs(mouse.y - 150) <= 1, `fullscreen mouse is in canvas pixels (${JSON.stringify(mouse)})`);
+  // drawn at the screen's full resolution: as many canvas pixels as it's shown at, and the
+  // square (a rect) still has sharp edges: every pixel across it is all white or all black
+  await page.waitForFunction((w) => document.getElementById("game-canvas").width === w, Math.round(box.w), { timeout: 5000 })
+    .catch(() => {});
+  const sharp = await page.evaluate(() => {
+    const c = document.getElementById("game-canvas"), g = FlauxWeb.gameSize();
+    const d = c.getContext("2d").getImageData(0, Math.floor(100.5 * c.height / g.h), c.width, 1).data;
+    let white = 0, between = 0;
+    for (let i = 0; i < c.width; i++) {
+      const v = d[i * 4];
+      if (v === 255) white++; else if (v !== 0) between++;
+    }
+    return { w: c.width, h: c.height, white, between, k: c.width / g.w };
+  });
+  check(sharp.w === Math.round(box.w) && sharp.h === Math.round(box.h),
+        `fullscreen draws at the screen's resolution (${sharp.w}x${sharp.h} pixels for the 300x200 game)`);
+  check(Math.abs(sharp.white - 20 * sharp.k) <= 1 && sharp.between === 0,
+        `rects stay sharp in fullscreen (${sharp.white} white pixels across the 20-pixel square, ${sharp.between} in between)`);
   await page.evaluate(() => document.exitFullscreen());
-  await page.waitForFunction(() => !document.fullscreenElement && document.getElementById("game-canvas").style.width === "");
-  check(true, "leaving fullscreen puts the game back in the panel");
+  await page.waitForFunction(() => !document.fullscreenElement && document.getElementById("game-canvas").style.width.startsWith("min("));
+  await page.waitForFunction(() => document.getElementById("game-canvas").width === 300, null, { timeout: 5000 }).catch(() => {});
+  check(await page.evaluate(() => document.getElementById("game-canvas").width) === 300,
+        "leaving fullscreen puts the game back in the panel, at its own size");
   await page.click("#btn-stop");
   await page.waitForFunction(() => document.getElementById("console").textContent.includes("Stopped"), null, { timeout: 15000 });
   check(true, "the Stop button stops a game");
+
+  // triangles side by side (a skewed mesh, white on black, like the faces of a 3D game) show no
+  // seams: in the panel, and in fullscreen, where they're drawn at the screen's resolution
+  await setCode('window(320, 200)\nrepeat forever\n    clear("black")\n    repeat with i from 0 to 9\n' +
+    '        repeat with j from 0 to 4\n            set x to 40 + i * 24 + j * 5\n            set y to 30 + j * 24 + i * 3\n' +
+    '            triangle(x, y, x + 24, y + 3, x + 29, y + 27, "white")\n' +
+    '            triangle(x, y, x + 29, y + 27, x + 5, y + 24, "white")\n        end\n    end\n    show()\nend\n');
+  const seams = () => page.evaluate(() => {
+    const c = document.getElementById("game-canvas"), g = FlauxWeb.gameSize(), k = c.width / g.w, ky = c.height / g.h;
+    const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+    // inside the mesh (corner 40,30, sides 240,30 and 25,120), at least 2 canvas pixels from its edges
+    const det = 240 * 120 - 30 * 25, mu = (2 / k) * Math.hypot(25, 120) / det, mv = (2 / k) * Math.hypot(240, 30) / det;
+    let inside = 0, bad = 0, darkest = 765;
+    for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) {
+      const px = (x + 0.5) / k - 40, py = (y + 0.5) / ky - 30;
+      const u = (px * 120 - py * 25) / det, v = (240 * py - 30 * px) / det;
+      if (u < mu || u > 1 - mu || v < mv || v > 1 - mv) continue;
+      const i = (y * c.width + x) * 4, sum = d[i] + d[i + 1] + d[i + 2];
+      inside++;
+      if (sum < 740) bad++;           // some of the black background shows through
+      darkest = Math.min(darkest, sum);
+    }
+    return { w: c.width, h: c.height, inside, bad, darkest };
+  });
+  await page.click("#btn-run");
+  await page.waitForSelector("#game:not([hidden])", { timeout: 60000 });
+  await page.waitForTimeout(300);
+  let mesh = await seams();
+  check(mesh.inside > 20000 && mesh.bad === 0,
+        `no seams between triangles in the panel (${mesh.w}x${mesh.h}: ${mesh.bad} of ${mesh.inside} pixels, darkest ${mesh.darkest}/765)`);
+  await page.click("#btn-fullscreen");
+  await page.waitForFunction(() => document.fullscreenElement && document.getElementById("game-canvas").width > 1000, null, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  mesh = await seams();
+  check(mesh.inside > 300000 && mesh.bad === 0,
+        `no seams between triangles in fullscreen (${mesh.w}x${mesh.h}: ${mesh.bad} of ${mesh.inside} pixels, darkest ${mesh.darkest}/765)`);
+  await page.evaluate(() => document.exitFullscreen());
+  await page.waitForFunction(() => !document.fullscreenElement);
+  await page.click("#btn-stop");
+  await page.waitForFunction(() => document.getElementById("console").textContent.includes("Stopped"), null, { timeout: 15000 });
 
   // Export: a zip with the program as a web page and a .bat that opens it
   const [download] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
@@ -169,7 +235,7 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   // move the (unlocked) mouse dx, dy screen pixels over the canvas: mouse_moved_x/y() must add up to that
   const moveCheck = async (pg, canvasSel, out, dx, dy, where) => {
     const r = await pg.evaluate((sel) => { const b = document.querySelector(sel).getBoundingClientRect();
-      return { x: b.left, y: b.top, w: b.width, h: b.height, cw: document.querySelector(sel).width }; }, canvasSel);
+      return { x: b.left, y: b.top, w: b.width, h: b.height }; }, canvasSel);
     await pg.mouse.move(r.x + r.w / 2, r.y + r.h / 2);
     await pg.waitForTimeout(200);
     const [sx, sy] = await lastMove(pg, out);
@@ -177,7 +243,7 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
     await pg.waitForTimeout(300);
     const [ex, ey] = await lastMove(pg, out);
     check(ex - sx === dx && ey - sy === dy, `${where}: mouse_moved_x/y() give screen pixels (${ex - sx}, ${ey - sy}` +
-          ` for ${dx}, ${dy}; the game is shown at ${(r.w / r.cw).toFixed(2)}x)`);
+          ` for ${dx}, ${dy}; the 800x600 game is shown at ${(r.w / 800).toFixed(2)}x)`);
   };
   const lookTest = async (pg, canvasSel, out, where, hintSel) => {
     await pg.waitForTimeout(300);
@@ -240,7 +306,27 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   // (the spy goes in first, so it's there when the program calls lock_mouse())
   await player.setContent((html || "<p>no game.html</p>").replace("<head>", `<head><script>(${spyLocks})()</script>`));
   await lookTest(player, "#canvas", "#out", "exported game", "#title");
+  // and fullscreen there draws at the screen's resolution too
+  await player.evaluate(() => document.exitPointerLock());
+  await player.setViewportSize({ width: 1600, height: 900 });
+  await player.click("#full");
+  await player.waitForFunction(() => !!document.fullscreenElement, null, { timeout: 5000 });
+  await player.waitForFunction(() => document.getElementById("canvas").width === 1200, null, { timeout: 5000 }).catch(() => {});
+  const shown = await player.evaluate(() => { const c = document.getElementById("canvas"), r = c.getBoundingClientRect();
+    return `${c.width}x${c.height} pixels, shown ${Math.round(r.width)}x${Math.round(r.height)}`; });
+  check(shown === "1200x900 pixels, shown 1200x900", `exported game: fullscreen draws at the screen's resolution (${shown})`);
   await player.close();
+  // on a sharp screen (two screen pixels for each CSS pixel) the game gets all of them
+  const sharpScreen = await browser.newContext({ viewport: { width: 1000, height: 600 }, deviceScaleFactor: 2 });
+  const sharpPage = await sharpScreen.newPage();
+  sharpPage.on("pageerror", (e) => errors.push("game.html (sharp screen): " + e.message));
+  await sharpPage.setContent(html || "<p>no game.html</p>");
+  await sharpPage.waitForFunction(() => document.getElementById("canvas").width > 800, null, { timeout: 5000 }).catch(() => {});
+  const dense = await sharpPage.evaluate(() => { const c = document.getElementById("canvas"), r = c.getBoundingClientRect();
+    return { w: c.width, h: c.height, cssW: Math.round(r.width), cssH: Math.round(r.height) }; });
+  check(Math.abs(dense.w - 2 * dense.cssW) <= 2 && Math.abs(dense.h - 2 * dense.cssH) <= 2,
+        `on a sharp screen the game gets every screen pixel (${dense.w}x${dense.h} pixels, shown ${dense.cssW}x${dense.cssH})`);
+  await sharpScreen.close();
 
   check(!errors.length, "no errors in the page" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();

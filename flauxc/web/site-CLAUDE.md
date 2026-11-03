@@ -36,6 +36,10 @@ are **built from that repository**, so make lasting changes there and rebuild
    the page on `fx.js`. Games draw on a `<canvas>` above the output.
    Its Fullscreen button puts that canvas on the whole screen (Fullscreen API),
    scaled to fit with black bars; mouse positions are turned back into canvas pixels.
+   The canvas has as many pixels as it's shown at (times the screen's pixel ratio,
+   up to about 4K; `web.js` watches its size and calls the runtime's `win.resize`),
+   so games are drawn at the screen's full resolution while programs keep their
+   own `window(w, h)` coordinates.
    `lock_mouse()` locks the pointer to the canvas (Pointer Lock API, after a click;
    Esc lets go) and `mouse_moved_x/y()` add up `movementX/Y` between frames, in CSS
    pixels as given (not scaled to the canvas, so turning feels the same in the panel

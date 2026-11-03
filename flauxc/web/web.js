@@ -6,7 +6,8 @@
  * - programs become JavaScript (jsgen.py) and run on fx.js
  * - your programs and pictures are kept in this browser (localStorage)
  * - games draw in the game panel, with keyboard, mouse and sound, and can go
- *   fullscreen (the Fullscreen button, or fullscreen() in the program), and
+ *   fullscreen (the Fullscreen button, or fullscreen() in the program), drawn at the
+ *   full resolution of the screen (see "sharpness"), and
  *   lock the mouse for looking around (lock_mouse(): Pointer Lock API)
  * - Export makes a .zip with the program as one web page (player.html filled
  *   in with fx.js, the compiled program and its pictures) and files that open it
@@ -153,7 +154,9 @@ window.FlauxWeb = (() => {
   }
 
   // ------------------------------------------------------------- running
-  const game = { canvas: null, keys: new Set(), mouse: { x: 0, y: 0, down: false, mx: 0, my: 0 } };
+  // W, H: the program's window(w, h) size (the canvas itself can have more pixels, see sharpness)
+  const game = { canvas: null, W: 800, H: 600, win: null, keys: new Set(),
+                 mouse: { x: 0, y: 0, down: false, mx: 0, my: 0 } };
 
   const KEY_NAMES = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", " ": "space",
     Enter: "enter", Escape: "escape", Shift: "shift", Control: "ctrl", Alt: "alt", Tab: "tab",
@@ -176,10 +179,10 @@ window.FlauxWeb = (() => {
       game.mouse.mx += e.movementX || 0;
       game.mouse.my += e.movementY || 0;
       if (mouseLocked()) return;        // locked: the pointer stays where it was
-      const x = Math.floor((e.clientX - r.left) * canvas.width / r.width);
-      const y = Math.floor((e.clientY - r.top) * canvas.height / r.height);
-      game.mouse.x = Math.max(0, Math.min(canvas.width - 1, x));
-      game.mouse.y = Math.max(0, Math.min(canvas.height - 1, y));
+      const x = Math.floor((e.clientX - r.left) * game.W / r.width);
+      const y = Math.floor((e.clientY - r.top) * game.H / r.height);
+      game.mouse.x = Math.max(0, Math.min(game.W - 1, x));
+      game.mouse.y = Math.max(0, Math.min(game.H - 1, y));
     };
     canvas.addEventListener("mousemove", where);
     canvas.addEventListener("mousedown", (e) => {
@@ -190,6 +193,38 @@ window.FlauxWeb = (() => {
     });
     window.addEventListener("mouseup", () => { game.mouse.down = false; });
     setUpFullscreen();
+    setUpSharpness();
+  }
+
+  // ------------------------------------------------------------ sharpness
+  // The game is drawn at as many pixels as it's shown at, times the screen's pixel ratio, so it's
+  // sharp in fullscreen and on sharp screens: the page tells the runtime (win.resize) and the
+  // program keeps its own window(w, h) pixels. Never fewer pixels than the program's own, and at
+  // most about a 4K screen's worth (3840 by 2160), so drawing stays quick.
+  let sizeWatch = null, exactBox = false;
+  function sharpness(entry) {
+    if (!game.win || !game.win.resize) return;
+    const r = game.canvas.getBoundingClientRect(), ratio = window.devicePixelRatio || 1;
+    let dw = Math.round(r.width * ratio), dh = Math.round(r.height * ratio);
+    // the browser's exact count of screen pixels, when it agrees (some only give the CSS size there)
+    const d = entry && entry.devicePixelContentBoxSize && entry.devicePixelContentBoxSize[0];
+    if (d && Math.abs(d.inlineSize - dw) <= 2 && Math.abs(d.blockSize - dh) <= 2) { dw = d.inlineSize; dh = d.blockSize; }
+    const fit = Math.min(dw / game.W, dh / game.H);
+    const s = Math.max(1, Math.min(fit, Math.sqrt(3840 * 2160 / (game.W * game.H))));
+    // exactly as many pixels as it's shown at when that's allowed (nothing gets resampled)
+    if (s === fit) game.win.resize(dw, dh);
+    else game.win.resize(game.W * s, game.H * s);
+  }
+  function watchSize() {          // (again for each program: the first report comes straight away)
+    if (!sizeWatch) return;
+    sizeWatch.disconnect();
+    try { sizeWatch.observe(game.canvas, { box: "device-pixel-content-box" }); exactBox = true; }
+    catch (e) { sizeWatch.observe(game.canvas); exactBox = false; }
+  }
+  function setUpSharpness() {
+    if (window.ResizeObserver) sizeWatch = new ResizeObserver((entries) => sharpness(entries[entries.length - 1]));
+    // zooming the page changes the pixel ratio; without device-pixel sizes, look again then
+    window.addEventListener("resize", () => { if (!exactBox) sharpness(); });
   }
 
   // ------------------------------------------------------------ fullscreen
@@ -200,18 +235,19 @@ window.FlauxWeb = (() => {
   function fullscreenElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
   function isFullscreen() { return full.fake || fullscreenElement() === document.getElementById("game-screen"); }
   function fitCanvas() {
-    const canvas = game.canvas, box = document.getElementById("game-screen");
+    const canvas = game.canvas, box = document.getElementById("game-screen"), W = game.W, H = game.H;
     if (!isFullscreen()) {
-      canvas.style.width = canvas.style.height = canvas.style.imageRendering = "";
+      // in the panel: the program's own size, or smaller to fit (same shape). (The canvas can have
+      // more pixels than that, so its size is set here rather than coming from its pixels.)
+      canvas.style.width = `min(100%, ${W}px, ${52 * W / H}vh)`;
+      canvas.style.height = "auto";
+      canvas.style.aspectRatio = `${W} / ${H}`;
       box.classList.remove("fake-full");
       return;
     }
-    const s = Math.min(box.clientWidth / canvas.width, box.clientHeight / canvas.height);
-    canvas.style.width = canvas.width * s + "px";
-    canvas.style.height = canvas.height * s + "px";
-    // a whole number of screen pixels per game pixel: sharp; otherwise smooth, so pixels don't look uneven
-    const device = s * (window.devicePixelRatio || 1);
-    canvas.style.imageRendering = Math.abs(device - Math.round(device)) < 0.01 ? "pixelated" : "auto";
+    const s = Math.min(box.clientWidth / W, box.clientHeight / H);
+    canvas.style.width = W * s + "px";
+    canvas.style.height = H * s + "px";
   }
   function wantFullscreen(on) {
     full.wanted = on;
@@ -335,6 +371,7 @@ window.FlauxWeb = (() => {
       },
       openWindow: (w, h, title) => {
         game.canvas.width = w; game.canvas.height = h;
+        game.W = w; game.H = h;
         panel.hidden = false;
         document.getElementById("game-title").dataset.name = title;
         wantFullscreen(false);
@@ -343,7 +380,9 @@ window.FlauxWeb = (() => {
         game.mouse.mx = game.mouse.my = 0;
         const back = document.createElement("canvas");
         back.width = w; back.height = h;
-        return { screen: game.canvas, back };
+        game.win = { screen: game.canvas, back };      // the runtime adds win.resize (see sharpness)
+        watchSize();
+        return game.win;
       },
       keys: game.keys, mouse: game.mouse,
       // fullscreen(): browsers only allow it straight after a click or key, so
@@ -571,5 +610,6 @@ window.FlauxWeb = (() => {
 
   return { api, download, openFromComputer, addPictures, picturesSaved: () => Object.keys(load(PICTURES)),
            mouse: () => ({ x: game.mouse.x, y: game.mouse.y }),
-           mouseLook: () => ({ wanted: look.wanted, locked: mouseLocked() }) };
+           mouseLook: () => ({ wanted: look.wanted, locked: mouseLocked() }),
+           gameSize: () => ({ w: game.W, h: game.H }) };
 })();
