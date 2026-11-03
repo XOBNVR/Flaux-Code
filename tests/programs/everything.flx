@@ -1,0 +1,178 @@
+# maths
+say 7 / 2
+say 7 // 2
+say -7 // 2
+say -7 mod 3
+say 2 ^ 10
+say 2.0 ^ -1
+say 0.1 + 0.2
+say 10 / 2
+say 1_000_000 * 1_000_000
+
+# variables and widening
+set total to 0
+add 5 to total
+add 0.5 to total
+subtract 1 from total
+say total
+
+# text
+set name to "Sam"
+say "Hi " + name + "! You are " + 12 + " years old."
+say "{name} has {length of name} letters, first is {name[1]}"
+say uppercase(name) + lowercase(" OK")
+say contains("hello", "ell")
+
+# comparisons
+say 3 is more than 2
+say 3 is not less than 2
+say "apple" < "banana"
+set x to 5
+if x is at least 5 and not (x = 6)
+    say "x is ok"
+end
+
+# if / else if / else
+repeat with i from 1 to 15
+    if i mod 15 = 0
+        say "FizzBuzz"
+    else if i mod 3 = 0
+        say "Fizz"
+    else if i mod 5 = 0
+        say "Buzz"
+    else
+        say i
+    end
+end
+
+# loops
+set count to 0
+repeat 3 times
+    add 1 to count
+end
+say count
+repeat while count < 10
+    add 3 to count
+end
+say count
+repeat until count = 0
+    subtract 1 from count
+end
+say count
+repeat with i from 10 to 1 by -3
+    say i
+end
+repeat with v from 0.5 to 2 by 0.5
+    say v
+end
+
+# lists
+set nums to [3, 1, 4, 1, 5]
+add 9 to nums
+say nums
+say length of nums
+set nums[1] to 100
+say nums[1] + nums[6]
+set total to 0
+repeat with n in nums
+    add n to total
+end
+say total
+add [2, 6] to nums
+say nums
+say contains(nums, 4)
+set empty to []
+add "a" to empty
+add "b" to empty
+say empty
+set grid to 3 copies of (2 copies of 0)
+set grid[2][1] to 7
+say grid
+set rows to []
+add [1, 2] to rows
+add [3, 4] to rows
+say rows
+say [1, 2] + [3]
+set flags to 5 copies of false
+say flags
+set ds to [1, 2.5]
+say ds
+
+# functions
+function square(x)
+    return x * x
+end
+say square(7)
+say square(1.5)
+
+function fib(n)
+    if n < 2
+        return n
+    end
+    return fib(n - 1) + fib(n - 2)
+end
+say fib(20)
+
+function fact(n)
+    if n > 1
+        return n * fact(n - 1)
+    end
+    return 1
+end
+say fact(10)
+
+function greet(who)
+    say "Hello, {who}!"
+end
+greet("world")
+
+function fill(items)
+    add "x" to items
+    add "y" to items
+end
+set stuff to []
+fill(stuff)
+say stuff
+
+function biggest(list)
+    set best to list[1]
+    repeat with item in list
+        if item > best
+            set best to item
+        end
+    end
+    return best
+end
+say biggest([4, 9, 2])
+say biggest([1.5, 0.5])
+
+# letters
+repeat with ch in "abc"
+    say ch
+end
+
+# stop and skip
+repeat with i from 1 to 10
+    if i = 3
+        skip
+    end
+    if i = 6
+        stop
+    end
+    say i
+end
+
+# builtins
+say sqrt(16)
+say abs(-3)
+say floor(3.7)
+say round(2.5)
+say min(3, 1, 2)
+say max(1.5, 2)
+say text(42) + "!"
+say number("3.5") * 2
+say whole("42") + 1
+say whole(3.9)
+set r to random(1, 6)
+say r >= 1 and r <= 6
+say [true, false]

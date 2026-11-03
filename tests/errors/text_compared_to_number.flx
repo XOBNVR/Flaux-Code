@@ -1,0 +1,8 @@
+# expect: You can't compare text with a whole number.
+# expect: How to fix it:
+# expect: if number(age) > 12
+# stdin: abc
+set age to ask("Age?")
+if age > 12
+  say "big"
+end

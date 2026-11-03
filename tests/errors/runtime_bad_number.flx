@@ -1,0 +1,4 @@
+# expect: I can't turn "abc" into a number.
+# expect: How to fix it:
+# stdin: abc
+set age to number(ask("Age?"))

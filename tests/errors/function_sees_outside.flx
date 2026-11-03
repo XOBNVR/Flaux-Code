@@ -1,0 +1,8 @@
+# expect: Functions can't see `lives`, because it was made outside the function.
+# expect: How to fix it:
+# expect: set lives to 3
+set lives to 3
+function hit()
+    subtract 1 from lives
+end
+hit()

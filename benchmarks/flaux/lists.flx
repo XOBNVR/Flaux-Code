@@ -1,0 +1,10 @@
+# Build a big list then add it up: tests growing lists.
+set nums to []
+repeat with i from 1 to 30_000_000
+    add i mod 1000 to nums
+end
+set total to 0
+repeat with n in nums
+    add n to total
+end
+say total

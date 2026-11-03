@@ -1,0 +1,4 @@
+# expect: Flaux doesn't use `let`. The Flaux word for this is `set`.
+# expect: How to fix it:
+# expect: set x to 5
+let x = 5

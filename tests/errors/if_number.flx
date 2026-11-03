@@ -1,0 +1,7 @@
+# expect: `if` needs a true-or-false check, but this is a whole number.
+# expect: How to fix it:
+# expect: if x != 0
+set x to 5
+if x
+  say 1
+end

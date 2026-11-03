@@ -1,0 +1,6 @@
+# expect: This `if` needs an `end` to finish it.
+# expect: How to fix it:
+# expect: if 5 > 3
+if 5 > 3
+    say "yes"
+    say "more"

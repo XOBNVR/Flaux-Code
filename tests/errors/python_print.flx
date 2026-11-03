@@ -1,0 +1,4 @@
+# expect: Flaux doesn't use `print`. The Flaux word for this is `say`.
+# expect: How to fix it:
+# expect: say "hello"
+print("hello")

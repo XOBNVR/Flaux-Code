@@ -1,0 +1,4 @@
+# expect: Flaux compares two things at a time.
+# expect: How to fix it:
+# expect: say 1 < 2 and 2 < 3
+say 1 < 2 < 3

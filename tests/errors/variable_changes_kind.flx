@@ -1,0 +1,5 @@
+# expect: `score` holds a whole number, so it can't hold text too.
+# expect: How to fix it:
+# expect: set score_text to "lots"
+set score to 10
+set score to "lots"

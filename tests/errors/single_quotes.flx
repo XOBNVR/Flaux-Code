@@ -1,0 +1,4 @@
+# expect: Flaux uses double quotes for text, not single quotes.
+# expect: How to fix it:
+# expect: say "hello"
+say 'hello'

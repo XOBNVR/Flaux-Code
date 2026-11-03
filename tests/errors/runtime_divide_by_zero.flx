@@ -1,0 +1,5 @@
+# expect: You can't divide by zero.
+# expect: How to fix it:
+set total to 10
+set count to 0
+say total / count

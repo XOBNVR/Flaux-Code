@@ -1,0 +1,4 @@
+# expect: There is no item number 0.
+# expect: How to fix it:
+set nums to [1, 2, 3]
+say nums[0]

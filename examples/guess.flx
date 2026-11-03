@@ -1,0 +1,22 @@
+# Guess the number! Run it with:  ./flaux run examples/guess.flx
+set secret to random(1, 100)
+set tries to 0
+say "I'm thinking of a number between 1 and 100."
+
+repeat forever
+    set answer to ask("Your guess:")
+    if not is_number(answer)
+        say "That's not a number. Try again!"
+        skip
+    end
+    set guess to whole(answer)
+    add 1 to tries
+    if guess < secret
+        say "Higher!"
+    else if guess > secret
+        say "Lower!"
+    else
+        say "You got it in {tries} tries!"
+        stop
+    end
+end

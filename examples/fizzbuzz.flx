@@ -1,0 +1,12 @@
+# FizzBuzz: a classic counting game.
+repeat with i from 1 to 30
+    if i mod 15 = 0
+        say "FizzBuzz"
+    else if i mod 3 = 0
+        say "Fizz"
+    else if i mod 5 = 0
+        say "Buzz"
+    else
+        say i
+    end
+end

@@ -1,0 +1,6 @@
+# expect: `True` should be written in lowercase in Flaux.
+# expect: How to fix it:
+# expect: if true
+if True
+  say 1
+end

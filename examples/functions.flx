@@ -1,0 +1,25 @@
+# Functions: make your own instructions.
+function area(width, height)
+    return width * height
+end
+
+function greet(name)
+    say "Hello, {name}!"
+end
+
+function is_even(n)
+    return n mod 2 = 0
+end
+
+function factorial(n)
+    if n <= 1
+        return 1
+    end
+    return n * factorial(n - 1)
+end
+
+greet("world")
+say area(3, 4)        # works with whole numbers...
+say area(2.5, 1.5)    # ...and decimals, with no extra work
+say is_even(10)
+say "10! is {factorial(10)}"

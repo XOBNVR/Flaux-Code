@@ -1,0 +1,6 @@
+# expect: Flaux doesn't use `while`. The Flaux word for this is `repeat while`.
+# expect: How to fix it:
+# expect: repeat while x < 5
+while x < 5
+  say x
+end

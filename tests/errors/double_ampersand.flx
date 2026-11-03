@@ -1,0 +1,7 @@
+# expect: Flaux uses the word `and` instead of `&&`.
+# expect: How to fix it:
+# expect: if a > 0 and a < 5
+set a to 1
+if a > 0 && a < 5
+  say a
+end

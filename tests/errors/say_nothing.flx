@@ -1,0 +1,7 @@
+# expect: `greet` doesn't give anything back, so there's nothing to say.
+# expect: How to fix it:
+# expect: greet("Bo")
+function greet(name)
+  say "hi {name}"
+end
+say greet("Bo")

@@ -1,0 +1,7 @@
+# expect: Flaux can't work out what `f` gives back.
+# expect: How to fix it:
+# expect: function f(n)
+function f(n)
+    return f(n)
+end
+say f(1)

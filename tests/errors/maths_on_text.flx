@@ -1,0 +1,4 @@
+# expect: You can't use `*` with text and a whole number.
+# expect: How to fix it:
+# expect: set total to number("5") * 2
+set total to "5" * 2

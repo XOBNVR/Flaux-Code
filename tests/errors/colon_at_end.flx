@@ -1,0 +1,7 @@
+# expect: Flaux doesn't use `:` at the end of lines.
+# expect: How to fix it:
+# expect: if name == "Sam"
+set name to "Sam"
+if name == "Sam":
+    say "hi"
+end

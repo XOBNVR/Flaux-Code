@@ -1,0 +1,5 @@
+# expect: I don't know what `scroe` is.
+# expect: How to fix it:
+# expect: say score
+set score to 10
+say scroe

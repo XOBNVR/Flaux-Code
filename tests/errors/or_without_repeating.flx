@@ -1,0 +1,7 @@
+# expect: Each side of `or` must be a complete check, but this is just text.
+# expect: How to fix it:
+# expect: if name = "Sam" or name = "Bo"
+set name to "Bo"
+if name = "Sam" or "Bo"
+  say "friend"
+end

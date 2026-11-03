@@ -1,0 +1,390 @@
+# The Flaux Language Guide
+
+Flaux reads like plain English but compiles to fast native code. This guide
+covers everything in Flaux 0.1.
+
+- [Running programs](#running-programs)
+- [Saying things](#saying-things)
+- [Variables](#variables)
+- [Kinds of values](#kinds-of-values)
+- [Maths](#maths)
+- [Text](#text)
+- [Making choices: if](#making-choices-if)
+- [Checks and comparisons](#checks-and-comparisons)
+- [Loops: repeat](#loops-repeat)
+- [Lists](#lists)
+- [Functions](#functions)
+- [Built-in functions](#built-in-functions)
+- [Comments](#comments)
+- [When things go wrong](#when-things-go-wrong)
+- [Why Flaux is fast](#why-flaux-is-fast)
+- [Special words](#special-words)
+
+---
+
+## Running programs
+
+Flaux programs are text files ending in `.flx`.
+
+```bash
+./flaux run hello.flx        # compile and run
+./flaux build hello.flx      # make a program called "hello" you can share
+./flaux check hello.flx      # look for mistakes without running
+./flaux c hello.flx          # see the C code Flaux makes
+```
+
+You need a C compiler (gcc or clang) installed. Flaux uses it to turn
+your program into machine code.
+
+## Saying things
+
+```
+say "Hello, world!"
+say 42
+say 2 + 2
+```
+
+`say` shows one thing per line. To show several things, join them with `+`
+or put them inside text with `{ }` (see [Text](#text)).
+
+## Variables
+
+A variable is a name that holds a value. Make one with `set ... to ...`:
+
+```
+set score to 0
+set name to "Sam"
+set alive to true
+```
+
+Change it with `set` again, or with `add` and `subtract`:
+
+```
+set score to 10
+add 5 to score          # score is now 15
+subtract 1 from score   # score is now 14
+```
+
+Names use letters, numbers and `_`, and can't start with a number:
+`score`, `player_2`, `highScore`.
+
+A variable keeps **the same kind of value** for the whole program. If
+`score` holds a number, it can't later hold text. The one exception: a
+whole number can become a decimal.
+
+```
+set total to 0
+add 0.5 to total     # fine: total becomes a decimal
+```
+
+## Kinds of values
+
+| Kind | Examples | Notes |
+|---|---|---|
+| whole number | `0`, `42`, `-7`, `1_000_000` | 64-bit, up to about 9 quintillion |
+| decimal number | `3.14`, `0.5`, `1.5e20` | |
+| text | `"hello"`, `"Score: {score}"` | always double quotes |
+| true/false | `true`, `false` | |
+| list | `[1, 2, 3]`, `["a", "b"]`, `[]` | every item is the same kind |
+
+You never write these kinds down. Flaux works them out by itself.
+
+## Maths
+
+| Write | Means | Example |
+|---|---|---|
+| `+ - *` | add, subtract, multiply | `2 * (3 + 4)` is `14` |
+| `/` | divide (always gives a decimal) | `7 / 2` is `3.5` |
+| `//` | whole-number divide (rounds down) | `7 // 2` is `3` |
+| `mod` or `%` | remainder | `7 mod 3` is `1` |
+| `^` | power | `2 ^ 10` is `1024` |
+
+Dividing by zero stops the program with a clear message instead of
+crashing or giving a strange answer.
+
+## Text
+
+Text goes in double quotes. Put any value inside text with `{ }`:
+
+```
+set name to "Sam"
+set age to 12
+say "{name} is {age} years old"
+say "Next year {name} will be {age + 1}"
+```
+
+Join text with `+`. Numbers get turned into text automatically:
+
+```
+say "Score: " + 100
+```
+
+Special characters: `\n` (new line), `\t` (tab), `\"` (a quote mark),
+`\{` and `\}` (curly brackets), `\\` (a backslash).
+
+Get one letter with `[ ]`. The first letter is number 1:
+
+```
+set word to "hello"
+say word[1]              # h
+say length of word       # 5
+```
+
+## Making choices: if
+
+```
+if score > 100
+    say "Amazing!"
+else if score > 50
+    say "Good job"
+else
+    say "Keep trying"
+end
+```
+
+Every `if` finishes with `end`. Indenting the inside isn't required, but it
+makes your program much easier to read. `then` after the check is allowed
+if you like it: `if score > 100 then`.
+
+## Checks and comparisons
+
+| Write | Means |
+|---|---|
+| `a = b` or `a is b` | equal |
+| `a != b` or `a is not b` | not equal |
+| `a < b` or `a is less than b` | smaller |
+| `a > b` or `a is more than b` | bigger |
+| `a <= b` or `a is at most b` | smaller or equal |
+| `a >= b` or `a is at least b` | bigger or equal |
+
+Join checks with `and`, `or` and `not`:
+
+```
+if age >= 13 and age <= 19
+    say "teenager"
+end
+
+if not finished
+    say "still going"
+end
+```
+
+Each side of `and`/`or` must be a complete check: write
+`name = "Sam" or name = "Bo"`, not `name = "Sam" or "Bo"`.
+
+## Loops: repeat
+
+```
+repeat 3 times
+    say "hip hip hooray"
+end
+
+repeat with i from 1 to 10
+    say i
+end
+
+repeat with i from 10 to 0 by -2     # count down in steps of 2
+    say i
+end
+
+repeat with fruit in ["apple", "pear"]
+    say fruit
+end
+
+repeat with letter in "hello"
+    say letter
+end
+
+repeat while lives > 0
+    subtract 1 from lives
+end
+
+repeat until done
+    ...
+end
+
+repeat forever
+    ...
+end
+```
+
+Inside any `repeat`:
+- `stop` leaves the loop straight away.
+- `skip` jumps to the next time around.
+
+## Lists
+
+```
+set nums to [3, 1, 4]
+add 1 to nums            # put an item on the end: [3, 1, 4, 1]
+add [5, 9] to nums       # add every item of another list
+say nums[1]              # the first item: 3
+set nums[1] to 100       # change an item
+say length of nums       # 6
+say contains(nums, 4)    # true
+say nums + [2, 6]        # a new, joined list
+```
+
+Item numbers start at **1**, like counting on your fingers. Asking for an
+item that isn't there stops the program with a clear message.
+
+Make a list of the same value many times with `copies of`:
+
+```
+set scores to 10 copies of 0
+set grid to 3 copies of (3 copies of ".")    # a 3-by-3 grid
+set grid[2][2] to "X"
+```
+
+Start an empty list with `[]`. Flaux works out what kind of items it holds
+from what you add to it:
+
+```
+set names to []
+add "Sam" to names       # now Flaux knows names holds text
+```
+
+## Functions
+
+A function is your own instruction. Make it with `function`, give its
+inputs names in brackets, and finish it with `end`:
+
+```
+function greet(name)
+    say "Hello, {name}!"
+end
+
+greet("Sam")
+```
+
+Use `return` to give back a value:
+
+```
+function area(width, height)
+    return width * height
+end
+
+say area(3, 4)       # 12
+say area(2.5, 1.5)   # 3.75
+```
+
+The same function works with whole numbers, decimals, text or lists. Flaux
+makes a separate fast version for each kind it's used with.
+
+Functions can call themselves:
+
+```
+function factorial(n)
+    if n <= 1
+        return 1
+    end
+    return n * factorial(n - 1)
+end
+```
+
+Functions can be written anywhere in the file (above or below the code
+that uses them), but not inside another block.
+
+**Functions only see their own inputs and variables.** To use a value from
+outside, pass it in. To change it, give back the new value:
+
+```
+function lose_life(lives)
+    return lives - 1
+end
+
+set lives to 3
+set lives to lose_life(lives)
+```
+
+Lists are different: a function that changes a list it was given changes
+the caller's list too.
+
+```
+function fill(basket)
+    add "apple" to basket
+end
+
+set basket to []
+fill(basket)
+say basket     # ["apple"]
+```
+
+## Built-in functions
+
+| Function | Gives back | Example |
+|---|---|---|
+| `ask(prompt)` | the text the user types | `set name to ask("Name?")` |
+| `random(a, b)` | a random number from a to b | `random(1, 6)` |
+| `random(list)` | a random item | `random(["rock", "paper", "scissors"])` |
+| `length(x)` or `length of x` | the size of a list or text | `length of nums` |
+| `contains(x, item)` | true if the list or text has it | `contains("hello", "ell")` |
+| `text(x)` | x as text | `text(42)` |
+| `number(t)` | text as a decimal number | `number("3.5")` |
+| `whole(x)` | text or a decimal as a whole number | `whole("42")`, `whole(3.9)` is 3 |
+| `is_number(t)` | true if the text is a number | `is_number("42")` |
+| `round(x)`, `floor(x)`, `ceil(x)` | rounded whole numbers | `round(2.5)` is 3 |
+| `abs(x)` | x without its minus sign | `abs(-5)` |
+| `min(a, b, ...)`, `max(a, b, ...)` | the smallest or biggest | `max(3, 9, 4)` |
+| `sqrt(x)` | square root | `sqrt(16)` |
+| `sin(x)`, `cos(x)`, `tan(x)`, `log(x)` | maths functions (radians) | `sin(0.5)` |
+| `uppercase(t)`, `lowercase(t)` | text in capitals or small letters | `uppercase("hi")` |
+| `clock()` | seconds since the program started | `say clock()` |
+
+## Comments
+
+Everything after `#` on a line is ignored by Flaux. Use it to leave notes:
+
+```
+# This is a comment
+set lives to 3   # so is this
+```
+
+## When things go wrong
+
+Flaux errors don't just say what's wrong. They teach you how to fix it,
+and when Flaux can, they show your line already fixed:
+
+```
+Problem in game.flx, line 2:
+
+  2 | if name = "Sam" or "Bo"
+    |                    ^^^^
+
+Each side of `or` must be a complete check, but this is just text.
+
+How to fix it:
+  Computers need the whole comparison repeated on each side. Change it to:
+
+  2 | if name = "Sam" or name = "Bo"
+```
+
+Flaux recognises habits from other languages (`print`, `while`, `x += 1`,
+`&&`, `:` at the end of a line, single quotes...) and shows the Flaux way.
+
+Problems that only show up while the program runs, like dividing by zero or
+asking for item 7 of a 3-item list, stop the program with the same kind of
+message instead of crashing.
+
+## Why Flaux is fast
+
+1. **Flaux works out every type before running.** You never write types,
+   but the compiler knows exactly what's in every variable, so the finished
+   program never has to check.
+2. **Each function is specialised.** `area(3, 4)` and `area(2.5, 1.5)`
+   become two separate machine-code functions, one for whole numbers and one
+   for decimals.
+3. **It compiles to native code.** Flaux turns your program into C and
+   uses an optimising C compiler (gcc or clang) to make machine code. There
+   is no interpreter, virtual machine or garbage collector.
+
+Flaux still checks list positions and division by zero, which costs very
+little. See [benchmarks/RESULTS.md](../benchmarks/RESULTS.md) for how it
+compares with C++, C# and Python.
+
+## Special words
+
+These words have special meanings, so they can't be used as names:
+
+`add` `and` `else` `end` `false` `function` `if` `is` `mod` `not` `or`
+`repeat` `return` `say` `set` `skip` `stop` `subtract` `true`

@@ -1,0 +1,20 @@
+# Longest Collatz chain: tests whole-number maths and while loops.
+set best to 0
+set best_start to 0
+repeat with start from 1 to 3_000_000
+    set n to start
+    set steps to 0
+    repeat while n != 1
+        if n mod 2 = 0
+            set n to n // 2
+        else
+            set n to 3 * n + 1
+        end
+        add 1 to steps
+    end
+    if steps > best
+        set best to steps
+        set best_start to start
+    end
+end
+say "{best_start} {best}"

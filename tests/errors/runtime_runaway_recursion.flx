@@ -1,0 +1,9 @@
+# expect: This almost always means a function kept calling itself and never stopped.
+# expect: How to fix it:
+function down(n)
+  if n = 0
+    return 0
+  end
+  return down(n + 1) + down(n + 2)
+end
+say down(1)

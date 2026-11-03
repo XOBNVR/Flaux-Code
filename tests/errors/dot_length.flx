@@ -1,0 +1,5 @@
+# expect: To get the length of `x`, use `length of x`.
+# expect: How to fix it:
+# expect: say length of x
+set x to 5
+say x.length

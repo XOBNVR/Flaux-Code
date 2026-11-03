@@ -1,0 +1,4 @@
+# expect: Flaux doesn't have `len`. The Flaux version is `length`.
+# expect: How to fix it:
+# expect: set n to length("abc")
+set n to len("abc")

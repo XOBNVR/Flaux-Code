@@ -1,0 +1,4 @@
+# expect: This text is missing its closing quote `"`.
+# expect: How to fix it:
+# expect: say "hello"
+say "hello

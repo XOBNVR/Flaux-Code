@@ -1,0 +1,5 @@
+# expect: Flaux doesn't use `+=`.
+# expect: How to fix it:
+# expect: add 1 to x
+set x to 1
+x += 1

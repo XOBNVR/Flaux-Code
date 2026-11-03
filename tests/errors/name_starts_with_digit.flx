@@ -1,0 +1,4 @@
+# expect: Names can't start with a number.
+# expect: How to fix it:
+# expect: set players2 to 5
+set 2players to 5

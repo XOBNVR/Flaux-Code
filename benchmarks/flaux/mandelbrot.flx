@@ -1,0 +1,21 @@
+# Mandelbrot set: tests decimal maths.
+set size to 1200
+set max_iter to 200
+set total to 0
+repeat with py from 0 to size - 1
+    set y0 to py / size * 2.0 - 1.0
+    repeat with px from 0 to size - 1
+        set x0 to px / size * 3.0 - 2.0
+        set x to 0.0
+        set y to 0.0
+        set i to 0
+        repeat while i < max_iter and x * x + y * y <= 4.0
+            set xt to x * x - y * y + x0
+            set y to 2.0 * x * y + y0
+            set x to xt
+            add 1 to i
+        end
+        add i to total
+    end
+end
+say total

@@ -1,0 +1,6 @@
+# expect: You can't pick a random item from an empty list.
+# expect: How to fix it:
+set items to []
+add 1 to items
+set items to []
+say random(items)

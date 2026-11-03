@@ -1,0 +1,17 @@
+# Find every prime number up to a limit (the Sieve of Eratosthenes).
+set limit to 100
+set is_prime to (limit + 1) copies of true
+set is_prime[1] to false
+set primes to []
+
+repeat with i from 2 to limit
+    if is_prime[i]
+        add i to primes
+        repeat with j from i * i to limit by i
+            set is_prime[j] to false
+        end
+    end
+end
+
+say "There are {length of primes} primes up to {limit}:"
+say primes

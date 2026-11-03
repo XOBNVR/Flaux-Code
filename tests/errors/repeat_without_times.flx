@@ -1,0 +1,6 @@
+# expect: A counted repeat ends with `times`. I expected `times` here, but found the end of the line.
+# expect: How to fix it:
+# expect: repeat 10 times
+repeat 10
+  say 1
+end

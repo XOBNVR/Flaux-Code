@@ -1,0 +1,6 @@
+# Your first Flaux program!
+say "Hello, world!"
+
+set name to "Flaux"
+set year to 2026
+say "Welcome to {name}. It's {year}."

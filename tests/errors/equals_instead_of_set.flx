@@ -1,0 +1,4 @@
+# expect: To change a variable, use `set`.
+# expect: How to fix it:
+# expect: set x to 5
+x = 5

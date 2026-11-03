@@ -1,0 +1,5 @@
+# expect: `nums` is a variable, not a function, so it can't be used with round brackets.
+# expect: How to fix it:
+# expect: say nums[2]
+set nums to [1, 2, 3]
+say nums(2)

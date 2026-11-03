@@ -1,0 +1,18 @@
+# Lists: a shopping basket.
+set items to ["apples", "bread", "milk"]
+set prices to [1.20, 2.50, 0.99]
+
+add "cheese" to items
+add 3.75 to prices
+
+say "You have {length of items} things in your basket:"
+set total to 0.0
+repeat with i from 1 to length of items
+    say "  {items[i]}: ${prices[i]}"
+    add prices[i] to total
+end
+say "Total: ${round(total * 100) / 100}"
+
+if contains(items, "milk")
+    say "Don't forget the cereal!"
+end

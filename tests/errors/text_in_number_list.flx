@@ -1,0 +1,5 @@
+# expect: `nums` is a list of whole numbers, so you can't add text to it.
+# expect: How to fix it:
+# expect: set nums to [1, 2]
+set nums to [1, 2]
+add "three" to nums

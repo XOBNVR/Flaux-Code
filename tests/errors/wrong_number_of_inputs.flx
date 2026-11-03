@@ -1,0 +1,7 @@
+# expect: `greet` needs 2 inputs, but it was given 1.
+# expect: How to fix it:
+# expect: function greet(name, age)
+function greet(name, age)
+  say "{name} is {age}"
+end
+greet("Sam")

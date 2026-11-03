@@ -1,0 +1,4 @@
+# expect: Flaux doesn't use `;`.
+# expect: How to fix it:
+# expect: set x to 5
+set x to 5; say x

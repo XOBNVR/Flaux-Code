@@ -1,0 +1,4 @@
+# expect: `count` needs a starting value before you can change it.
+# expect: How to fix it:
+# expect: set count to 0
+add 1 to count
