@@ -67,6 +67,8 @@
     return out;
   }
 
+  const PAD_FIX = 'Controller buttons are "a", "b", "x", "y", "start", "back", "lb", "rb" (bumpers),\n' +
+    '  "lt", "rt" (triggers), "l3", "r3" (pressing a stick) and "up", "down", "left", "right" (the D-pad).';
   function squash(text) { return String(text).toLowerCase().replace(/[ _-]/g, ""); }
   function lround(x) { return x < 0 ? -Math.round(-x) : Math.round(x); }
   function px(v) { return v > 1e6 ? 1e6 : v < -1e6 ? -1e6 : lround(v); }
@@ -217,9 +219,57 @@
         span(px(cx - dx), px(cx + dx), y);
       }
     }
+    // game controllers (and VR controllers, through fx.extraPads), with the
+    // same button names as the desktop app
+    const PAD_BUTTONS = ["a", "b", "x", "y", "lb", "rb", "lt", "rt", "back", "start", "l3", "r3", "up", "down", "left", "right"];
+    const PAD_ALIASES = { select: "back", view: "back", menu: "start", options: "start", leftbumper: "lb", l1: "lb",
+      grip: "lb", rightbumper: "rb", r1: "rb", lefttrigger: "lt", l2: "lt", righttrigger: "rt", r2: "rt", trigger: "rt" };
+    let padNow = new Set(), padPrev = new Set(), stick = [[0, 0], [0, 0]];
+    function readPads() {
+      padPrev = padNow; padNow = new Set(); stick = [[0, 0], [0, 0]];
+      const pads = io.gamepads ? io.gamepads() : [];
+      for (const p of pads) {
+        if (!p) continue;
+        p.buttons.forEach((btn, i) => { if (i < 16 && (btn.pressed || btn.value > 0.5)) padNow.add(PAD_BUTTONS[i]); });
+        for (let s = 0; s < 2; s++)
+          for (let a = 0; a < 2; a++) {
+            let v = p.axes[s * 2 + a] || 0;
+            if (Math.abs(v) < 0.15) v = 0;
+            if (a === 1) v = -v;                 // up is positive
+            if (Math.abs(v) > Math.abs(stick[s][a])) stick[s][a] = v;
+          }
+      }
+      if (fx.extraPads) {
+        for (const name of fx.extraPads.buttons) padNow.add(name);
+        for (let s = 0; s < 2; s++)
+          for (let a = 0; a < 2; a++)
+            if (Math.abs(fx.extraPads.stick[s][a]) > Math.abs(stick[s][a])) stick[s][a] = fx.extraPads.stick[s][a];
+      }
+    }
+    function padName(name, line) {
+      let k = squash(name);
+      k = PAD_ALIASES[k] || k;
+      if (!PAD_BUTTONS.includes(k)) fail(line, PAD_FIX, `I don't know the controller button "${name}".`);
+      return k;
+    }
+    function stickSide(side, line) {
+      const k = side === undefined ? "left" : squash(side);
+      if (k !== "left" && k !== "right") fail(line, 'Use stick_x("left") or stick_x("right").',
+        `A controller has a "left" and a "right" stick, not "${side}".`);
+      return k === "left" ? 0 : 1;
+    }
+    let windowOpened = 0, fpsValue = 0, fpsFrames = 0, fpsSince = 0, frameCount = 0;
+    function countFrame() {
+      frameCount++;
+      const now = io.now();
+      if (!fpsSince) fpsSince = now;
+      fpsFrames++;
+      if (now - fpsSince >= 500) { fpsValue = fpsFrames * 1000 / (now - fpsSince); fpsFrames = 0; fpsSince = now; }
+    }
     function readInput() {
       keysPrev = keysNow; keysNow = new Set(io.keys);
       mousePrev = mouseNow; mouseNow = !!io.mouse.down;
+      readPads();
     }
     function present() { win.screen.getContext("2d").drawImage(back, 0, 0); dirty = false; }
     function keyName(name, line) {
@@ -243,7 +293,8 @@
         w = lround(w); h = lround(h);
         if (w < 50 || h < 50 || w > 8000 || h > 8000)
           fail(line, "Pick a size between 50 and 8000, like window(800, 600).", `A window can't be ${w} by ${h} pixels.`);
-        win = io.openWindow(w, h, title === undefined ? "Flaux" : str(title));
+        win = io.openWindow(w, h, title === undefined ? "Flaux" : str(title), "2d");
+        windowOpened = io.now();
         back = win.back; ctx = back.getContext("2d"); W = w; H = h;
         ctx.imageSmoothingEnabled = false;
         ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, w, h); present();
@@ -251,6 +302,7 @@
       },
       show: async (_, line) => {
         needWindow(line);
+        countFrame();
         present();
         await io.nextFrame();
         if (io.cancelled()) throw new FlauxCancelled();
@@ -333,7 +385,21 @@
       mouse_down: () => mouseNow, mouse_clicked: () => mouseNow && !mousePrev,
       beep: ([pitch, seconds]) => io.beep(pitch, seconds === undefined ? 0.1 : seconds),
       screenshot: ([name], line) => { needWindow(line); if (io.screenshot) io.screenshot(str(name), back); },
+      fps: () => Math.round(fpsValue),
+      seconds: () => (io.fast ? frameCount / 60 : (io.now() - windowOpened) / 1000),
+      button_down: ([name], line) => padNow.has(padName(name, line)),
+      button_pressed: ([name], line) => { const k = padName(name, line); return padNow.has(k) && !padPrev.has(k); },
+      stick_x: ([side], line) => stick[stickSide(side, line)][0],
+      stick_y: ([side], line) => stick[stickSide(side, line)][1],
     });
+
+    // 3D and shaders: the WebGL 2 engine (fx3d.js) takes over the drawing
+    fx.setup3d = (glsl, shaders) => {
+      if (!root.FlauxRuntime3D) fail(0, "Load fx3d.js next to fx.js.", "3D isn't available here.");
+      root.FlauxRuntime3D.install(fx, b, io, {
+        colour, px, readInput, font: () => font, Cancelled: FlauxCancelled,
+      }, glsl, shaders);
+    };
 
     fx.finish = () => { if (win && dirty) present(); };
     return fx;
@@ -351,7 +417,7 @@
     }
     try {
       await main();
-      fx.finish();
+      await fx.finish();
       return 0;
     } catch (e) {
       if (e instanceof FlauxCancelled) return null;

@@ -29,7 +29,7 @@ def python_files():
     files = {}
     wanted = (glob.glob(os.path.join(FLAUXC, "*.py")) + glob.glob(os.path.join(FLAUXC, "web", "*.py"))
               + [os.path.join(STUDIO, "__init__.py"), os.path.join(STUDIO, "blocks.py"),
-                 os.path.join(STUDIO, "blocks_table.json")])
+                 os.path.join(STUDIO, "blocks_table.json"), os.path.join(FLAUXC, "engine.glsl")])
     for path in wanted:
         with open(path, encoding="utf-8") as fh:
             files[os.path.relpath(path, ROOT).replace(os.sep, "/")] = fh.read()
@@ -47,7 +47,8 @@ def examples(out):
         group = key.split("/")[0] if "/" in key else ""
         with open(path, encoding="utf-8") as fh:
             programs.append({"key": key, "name": os.path.basename(path), "group": group, "content": fh.read()})
-    for path in sorted(glob.glob(os.path.join(base, "**", "*.png"), recursive=True)):
+    files = [p for ext in ("png", "obj", "mtl") for p in glob.glob(os.path.join(base, "**", "*." + ext), recursive=True)]
+    for path in sorted(files):
         key = os.path.relpath(path, base).replace(os.sep, "/")
         target = os.path.join(out, "examples", key)
         os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -61,7 +62,8 @@ def page():
     with open(os.path.join(STUDIO, "index.html"), encoding="utf-8") as fh:
         html = fh.read()
     html = html.replace("@@TOKEN@@", "web").replace('<html lang="en">', '<html lang="en" class="web">', 1)
-    html = html.replace("<!--@WEB@-->", '<script src="fx.js"></script>\n<script src="web.js"></script>')
+    html = html.replace("<!--@WEB@-->", '<script src="fx.js"></script>\n<script src="fx3d.js"></script>\n'
+                                        '<script src="web.js"></script>')
     html = html.replace("<title>Flaux Studio</title>", "<title>Flaux Studio</title>\n"
                         '<meta name="description" content="Write and run Flaux programs in your browser.">')
     return html
@@ -73,7 +75,7 @@ def build(out, pyodide):
         fh.write(page())
     for name in ("blocks.js", "icon.png"):
         shutil.copyfile(os.path.join(STUDIO, name), os.path.join(out, name))
-    for name in ("fx.js", "web.js"):
+    for name in ("fx.js", "fx3d.js", "web.js"):
         shutil.copyfile(os.path.join(HERE, name), os.path.join(out, name))
     shutil.copytree(os.path.join(STUDIO, "blockly"), os.path.join(out, "blockly"), dirs_exist_ok=True)
     with open(os.path.join(out, "flaux-files.json"), "w", encoding="utf-8") as fh:

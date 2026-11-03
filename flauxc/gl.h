@@ -963,6 +963,26 @@ static void fx_g_effect(int shader, const float *vals, int n) {
     fx_dirty = true;
 }
 
+/* ------------------------------------------------------------ VR and AR */
+
+/* Where your hands are (in a VR headset), and if you're in one. Without a
+   headset, your hands are where the camera is. */
+static bool fx_xr_running;
+static fx_v3 fx_xr_hands[2];
+static bool fx_xr_hand_seen[2];
+
+static bool fx_in_vr(void) { return fx_xr_running; }
+
+static double fx_hand(fx_text side, int axis, int line) {
+    char key[40];
+    fx_squash(side, key, sizeof key);
+    int h = !strcmp(key, "left") ? 0 : !strcmp(key, "right") ? 1 : -1;
+    if (h < 0) fx_fail(line, "Use hand_x(\"left\") or hand_x(\"right\").", "You have a \"left\" and a \"right\" hand, not \"%.*s\".",
+                       (int)side.n, side.p);
+    fx_v3 p = fx_xr_hand_seen[h] ? fx_xr_hands[h] : fx_cam_eye;
+    return axis == 0 ? p.x : axis == 1 ? p.y : p.z;
+}
+
 /* ------------------------------------------------------------ 2D on top */
 
 typedef struct { float x, y, u, v; uint8_t rgba[4]; } fx_flat_vertex_t;

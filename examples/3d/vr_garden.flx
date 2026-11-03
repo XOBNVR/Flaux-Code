@@ -1,0 +1,47 @@
+# VR garden: put on a VR headset (in Flaux Studio on the web, press Enter VR).
+# Hold the trigger to grow flowers where your right hand is.
+# Without a headset it works too: the space bar grows a flower.
+
+window(900, 600, "VR garden")
+
+set flower_x to []
+set flower_y to []
+set flower_z to []
+set flower_colours to ["red", "yellow", "pink", "violet", "orange", "white"]
+set flower_colour to []
+set cooldown to 0
+
+repeat forever
+    sky("sky", "white")
+    camera(0, 1.6, 2, 0, 1.6, 0)
+    plane(0, 0, 0, 30, 30, "green")
+
+    # trees
+    repeat with i from 1 to 8
+        set tx to sin(i * 0.8) * 6
+        set tz to cos(i * 0.8) * 6 - 2
+        cylinder(tx, 0.75, tz, 0.15, 1.5, "brown")
+        cone(tx, 2.2, tz, 0.8, 1.8, "dark green")
+    end
+
+    # grow a flower
+    subtract 1 from cooldown
+    if cooldown <= 0 and (button_down("rt") or key_down("space"))
+        add hand_x("right") to flower_x
+        add max(0.3, hand_y("right") - 0.2) to flower_y
+        add hand_z("right") to flower_z
+        add random(flower_colours) to flower_colour
+        set cooldown to 10
+        beep(660 + length of flower_x * 20, 0.05)
+    end
+
+    repeat with i from 1 to length of flower_x
+        cylinder(flower_x[i], flower_y[i] / 2, flower_z[i], 0.02, flower_y[i], "green")
+        ball(flower_x[i], flower_y[i], flower_z[i], 0.08, flower_colour[i])
+    end
+
+    if not in_vr()
+        write("Press space to grow a flower. In a VR headset, use the trigger.", 10, 10, "black", 2)
+    end
+    show()
+end

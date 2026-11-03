@@ -113,11 +113,16 @@ BUILTINS = {
     "model": "model(\"tree.obj\", 0, 1, 0, 2)          # a 3D model file, x, y, z, size\n"
              "model(\"tree.obj\", 0, 1, 0, 2, \"red\")   # ...painted red",
     "effect": "effect(wobble)      # put the whole screen through the shader called wobble",
+    # VR and AR
+    "in_vr": "if in_vr()\n    say \"You're in a VR headset!\"\nend",
+    "hand_x": "ball(hand_x(\"right\"), hand_y(\"right\"), hand_z(\"right\"), 0.1, \"gold\")   # where your hand is",
+    "hand_y": "ball(hand_x(\"left\"), hand_y(\"left\"), hand_z(\"left\"), 0.1, \"gold\")   # where your hand is",
+    "hand_z": "ball(hand_x(\"left\"), hand_y(\"left\"), hand_z(\"left\"), 0.1, \"gold\")   # where your hand is",
 }
 
 # Built-ins that draw in 3D (they need the OpenGL runtime).
 THREE_D_BUILTINS = {"camera", "sky", "sun", "light", "fog", "turn", "cube", "box", "ball", "cylinder", "cone",
-                    "plane", "model", "effect"}
+                    "plane", "model", "effect", "in_vr", "hand_x", "hand_y", "hand_z"}
 
 # Which input of a built-in can be a shader (to paint with).
 SHADER_INPUT = {"cube": 4, "box": 6, "ball": 4, "cylinder": 5, "cone": 5, "plane": 5, "model": 5, "effect": 0}
@@ -2190,6 +2195,32 @@ class Compiler:
         if nums is None:
             return "", VOID
         return self.call_3d(f"fx_g_turn({', '.join(nums)})")
+
+    def b_in_vr(self, e, args):
+        self.arity(e, args, 0)
+        return self.call_3d("fx_in_vr()", BOOL)
+
+    def hand(self, e, args, axis):
+        self.arity(e, args, 0, 1)
+        side = 'FX_LIT("right")'
+        if args:
+            node, (c, t) = e.args[0], args[0]
+            self.need_text(e, node, t)
+            if isinstance(node, N.Str) and len(node.parts) == 1 and isinstance(node.parts[0], str):
+                if graphics.normalize(node.parts[0]) not in ("left", "right"):
+                    raise self.err(node, "You have a \"left\" and a \"right\" hand.", fix='"right"',
+                                   hint="Change it to:")
+            side = c
+        return self.call_3d(f"fx_hand({side}, {axis}, {e.line})", FLOAT)
+
+    def b_hand_x(self, e, args):
+        return self.hand(e, args, 0)
+
+    def b_hand_y(self, e, args):
+        return self.hand(e, args, 1)
+
+    def b_hand_z(self, e, args):
+        return self.hand(e, args, 2)
 
     def b_effect(self, e, args):
         self.arity(e, args, 1)

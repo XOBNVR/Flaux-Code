@@ -153,8 +153,17 @@ window.FlauxWeb = (() => {
     PageUp: "pageup", PageDown: "pagedown" };
   function keyName(e) { return KEY_NAMES[e.key] || (e.key.length === 1 ? e.key.toLowerCase() : e.key.toLowerCase()); }
 
-  function setUpGame() {
-    const canvas = document.getElementById("game-canvas");
+  // A canvas can only ever draw one way (2D or WebGL), so each window gets a
+  // fresh one, with the keys and mouse wired up.
+  function freshCanvas() {
+    const old = document.getElementById("game-canvas");
+    const canvas = old.cloneNode(false);
+    old.replaceWith(canvas);
+    setUpGame(canvas);
+    return canvas;
+  }
+
+  function setUpGame(canvas = document.getElementById("game-canvas")) {
     game.canvas = canvas;
     canvas.addEventListener("keydown", (e) => { game.keys.add(keyName(e)); e.preventDefault(); });
     canvas.addEventListener("keyup", (e) => { game.keys.delete(keyName(e)); e.preventDefault(); });
@@ -166,7 +175,28 @@ window.FlauxWeb = (() => {
     };
     canvas.addEventListener("mousemove", where);
     canvas.addEventListener("mousedown", (e) => { where(e); game.mouse.down = true; canvas.focus(); });
-    window.addEventListener("mouseup", () => { game.mouse.down = false; });
+    if (!game.listening) {
+      window.addEventListener("mouseup", () => { game.mouse.down = false; });
+      game.listening = true;
+    }
+    // touch screens: a finger is the mouse
+    const touch = (e) => {
+      if (!e.touches.length) { game.mouse.down = false; return; }
+      where(e.touches[0]);
+      game.mouse.down = true;
+      e.preventDefault();
+    };
+    canvas.addEventListener("touchstart", touch, { passive: false });
+    canvas.addEventListener("touchmove", touch, { passive: false });
+    canvas.addEventListener("touchend", touch, { passive: false });
+  }
+
+  // a model (.obj or .mtl) or any other file added with the Pictures button,
+  // or one of the examples', as text
+  async function loadFile(name, programPath) {
+    const url = await pictureUrl(name, programPath);
+    if (!url) return null;
+    try { const r = await fetch(url); return r.ok ? await r.text() : null; } catch (e) { return null; }
   }
 
   let audio = null, audioTime = 0;
@@ -196,6 +226,7 @@ window.FlauxWeb = (() => {
     runs.set(id, r);
     const panel = document.getElementById("game");
     panel.hidden = true;
+    document.getElementById("game-buttons").replaceChildren();
     game.keys.clear();
     const io = {
       write: (stream, text) => { if (r.chunks.length < MAX_CHUNKS) r.chunks.push([stream, text]); },
@@ -205,6 +236,7 @@ window.FlauxWeb = (() => {
         return new Promise((resolve) => { r.asking = resolve; });
       },
       openWindow: (w, h, title) => {
+        freshCanvas();
         game.canvas.width = w; game.canvas.height = h;
         panel.hidden = false;
         document.getElementById("game-title").textContent = title + "  (click here to use the keys)";
@@ -223,6 +255,15 @@ window.FlauxWeb = (() => {
       }),
       cancelled: () => r.cancelled,
       loadPicture: (pic) => loadPicture(pic, d.path),
+      loadFile: (file) => loadFile(file, d.path),
+      gamepads: () => (navigator.getGamepads ? Array.from(navigator.getGamepads()) : []),
+      addButton: (label, onclick) => {          // like "Enter VR", next to the game
+        const button = document.createElement("button");
+        button.className = "game-button";
+        button.textContent = label;
+        button.addEventListener("click", onclick);
+        document.getElementById("game-buttons").append(button);
+      },
       beep,
       now: () => performance.now(),
     };

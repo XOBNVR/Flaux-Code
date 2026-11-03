@@ -1,0 +1,60 @@
+# Block world: 6400 blocks, drawn every frame. Fly around with the arrow keys
+# (or a game controller's sticks). The number at the top is how many frames
+# a second your computer draws.
+
+shader grass_and_stone
+    if y > 3.4
+        return rgb(150, 150, 160)       # high up: stone
+    end
+    if ny > 0.5
+        return rgb(80, 180, 70)         # tops of blocks: grass
+    end
+    return rgb(130, 90, 55)             # sides: dirt
+end
+
+window(1000, 700, "Block world")
+
+set heights to []
+repeat with gx from -40 to 39
+    repeat with gz from -40 to 39
+        add floor(sin(gx * 0.2) * 2 + cos(gz * 0.15) * 2 + 3) to heights
+    end
+end
+
+set cam_x to 0.0
+set cam_z to 30.0
+set facing to 0.0
+
+repeat forever
+    if key_down("left")
+        add 0.03 to facing
+    end
+    if key_down("right")
+        subtract 0.03 from facing
+    end
+    subtract stick_x("right") * 0.04 from facing
+    set forward to stick_y() * 0.4
+    if key_down("up")
+        set forward to 0.4
+    end
+    if key_down("down")
+        set forward to -0.4
+    end
+    subtract sin(facing) * forward from cam_x
+    subtract cos(facing) * forward from cam_z
+
+    sky("sky", "white")
+    fog(70)
+    camera(cam_x, 14, cam_z, cam_x - sin(facing) * 10, 6, cam_z - cos(facing) * 10)
+
+    set i to 1
+    repeat with gx from -40 to 39
+        repeat with gz from -40 to 39
+            cube(gx, heights[i], gz, 1, grass_and_stone)
+            add 1 to i
+        end
+    end
+
+    write("{fps()} frames a second", 10, 10, "black", 2)
+    show()
+end

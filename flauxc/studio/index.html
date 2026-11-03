@@ -176,6 +176,10 @@ html.web .native-only { display: none !important; }
 #game { border-bottom: 1px solid var(--line); padding: 10px; background: var(--console-bg); display: flex;
         flex-direction: column; align-items: center; gap: 6px; }
 #game-title { font-size: 13px; color: var(--muted); }
+#game-buttons { display: flex; gap: 8px; }
+#game-buttons:empty { display: none; }
+.game-button { font: inherit; font-weight: 600; padding: 6px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--accent-2); background: var(--accent); color: #fff; }
 #game-canvas { max-width: 100%; max-height: 52vh; image-rendering: pixelated; background: #000; border-radius: 6px;
                outline: none; box-shadow: 0 2px 10px var(--shadow); }
 #game-canvas:focus { box-shadow: 0 0 0 3px var(--accent-2); }
@@ -248,6 +252,7 @@ a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--l
       <div id="game" hidden>
         <canvas id="game-canvas" tabindex="0" width="800" height="600"></canvas>
         <div id="game-title"></div>
+        <div id="game-buttons"></div>
       </div>
       <pre id="console"></pre>
       <form id="input-row" hidden>
@@ -278,7 +283,7 @@ a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--l
     <button id="open-computer" class="web-only">Open a .flx file from this computer</button>
     <button id="download-program" class="web-only">Download this program</button>
     <input type="file" id="open-file" accept=".flx,.txt" hidden>
-    <input type="file" id="picture-files" accept="image/png,image/jpeg,image/gif,image/bmp" multiple hidden>
+    <input type="file" id="picture-files" accept="image/png,image/jpeg,image/gif,image/bmp,.obj,.mtl" multiple hidden>
     <div class="spacer"></div>
     <button id="open-cancel">Cancel</button>
   </div>

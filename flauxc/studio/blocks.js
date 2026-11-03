@@ -100,6 +100,9 @@ window.FlauxBlocks = (() => {
       { type: "flx_colour", message0: "%1", output: null, colour: cat.Drawing, tooltip: "A colour.",
         args0: [{ type: "field_dropdown", name: "COLOUR",
           options: info.colors.map((c) => [c.replace(/^(dark|light)/, "$1 "), c]) }] },
+      { type: "flx_shader", message0: "shader %1 %2 %3", args0: [{ type: "field_input", name: "NAME", text: "glow" }, dummy, s("DO")],
+        colour: cat["3D"], tooltip: "A shader runs on the graphics card, for every pixel, and gives back a colour. " +
+          "Use its name in place of a colour (on a shape), or with effect(...) for the whole screen." },
       { type: "flx_key", message0: "%1", output: null, colour: cat["Keys & Mouse"], tooltip: "A key on the keyboard.",
         args0: [{ type: "field_dropdown", name: "KEY", options: info.table.keys.map((k) => [k, k]) }] },
     ];
@@ -169,6 +172,8 @@ window.FlauxBlocks = (() => {
       ]),
       category("Functions", [], { custom: "PROCEDURE" }),
       category("Drawing", [...fns("Drawing"), block("flx_colour")]),
+      category("3D", [...fns("3D"), block("flx_shader", { DO: { block: { type: "flx_return",
+        inputs: { VALUE: { shadow: { type: "flx_colour", fields: { COLOUR: "gold" } } } } } } })]),
       category("Keys & Mouse", [...fns("Keys & Mouse"), block("flx_key")]),
       category("Sound", fns("Sound")),
       category("Notes", [block("flx_note"), block("flx_return"), block("flx_return_nothing"),
@@ -356,6 +361,7 @@ window.FlauxBlocks = (() => {
           emit("end"); break;
         }
         case "procedures_callnoreturn": emit(`${ident(b.getFieldValue("NAME"))}(${args(b)})`); break;
+        case "flx_shader": emit(`shader ${ident(b.getFieldValue("NAME"))}`); body(b, "DO", indent + 1); emit("end"); break;
         default:
           if (b.type.startsWith("fn_")) emit(`${fnName(b)}(${args(b)})`);
           else problems.push({ id: b.id, message: "Flaux doesn't know this block." });

@@ -1,0 +1,21 @@
+# Lesson 13: 3D! A world with a floor, a spinning cube and a ball
+window(800, 600, "My first 3D world")
+
+set angle to 0
+
+repeat forever
+    sky("sky", "white")                # the sky: blue at the top, white at the horizon
+    camera(0, 3, 8, 0, 1, 0)           # the camera is at x 0, y 3, z 8 and looks at 0, 1, 0
+
+    plane(0, 0, 0, 30, 30, "green")    # a flat green floor
+
+    turn(0, angle, 0)                  # turn the next shapes...
+    cube(-2, 1, 0, 1.5, "red")         # ...like this cube
+    turn(0, 0, 0)                      # (stop turning)
+
+    ball(2, 1, 0, 1, "orange")         # a ball: x, y, z, then its radius
+    add 1 to angle
+
+    write("x goes right, y goes up, z comes towards you", 10, 10)
+    show()
+end

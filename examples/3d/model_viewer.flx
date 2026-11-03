@@ -1,0 +1,33 @@
+# A 3D model from a file. rocket.obj (and its colours, rocket.mtl) are next to
+# this program. Models from Blender, or downloaded ones, work the same way:
+# save them as .obj. Turn it with the arrow keys.
+
+window(800, 600, "Model viewer")
+
+set spin to 0
+set tilt to 0
+
+repeat forever
+    if key_down("left")
+        subtract 2 from spin
+    end
+    if key_down("right")
+        add 2 to spin
+    end
+    if key_down("up")
+        subtract 2 from tilt
+    end
+    if key_down("down")
+        add 2 to tilt
+    end
+    add 0.5 to spin
+
+    sky("navy", "black")
+    sun(1, 2, 2)
+    camera(0, 1.5, 6, 0, 1.5, 0)
+    plane(0, 0, 0, 10, 10, "dark gray")
+    turn(tilt, spin, 0)
+    model("rocket.obj", 0, 1.6, 0, 3)
+    write("Arrow keys turn the rocket", 10, 10)
+    show()
+end

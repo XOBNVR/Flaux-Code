@@ -1,0 +1,76 @@
+# 3D Runner: dodge the blocks! Left and right arrows (or a game controller).
+# The floor is painted by a shader, and the screen flashes red when you're hit.
+
+shader road
+    # white lines at the edges of the road
+    if abs(x) > 3.8
+        return "white"
+    end
+    if (floor(z / 4) mod 2) = 0
+        return rgb(70, 70, 90)
+    end
+    return rgb(55, 55, 75)
+end
+
+shader hit_flash
+    return rgb(red + flash * 150, green * (1 - flash), blue * (1 - flash))
+end
+
+window(800, 600, "3D Runner")
+
+set player_x to 0.0
+set blocks_x to [-2.0, 0.0, 2.0]
+set blocks_z to [-30.0, -50.0, -70.0]
+set speed to 0.4
+set score to 0
+set lives to 3
+set flash to 0.0
+
+repeat forever
+    if lives > 0
+        # steer
+        if key_down("left") or button_down("left")
+            subtract 0.15 from player_x
+        end
+        if key_down("right") or button_down("right")
+            add 0.15 to player_x
+        end
+        add stick_x() * 0.15 to player_x
+        set player_x to max(-3, min(3, player_x))
+
+        # the blocks come towards you
+        repeat with i from 1 to length of blocks_z
+            add speed to blocks_z[i]
+            if blocks_z[i] > 2
+                set blocks_z[i] to -60.0
+                set blocks_x[i] to random(-3.0, 3.0)
+                add 1 to score
+                add 0.01 to speed
+            end
+            if abs(blocks_z[i]) < 0.8 and abs(blocks_x[i] - player_x) < 1
+                subtract 1 from lives
+                set flash to 1.0
+                set blocks_z[i] to -60.0
+                beep(150, 0.3)
+            end
+        end
+    end
+    set flash to max(0, flash - 0.05)
+
+    sky("black", "dark blue")
+    fog(60)
+    camera(player_x * 0.5, 3, 6, player_x * 0.5, 0, -10)
+    plane(0, 0, -30, 8, 80, road)
+    ball(player_x, 0.5, 0, 0.5, "orange")
+    repeat with i from 1 to length of blocks_z
+        cube(blocks_x[i], 0.75, blocks_z[i], 1.5, "magenta")
+    end
+    light(player_x, 2, 0, "orange", 6)
+    effect(hit_flash)
+
+    write("Score: {score}   Lives: {lives}", 10, 10, "white", 3)
+    if lives = 0
+        write("GAME OVER", 250, 260, "red", 8)
+    end
+    show()
+end

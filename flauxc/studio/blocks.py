@@ -277,6 +277,13 @@ class ToBlocks:
             b["icons"] = {"comment": {"text": self.trailing[f.line], "pinned": False, "height": 60, "width": 200}}
         return b
 
+    def shader(self, sh):
+        """A shader is a block of its own, holding the blocks inside it."""
+        b = self.block("flx_shader", {"NAME": sh.name}, {"DO": self.chain(list(sh.body), sh.line, sh.end_line)})
+        if sh.line in self.trailing:
+            b["icons"] = {"comment": {"text": self.trailing[sh.line], "pinned": False, "height": 60, "width": 200}}
+        return b
+
     def call_block(self, call, kind):
         f = self.functions[call.name]
         inputs = {f"ARG{i}": self.val(a) for i, a in enumerate(call.args)}
@@ -293,8 +300,8 @@ class ToBlocks:
         if not (isinstance(arg, N.Str) and len(arg.parts) == 1 and isinstance(arg.parts[0], str)):
             return None
         text = arg.parts[0]
-        if kind == "colour" and normalize(text) in COLOR_NAMES:
-            return {"shadow": self.block("flx_colour", {"COLOUR": normalize(text)})}
+        if kind == "colour" and text in COLOR_NAMES:   # (written exactly like the dropdown, so it stays the same)
+            return {"shadow": self.block("flx_colour", {"COLOUR": text})}
         if kind == "key" and text.lower() in KEYS:
             return {"shadow": self.block("flx_key", {"KEY": text.lower()})}
         return None
@@ -382,10 +389,10 @@ class ToBlocks:
                 groups.append((run[0].line if run else end - 0.5, first))
 
         for _, node in items:
-            if isinstance(node, N.FuncDef):
+            if isinstance(node, (N.FuncDef, N.ShaderDef)):
                 close_run(node.line)
                 run = []
-                groups.append((node.line, self.function(node)))
+                groups.append((node.line, self.function(node) if isinstance(node, N.FuncDef) else self.shader(node)))
                 prev_end = node.end_line
             else:
                 if not run:

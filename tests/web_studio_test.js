@@ -7,7 +7,8 @@
 // Checks: Flaux starts in the page, a program runs and asks a question, a
 // problem while running is explained, Apply fix, Blocks mode, saving in the
 // browser, the graphics pixel tests from tests/graphics, pictures, keys,
-// and the Stop button.
+// the Stop button, every 3D test from tests/graphics3d (WebGL 2), and VR with
+// a pretend headset.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -18,14 +19,50 @@ const graphics = path.join(__dirname, "graphics");
 const read = (name) => fs.readFileSync(path.join(graphics, name), "utf8");
 const pixels = (src) => src.split("\n").filter((l) => l.startsWith("# pixel:")).map((l) => l.slice(8).trim().split(/\s+/));
 
+// A pretend VR headset (WebXR), so VR can be tested without one: two eyes
+// side by side on the page, 1.6 m above the floor, and a right controller
+// with its trigger held.
+function fakeHeadset() {
+  const move = (x, y, z) => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1]);
+  const proj = (() => {
+    const f = 1 / Math.tan(Math.PI / 4), n = 0.05, far = 1000, m = new Float32Array(16);
+    m[0] = f; m[5] = f; m[10] = (far + n) / (n - far); m[11] = -1; m[14] = 2 * far * n / (n - far);
+    return m;
+  })();
+  const views = [{ eye: "left", transform: { matrix: move(-0.03, 1.6, 0) }, projectionMatrix: proj },
+                 { eye: "right", transform: { matrix: move(0.03, 1.6, 0) }, projectionMatrix: proj }];
+  const button = (on) => ({ pressed: on, value: on ? 1 : 0 });
+  const frame = {
+    getViewerPose: () => ({ views }),
+    getPose: () => ({ transform: { matrix: move(0.2, 1.2, -0.3) } }),
+  };
+  const session = {
+    inputSources: [{ handedness: "right", gripSpace: {},
+      gamepad: { buttons: [button(true), button(false), button(false), button(false), button(false), button(false)], axes: [0, 0, 0, 0] } }],
+    requestAnimationFrame: (cb) => setTimeout(() => cb(performance.now(), frame), 16),
+    updateRenderState() {}, requestReferenceSpace: async () => ({}), addEventListener() {}, end() {},
+  };
+  Object.defineProperty(navigator, "xr", { value: {
+    isSessionSupported: async (mode) => mode === "immersive-vr",
+    requestSession: async () => session,
+  } });
+  WebGL2RenderingContext.prototype.makeXRCompatible = async () => {};
+  window.XRWebGLLayer = class {
+    constructor(s, gl) { this.framebuffer = null; this.w = gl.drawingBufferWidth; this.h = gl.drawingBufferHeight; }
+    getViewport(view) { return { x: view.eye === "left" ? 0 : this.w / 2, y: 0, width: this.w / 2, height: this.h }; }
+  };
+}
+
 let failures = 0;
 function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!ok) failures++; }
 
 (async () => {
-  const browser = await chromium.launch();
+  // WebGL 2 without a graphics card: Chromium's SwiftShader
+  const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
   const page = await browser.newPage({ viewport: { width: 1300, height: 820 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  await page.addInitScript(fakeHeadset);
   const started = Date.now();
   await page.goto(url);
   await page.waitForFunction(() => /Ready|No problems/.test(document.getElementById("status").textContent), null, { timeout: 120000 });
@@ -117,6 +154,52 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.click("#btn-stop");
   await page.waitForFunction(() => document.getElementById("console").textContent.includes("Stopped"), null, { timeout: 15000 });
   check(true, "the Stop button stops a game");
+
+  // 3D and shaders: every tests/graphics3d program, with the same pixel checks
+  const dir3d = path.join(__dirname, "graphics3d");
+  const files = {};
+  for (const f of fs.readdirSync(dir3d).filter((f) => /\.(png|obj|mtl)$/.test(f))) {
+    const type = f.endsWith(".png") ? "image/png" : "text/plain";
+    files[f] = `data:${type};base64,` + fs.readFileSync(path.join(dir3d, f)).toString("base64");
+  }
+  await page.evaluate((f) => localStorage.setItem("flaux-web-pictures", JSON.stringify(f)), files);
+  const glPixel = (x, y) => page.evaluate(([x, y]) => {
+    const src = document.getElementById("game-canvas");
+    const c = document.createElement("canvas"); c.width = src.width; c.height = src.height;
+    const g = c.getContext("2d"); g.drawImage(src, 0, 0);
+    const d = g.getImageData(x, y, 1, 1).data;
+    return "#" + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+  }, [x, y]);
+  const near = (a, b) => [1, 3, 5].every((i) => Math.abs(parseInt(a.slice(i, i + 2), 16) - parseInt(b.slice(i, i + 2), 16)) <= 24);
+  for (const f of fs.readdirSync(dir3d).filter((f) => f.endsWith(".flx")).sort()) {
+    const src = fs.readFileSync(path.join(dir3d, f), "utf8");
+    await setCode(src);
+    await runUntil("Finished");
+    await page.waitForTimeout(100);
+    const wrong = [];
+    for (const l of src.split("\n").filter((l) => /^# (pixel|near):/.test(l))) {
+      const [kind, x, y, want] = l.slice(2).replace(":", "").split(/\s+/);
+      const got = await glPixel(+x, +y);
+      if (kind === "pixel" ? got !== want.toLowerCase() : !near(got, want.toLowerCase())) wrong.push(`(${x},${y}) is ${got}, not ${want}`);
+    }
+    check(!wrong.length, `3D ${f}: pixel checks ${wrong.length ? "-- " + wrong.join("; ") : ""}`);
+  }
+
+  // VR (with a pretend headset): both eyes are drawn, and VR controller
+  // buttons work like a game controller's
+  await setCode('window(400, 200)\nrepeat forever\n    sky("black")\n    camera(0, 1.6, 3, 0, 1.6, 0)\n' +
+                '    if in_vr() and button_down("rt")\n        cube(0, 1.6, 0, 1, "red")\n    else\n' +
+                '        cube(0, 1.6, 0, 1, "blue")\n    end\n    show()\nend\n');
+  await page.click("#btn-run");
+  await page.waitForSelector("#game-buttons button", { timeout: 60000 });
+  check((await page.textContent("#game-buttons")).includes("Enter VR"), "3D programs get an Enter VR button");
+  await page.click("#game-buttons button");
+  await page.waitForTimeout(1500);
+  const left = await glPixel(100, 100), right = await glPixel(300, 100);
+  const reddish = (c) => parseInt(c.slice(1, 3), 16) > 100 && parseInt(c.slice(5, 7), 16) < 80;
+  check(reddish(left) && reddish(right),
+        `in VR, both eyes see the red cube (the trigger is held): left ${left}, right ${right}`);
+  await page.click("#btn-stop");
 
   check(!errors.length, "no errors in the page" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();

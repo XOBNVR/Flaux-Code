@@ -14,12 +14,12 @@ import json
 
 from . import graphics
 from . import nodes as N
-from .compiler import Compiler, compile_source  # noqa: F401  (compile_source re-exported for convenience)
+from .compiler import SHADER_INPUT, Compiler, compile_source  # noqa: F401  (compile_source re-exported)
 from .errors import FlauxError
 from .font import FONT_5X7
 from .lexer import Lexer
 from .parser import Parser
-from .types import INT, FLOAT, BOOL, TEXT, is_list, resolve
+from .types import INT, FLOAT, BOOL, TEXT, SHADER, is_list, resolve
 
 
 class JsGen:
@@ -60,6 +60,11 @@ class JsGen:
         if c.uses_graphics:
             colors = {name: f"#{rgb:06x}" for name, rgb in graphics.COLORS.items()}
             self.emit(f"fx.setupGraphics({json.dumps(colors)}, {json.dumps(FONT_5X7)});")
+        if c.uses_3d:
+            shaders = [{"name": name,
+                        "surface": c.shader_uses.get((name, "surface"), (None,))[0],
+                        "screen": c.shader_uses.get((name, "screen"), (None,))[0]} for name in c.shaders]
+            self.emit(f"fx.setup3d({json.dumps(graphics.glsl_sections())}, {json.dumps(shaders)});")
         for spec in c.used:
             self.function(spec)
         self.function(c.main)
@@ -201,6 +206,9 @@ class JsGen:
     def s_Return(self, s):
         self.emit("return;" if s.value is None else f"return {self.ex(s.value)};")
 
+    def s_ShaderDef(self, s):
+        pass   # shaders run on the graphics card: their GLSL goes to fx.setup3d
+
     def s_ExprStmt(self, s):
         self.emit(self.ex(s.expr) + ";")
 
@@ -278,8 +286,18 @@ class JsGen:
             key = (f.name, tuple(self.type_of(a) for a in e.args))
             spec = self.c.specs[key]
             return f"(await {spec.c_name}({', '.join(self.ex(a) for a in e.args)}))"
-        args = [self.ex(a) for a in e.args]
         name = e.name
+        paint_at = SHADER_INPUT.get(name)
+        args = []
+        for i, a in enumerate(e.args):
+            if i == paint_at and isinstance(a, N.Name) and self.c.expr(a, SHADER)[1] == SHADER:
+                kind = "screen" if name == "effect" else "surface"
+                _, outside = self.c.shader_uses[(a.name, kind)]
+                values = [f"(v_{v} ? 1 : 0)" if self.type_of(N.Name(v, line=a.line, col=a.col)) == BOOL else f"v_{v}"
+                          for v in outside]
+                args.append(f"{{shader: {self.c.shader_ids[a.name]}, values: [{', '.join(values)}]}}")
+            else:
+                args.append(self.ex(a))
         if name == "random":
             if len(e.args) == 1:
                 return f"fx.pick({args[0]}, {e.line})"

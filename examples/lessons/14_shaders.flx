@@ -1,0 +1,38 @@
+# Lesson 14: shaders. A shader is a little program that runs on the graphics
+# card, once for every pixel. It works out a colour and gives it back.
+
+# This one paints in stripes: x is where on the shape it's painting.
+shader stripes
+    if floor(x * 4) mod 2 = 0
+        return "white"
+    end
+    return "red"
+end
+
+# This one changes over time: time counts the seconds.
+shader rainbow
+    set r to sin(time * 2) * 127 + 128
+    set g to sin(time * 2 + 2) * 127 + 128
+    set b to sin(time * 2 + 4) * 127 + 128
+    return rgb(r, g, b)
+end
+
+# A screen effect goes over the whole window. It knows each pixel's red,
+# green and blue, and gives back a new colour: here, a bit darker at the edges.
+shader dark_corners
+    set d to distance(x, y, width / 2, height / 2) / width
+    set light to 1 - d * d
+    return rgb(red * light, green * light, blue * light)
+end
+
+window(800, 600, "Shaders")
+
+repeat forever
+    sky("navy", "purple")
+    camera(0, 3, 8, 0, 1, 0)
+    plane(0, 0, 0, 30, 30, "dark gray")
+    cube(-2, 1, 0, 2, stripes)      # a shader goes where a colour would
+    ball(2, 1, 0, 1, rainbow)
+    effect(dark_corners)            # the whole screen goes through this one
+    show()
+end
