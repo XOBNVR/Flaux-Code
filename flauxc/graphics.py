@@ -1,9 +1,11 @@
 """Graphics support: the colour and key names Flaux knows, and the C code
 for the graphics runtime (which uses the SDL2 library)."""
 
+import base64
 import os
 
 from .font import c_table as font_table
+from .window_icon import RGBA as ICON_RGBA, SIZE as ICON_SIZE
 
 GRAPHICS_RUNTIME_PATH = os.path.join(os.path.dirname(__file__), "graphics.h")
 
@@ -82,4 +84,9 @@ def runtime_c():
     colors = ",\n".join(f'    {{"{name}", 0x{rgb:06X}}}' for name, rgb in COLORS.items())
     code = code.replace("/*@COLORS@*/", colors)
     code = code.replace("/*@FONT@*/", font_table())
+    pixels = base64.b64decode(ICON_RGBA)
+    rows = [", ".join(str(b) for b in pixels[i:i + 32]) for i in range(0, len(pixels), 32)]
+    icon = (f"#define FX_ICON_SIZE {ICON_SIZE}\nstatic const uint8_t fx_icon[] = {{\n    "
+            + ",\n    ".join(rows) + "\n};")
+    code = code.replace("/*@ICON@*/", icon)
     return code

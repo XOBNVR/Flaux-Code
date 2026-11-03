@@ -25,9 +25,11 @@ EXE = ".exe" if WINDOWS else ""
 
 # When Flaux is installed with FlauxSetup.exe, the C compiler and SDL2 come
 # with it, in folders next to the flauxc folder.
+# (FLAUX_TOOLS can point somewhere else, which the Windows build's tests use.)
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BUNDLED_CC = os.path.join(ROOT, "toolchain", "bin", "gcc" + EXE)
-BUNDLED_SDL = os.path.join(ROOT, "sdl2")
+TOOLS = os.environ.get("FLAUX_TOOLS") or ROOT
+BUNDLED_CC = os.path.join(TOOLS, "toolchain", "bin", "gcc" + EXE)
+BUNDLED_SDL = os.path.join(TOOLS, "sdl2")
 
 
 class CliError(Exception):
@@ -118,7 +120,8 @@ def compile_c(c_code, out_path):
             fh.write(c_code)
         extra = ["-Wl,--stack,16777216"] if WINDOWS else []  # 16 MB, like Linux, for deep recursion
         result = subprocess.run([cc, *CFLAGS, *cflags, c_path, "-o", out_path, *libs, "-lm", *extra],
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if result.returncode != 0:
         fd, keep = tempfile.mkstemp(prefix="flaux-bug-", suffix=".c")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -202,6 +205,11 @@ def cmd_studio(args):
 
 
 def main(argv=None):
+    # Flaux Studio's shortcut starts us without a console (pythonw.exe)
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
     parser = argparse.ArgumentParser(
         prog="flaux",
         description="Flaux: a programming language that reads like English and runs like C.")

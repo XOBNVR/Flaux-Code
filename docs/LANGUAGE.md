@@ -422,6 +422,25 @@ Key names: `"a"` to `"z"`, `"0"` to `"9"`, `"left"`, `"right"`, `"up"`,
 Use `key_down` for smooth movement, and `key_pressed` for things that
 should happen once per press, like jumping or firing.
 
+### Pictures
+
+```
+image("ship.png", x, y)                 # the picture at its own size
+image("ship.png", x, y, 64, 64)         # stretched to 64 by 64 pixels
+image("ship.png", x, y, -64, 64)        # flipped (a minus width or height flips it)
+image("ship.png", x, y, 64, 64, 45)     # turned 45 degrees around its middle
+say image_width("ship.png")             # its real size
+say image_height("ship.png")
+```
+
+`x, y` is the top-left corner. Pictures can be `.png`, `.jpg`, `.bmp` or
+`.gif`; PNG pictures can have see-through parts. Put picture files in the
+**same folder as your program**. Flaux looks there first, wherever the
+program is started from. If the name is misspelled, Flaux says so before the
+program runs, and suggests the right name if a similar file is there.
+Pictures are loaded once and then reused, so drawing them every frame is
+fast. Small pixel art stays sharp when made bigger.
+
 ### Sound
 
 ```

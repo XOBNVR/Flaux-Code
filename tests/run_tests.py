@@ -65,7 +65,7 @@ def build_and_run(path, stdin, tmp, env=None):
     exe = os.path.join(tmp, name[:-4] + EXE)
     compile_c(c_code, exe)
     r = subprocess.run([exe], input=stdin, capture_output=True, text=True, timeout=60,
-                       env={**os.environ, **(env or {})})
+                       encoding="utf-8", errors="replace", env={**os.environ, **(env or {})})
     return r.returncode, r.stdout, r.stderr
 
 
@@ -184,6 +184,9 @@ def main():
 
     for name, detail in failures:
         print(f"FAIL {name}\n{detail}\n")
+        if os.environ.get("GITHUB_ACTIONS"):  # show it on the GitHub page too
+            short = detail[:3000].replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+            print(f"::error title=FAIL {name}::{short}")
     print(f"{passed} passed, {len(failures)} failed")
     sys.exit(1 if failures else 0)
 

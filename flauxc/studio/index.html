@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flaux Studio</title>
+<link rel="icon" type="image/png" href="/picture?name=icon.png">
 <style>
 :root {
   --bg: #f4f5fb; --panel: #ffffff; --line: #dfe2ee; --text: #1d2033; --muted: #6a6f87;
@@ -50,8 +51,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--accent-2); 
 header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel);
          border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; margin-right: 10px; }
-.logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #fff;
-        background: linear-gradient(135deg, var(--accent), #ff6fb5); font-weight: 800; font-size: 18px; }
+.logo { width: 32px; height: 32px; border-radius: 8px; display: block; }
 #filename { color: var(--muted); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #filename b { color: var(--text); }
 .spacer { flex: 1; }
@@ -162,7 +162,7 @@ dialog::backdrop { background: rgba(20, 22, 40, .45); }
 </head>
 <body>
 <header>
-  <div class="brand"><span class="logo">F</span>Flaux Studio</div>
+  <div class="brand"><img class="logo" src="/picture?name=icon.png" alt="">Flaux Studio</div>
   <button id="btn-new" title="New program (Ctrl+N)">New</button>
   <button id="btn-open" title="Open a program (Ctrl+O)">Open</button>
   <button id="btn-save" title="Save (Ctrl+S)">Save</button>

@@ -1,3 +1,19 @@
-*.bat text eol=crlf
+# Flaux files always use plain Unix line endings, even on Windows
+*.flx text eol=lf
+*.out text eol=lf
+*.py text eol=lf
+*.h text eol=lf
+*.c text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+flaux text eol=lf
 *.sh text eol=lf
 *.command text eol=lf
+# Windows-only files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+# pictures and icons
+*.png binary
+*.ico binary

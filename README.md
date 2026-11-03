@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/flaux-icon.png" width="150" alt="The Flaux logo"></p>
+
 # Flaux
 
 **Flaux is a coding language that reads like English and runs super fast.
@@ -15,176 +17,142 @@ C++, one of the fastest languages there is.
 
 ## Contents
 
-1. [Get Flaux running](#get-flaux-running)
-2. [Run your program with a double-click](#run-your-program-with-a-double-click)
-3. [Learn Flaux in 11 lessons](#learn-flaux-in-11-lessons)
-4. [Your first game](#your-first-game)
-5. [Example games](#example-games)
-6. [Cheat sheet](#cheat-sheet)
-7. [When something goes wrong](#when-something-goes-wrong)
-8. [Already know another language?](#already-know-another-language)
-9. [How fast is it?](#how-fast-is-it)
-10. [For people who want to help build Flaux](#for-people-who-want-to-help-build-flaux)
+1. [Install Flaux on Windows](#install-flaux-on-windows)
+2. [Flaux Studio](#flaux-studio)
+3. [Run your program with a batch file](#run-your-program-with-a-batch-file)
+4. [Learn Flaux in 12 lessons](#learn-flaux-in-12-lessons)
+5. [Your first game](#your-first-game)
+6. [Example games](#example-games)
+7. [Cheat sheet](#cheat-sheet)
+8. [When something goes wrong](#when-something-goes-wrong)
+9. [Already know another language?](#already-know-another-language)
+10. [How fast is it?](#how-fast-is-it)
+11. [Mac and Linux](#mac-and-linux)
+12. [For people who want to help build Flaux](#for-people-who-want-to-help-build-flaux)
 
 ---
 
-## Get Flaux running
+## Install Flaux on Windows
 
-You need two free tools on your computer: **Python 3** and a **C compiler**
-(gcc or clang). Most Linux and Mac computers already have them. On Windows,
-use [WSL](https://learn.microsoft.com/windows/wsl/install).
+**1.** Download the installer:
 
-**Step 1.** Download Flaux:
+<p><a href="https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe"><b>&#11015; Download Flaux for Windows (FlauxSetup.exe)</b></a></p>
 
-```bash
-git clone https://github.com/XOBNVR/Flaux-Code.git
-cd Flaux-Code
-```
+**2.** Double-click `FlauxSetup.exe`.
 
-**Step 2.** Run your first program:
+> Windows might show a blue box saying **"Windows protected your PC"**.
+> That's because Flaux is new and isn't signed by a big company yet. Click
+> **More info**, then **Run anyway**.
 
-```bash
-./flaux examples/hello.flx
-```
+**3.** Click **Next** until it's done. Keep all three boxes ticked:
 
-**Step 3.** Make your own! Create a file called `me.flx`, type this in it,
-and save it:
+- **Put a Flaux Studio icon on my Desktop**
+- **Let me type "flaux" in Command Prompt and in batch files**
+- **Open .flx files in Flaux Studio when I double-click them**
 
-```
-say "My name is Sam"
-```
+**4.** Click **Finish**, and Flaux Studio opens. You're ready to code!
 
-Then run it:
-
-```bash
-./flaux me.flx
-```
-
-That's it. You're coding.
-
-**For graphics and games** (Lesson 11), also install the free SDL2 library,
-just once:
-
-```bash
-sudo apt install libsdl2-dev      # Linux and WSL
-brew install sdl2                 # Mac (with Homebrew)
-```
+Everything Flaux needs comes inside the installer (Python, a C compiler and
+the SDL2 graphics library), so there's nothing else to download. It doesn't
+need an administrator, and it works on Windows 10 and 11. To remove it, go
+to **Settings, Apps** and uninstall **Flaux**.
 
 ---
 
-## Run your program with a double-click
+## Flaux Studio
 
-Typing `./flaux mygame.flx` every time gets boring. Instead, you can make a
-tiny **launcher file** that types the command for you. Then you start your
-game by double-clicking it, just like any other program.
+Flaux Studio is where you write and run your programs. Open it from the
+**Flaux Studio** icon on your Desktop or in the Start menu.
 
-On Windows this is called a **batch file** (it ends in `.bat`). On a Mac
-it's a `.command` file, and on Linux a `.sh` file. Ready-made copies of all
-three are in [`examples/launchers/`](examples/launchers/).
+![Flaux Studio, showing a program with a mistake and the Apply fix button](docs/images/studio.png)
 
-### Windows: make a batch file
+- **Write** your program on the left. Colours show the different parts.
+- **Press the green Run button** (or **F5**). What your program says appears
+  on the right. If it asks a question, type your answer in the box at the
+  bottom and press **Enter**.
+- **Mistakes are underlined while you type.** The yellow box explains what's
+  wrong and how to fix it. Click **Apply fix** and Flaux fixes it for you.
+- **Learn** (on the right) has all the lessons, the example games, and
+  bits of code you can add to your program with one click.
+- **Open** shows your programs, the lessons and the games.
+  **Save** keeps your program in your **Documents\Flaux** folder.
+- **&#127769; Night** switches to dark colours. **A&minus;** and **A+**
+  change the text size.
 
-These steps assume you followed [Get Flaux running](#get-flaux-running) in
-WSL, so the `Flaux-Code` folder is in your Linux home folder.
+| Key | Does |
+|---|---|
+| **F5** | run your program |
+| **Ctrl+S** | save |
+| **Ctrl+O** | open |
+| **Ctrl+N** | new program |
+| **Ctrl+Z** | undo |
+| **Tab** / **Shift+Tab** | move lines right / left |
 
-**1.** Open **Notepad**.
+You can also double-click any `.flx` file to open it in Flaux Studio, or
+right-click it and choose **Run with Flaux**.
 
-**2.** Type these three lines:
+---
+
+## Run your program with a batch file
+
+A **batch file** is a tiny file that runs commands for you. Make one, and
+you can start your game with a double-click, like any other program.
+
+**1.** Save your program in Flaux Studio. Say you called it `mygame`, so
+it's `mygame.flx` in your **Documents\Flaux** folder.
+
+**2.** Open **Notepad** and type these four lines:
 
 ```bat
 @echo off
-wsl bash -lc "cd ~/Flaux-Code && ./flaux examples/games/star_catcher.flx"
+cd /d "%~dp0"
+flaux mygame.flx
 pause
 ```
 
-**3.** Click **File**, then **Save As**. Set **Save as type** to
-**All Files (\*.\*)**, type the name `play.bat`, and save it on your
-**Desktop**.
+**3.** Click **File**, then **Save As**. Go to your **Documents\Flaux**
+folder (the same folder as `mygame.flx`). Set **Save as type** to
+**All Files (\*.\*)**, type the name `play.bat`, and click **Save**.
 
-**4.** Double-click `play.bat` on your Desktop. Your game starts!
+**4.** Double-click `play.bat`. Your game starts!
 
-Here's what each part means:
+Here's what each line means:
 
-| Part | What it does |
+| Line | What it does |
 |---|---|
 | `@echo off` | hides the commands, so you only see what your program shows |
-| `wsl` | runs the rest in Linux (WSL), where Flaux lives |
-| `bash -lc "..."` | runs the commands inside the quotes |
-| `cd ~/Flaux-Code` | goes into the Flaux-Code folder |
-| `&&` | "and then, if that worked..." |
-| `./flaux examples/games/star_catcher.flx` | runs the program |
-| `pause` | waits for you to press a key before the black window closes, so you can read any messages |
+| `cd /d "%~dp0"` | goes to the folder this batch file is in, so Flaux can find `mygame.flx` next to it |
+| `flaux mygame.flx` | runs your program |
+| `pause` | waits for you to press a key before the window closes, so you can read what it said |
 
-**To run your own program,** change `examples/games/star_catcher.flx` to
-your file's name. For example, if you saved `me.flx` in the Flaux-Code
-folder:
-
-```bat
-@echo off
-wsl bash -lc "cd ~/Flaux-Code && ./flaux me.flx"
-pause
-```
+For a different program, change `mygame.flx` to its name. A ready-made copy
+is in [`examples/launchers/play.bat`](examples/launchers/play.bat).
 
 > **It opened in Notepad instead of running?** Windows saved it as
 > `play.bat.txt`. In File Explorer, click **View**, turn on **File name
 > extensions**, and rename the file to remove `.txt`.
 >
-> **Graphics need Windows 11** (it can show windows from WSL by itself).
-> Text programs work on Windows 10 too.
+> **It says `'flaux' is not recognized`?** Run `FlauxSetup.exe` again and
+> keep the box **Let me type "flaux"...** ticked. Then sign out of Windows
+> and back in.
 
-### Mac: make a `.command` file
+**Want to share your game?** Open **Command Prompt** in the folder (type
+`cmd` in File Explorer's address bar and press Enter) and type:
 
-**1.** Open **TextEdit**. Click **Format**, then **Make Plain Text**.
-
-**2.** Type:
-
-```bash
-#!/bin/bash
-cd ~/Flaux-Code
-./flaux examples/games/star_catcher.flx
+```bat
+flaux build mygame.flx
 ```
 
-**3.** Save it on your Desktop as `play.command`.
-
-**4.** Just once, open **Terminal** and type this, so your Mac knows the
-file is allowed to run:
-
-```bash
-chmod +x ~/Desktop/play.command
-```
-
-**5.** Double-click `play.command`. (The first time, your Mac may say it's
-from an unknown developer. Right-click it, choose **Open**, then **Open**
-again.)
-
-| Line | What it does |
-|---|---|
-| `#!/bin/bash` | says "these are Terminal commands" |
-| `cd ~/Flaux-Code` | goes into the Flaux-Code folder |
-| `./flaux examples/games/star_catcher.flx` | runs the program |
-
-### Linux: make a `.sh` file
-
-Make a file called `play.sh` with the same three lines as the Mac one,
-then make it runnable, just once:
-
-```bash
-chmod +x play.sh
-```
-
-Now run it with `./play.sh`, or double-click it in your file manager (if it
-asks, choose **Run**).
+That makes `mygame.exe`, which runs on any Windows computer, even without
+Flaux. If your game has graphics, share the `SDL2.dll` file next to it too.
 
 ---
 
-## Learn Flaux in 11 lessons
+## Learn Flaux in 12 lessons
 
-Every lesson is also a file in [`examples/lessons/`](examples/lessons/), so
-you can run it yourself and change it. For example:
-
-```bash
-./flaux examples/lessons/01_say.flx
-```
+Every lesson is in Flaux Studio's **Learn** tab (and in
+[`examples/lessons/`](examples/lessons/)), so you can open it, run it, and
+change it.
 
 ### Lesson 1: Say things
 
@@ -487,8 +455,7 @@ I choose scissors!
 
 ### Lesson 11: Graphics and games
 
-Flaux can open a window and draw in it. (You need SDL2 installed for this,
-see [Get Flaux running](#get-flaux-running).)
+Flaux can open a window and draw in it.
 
 **Draw a picture.** Places in the window are measured in pixels from the
 top-left corner. `x` goes to the right and `y` goes **down** (not up like
@@ -580,6 +547,47 @@ points are, which is great for checking if two things touch.
 `text_width("GAME OVER", 5)` tells you how wide some text is, to help
 centre it.
 
+### Lesson 12: Pictures
+
+Games look better with pictures (game makers call them **sprites**). Put a
+picture file, like `ship.png`, in the **same folder** as your program,
+then draw it with `image`:
+
+```
+window(800, 600, "Pictures")
+
+set x to 400
+
+repeat forever
+    if key_down("left")
+        subtract 6 from x
+    end
+    if key_down("right")
+        add 6 to x
+    end
+
+    clear("navy")
+    image("ship.png", x - 32, 480, 64, 64)
+    write("Arrow keys move the ship", 10, 10)
+    show()
+end
+```
+
+| Write | Draws |
+|---|---|
+| `image("ship.png", x, y)` | the picture at its own size, with its top-left corner at x, y |
+| `image("ship.png", x, y, 64, 64)` | the picture stretched to 64 by 64 pixels |
+| `image("ship.png", x, y, -64, 64)` | the same, but flipped (a minus width flips it) |
+| `image("ship.png", x, y, 64, 64, 90)` | the same, turned 90 degrees |
+| `image_width("ship.png")` | how wide the picture really is |
+
+Flaux can use `.png`, `.jpg`, `.bmp` and `.gif` pictures. PNG pictures can
+have see-through parts. You can draw your own in **Paint** (or a free
+pixel-art website), and save them as PNG.
+
+> **Tip:** small pixel-art pictures (like 16 by 16) look great made bigger,
+> because Flaux keeps the pixels sharp instead of blurry.
+
 ---
 
 ## Your first game
@@ -619,12 +627,16 @@ More programs to try are in [`examples/`](examples/).
 
 ![Star Catcher, a game made with Flaux](docs/images/star_catcher.png)
 
+Open them from the **Learn** tab in Flaux Studio, or run them from a
+command line:
+
 | Game | Run it with |
 |---|---|
 | **Star Catcher**: move the basket with the arrow keys and catch the falling stars | `./flaux examples/games/star_catcher.flx` |
 | **Bounce**: a bouncing ball with gravity and sound | `./flaux examples/games/bounce.flx` |
 | **Doodle**: draw with the mouse | `./flaux examples/games/doodle.flx` |
 | **Picture**: a drawing with no loop at all | `./flaux examples/games/picture.flx` |
+| **Space Dodge**: steer a spaceship past falling rocks (uses pictures) | `./flaux examples/games/space_dodge.flx` |
 
 Open them up, read them, and change things. Make the stars fall faster,
 change the colours, add a second basket. That's the best way to learn.
@@ -658,13 +670,15 @@ change the colours, add a second basket. That's the best way to learn.
 | draw text | `write("Hi", 10, 10, "white", 3)` |
 | make a game loop | `repeat forever` ... `show()` ... `end` |
 | check a key | `if key_down("left")` |
+| draw a picture | `image("ship.png", x, y, 64, 64)` |
 
 Built-in helpers: `ask`, `random`, `length`, `contains`, `text`, `number`,
 `whole`, `is_number`, `round`, `floor`, `ceil`, `abs`, `min`, `max`, `sqrt`,
 `uppercase`, `lowercase`, `sin`, `cos`, `tan`, `log`, `clock`, `distance`, `rgb`.
 Graphics: `window`, `clear`, `rect`, `circle`, `triangle`, `line`, `dot`,
 `write`, `show`, `key_down`, `key_pressed`, `mouse_x`, `mouse_y`,
-`mouse_down`, `mouse_clicked`, `beep`, `text_width`, `screenshot`.
+`mouse_down`, `mouse_clicked`, `beep`, `text_width`, `screenshot`, `image`,
+`image_width`, `image_height`.
 Every one is explained in the [full guide](docs/LANGUAGE.md).
 
 ---
@@ -752,6 +766,45 @@ Python work things out while the program is running, which is much slower.
 
 ---
 
+## Mac and Linux
+
+Flaux works on Mac and Linux too. You need **Python 3**, a **C compiler**
+(gcc or clang) and, for graphics, **SDL2**:
+
+```bash
+sudo apt install python3 gcc libsdl2-dev      # Ubuntu, Debian
+brew install sdl2                             # Mac (with Homebrew), after: xcode-select --install
+```
+
+Then download Flaux and open Flaux Studio:
+
+```bash
+git clone https://github.com/XOBNVR/Flaux-Code.git
+cd Flaux-Code
+./flaux studio
+```
+
+Or run a program straight from the terminal:
+
+```bash
+./flaux examples/hello.flx
+```
+
+To start a program with a double-click, make a launcher file. On a Mac,
+save this in TextEdit (**Format, Make Plain Text**) as `play.command`, run
+`chmod +x play.command` once in Terminal, then double-click it:
+
+```bash
+#!/bin/bash
+cd ~/Flaux-Code
+./flaux examples/games/star_catcher.flx
+```
+
+On Linux, do the same with a file called `play.sh`. Ready-made copies are
+in [`examples/launchers/`](examples/launchers/).
+
+---
+
 ## For people who want to help build Flaux
 
 Flaux is written in Python. It turns `.flx` files into C code, and a C
@@ -771,6 +824,9 @@ your .flx file → lexer → parser → type checker → C code → gcc/clang �
 | [`flauxc/font.py`](flauxc/font.py) | the 5x7 pixel font used to write text in windows |
 | [`flauxc/errors.py`](flauxc/errors.py) | turns problems into friendly, teaching messages |
 | [`flauxc/cli.py`](flauxc/cli.py) | the `flaux` command |
+| [`flauxc/studio/`](flauxc/studio/) | Flaux Studio: a tiny local web server and the editor page |
+| [`installer/`](installer/) | the Windows installer (Inno Setup), `flaux.exe`, and its build scripts |
+| [`assets/`](assets/) | the Flaux icon, and the script that makes every size of it |
 
 Useful commands:
 
@@ -780,7 +836,15 @@ Useful commands:
 ./flaux c game.flx              # see the C code Flaux makes
 python3 tests/run_tests.py      # run all the tests
 python3 benchmarks/run.py       # race Flaux against C++, C# and Python
+./flaux studio                  # open Flaux Studio
 ```
+
+Every change pushed to GitHub is tested on Linux and on Windows
+([`.github/workflows/build.yml`](.github/workflows/build.yml)). The Windows
+run also builds `FlauxSetup.exe`, installs it, and uses it the way a
+beginner would: Flaux Studio, the `flaux` command, a batch file exactly like
+the one above, a graphics game, and uninstalling. Pushing a tag like
+`v0.2.0` publishes the installer as a GitHub release.
 
 ### Coming next
 
@@ -789,5 +853,6 @@ python3 benchmarks/run.py       # race Flaux against C++, C# and Python
 - [ ] Removing items from lists, splitting and joining text
 - [ ] Grouping values together (like a player with a name and a score)
 - [x] Graphics and sound for making games
-- [ ] Pictures from files (sprites) for games
+- [x] Pictures from files (sprites) for games
+- [x] A Windows installer and a beginner code editor (Flaux Studio)
 - [ ] A drag-and-drop block editor that writes Flaux for you
