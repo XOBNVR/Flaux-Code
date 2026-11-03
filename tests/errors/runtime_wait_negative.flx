@@ -1,0 +1,4 @@
+# expect: line 4
+# expect: You can't wait for a negative amount of time.
+set delay to 1 - 3
+wait delay seconds

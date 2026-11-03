@@ -60,6 +60,10 @@ window.FlauxBlocks = (() => {
         tooltip: "Keep going while (or until) the check is true." },
       { type: "flx_forever", message0: "repeat forever %1 %2", args0: [dummy, s("DO")], ...stmt,
         colour: cat.Control, tooltip: "Keep going for ever. Games put their main loop in here." },
+      { type: "flx_wait", message0: "wait %1 %2", inputsInline: true, ...stmt, colour: cat.Control,
+        args0: [v("VALUE"), { type: "field_dropdown", name: "UNIT", options: [["seconds", "s"], ["minutes", "m"],
+          ["hours", "h"], ["days", "d"]] }],
+        tooltip: "Wait a while before doing the next block." },
       { type: "flx_stop", message0: "stop repeating", previousStatement: null, colour: cat.Control,
         tooltip: "Leave the repeat this block is in." },
       { type: "flx_skip", message0: "skip to the next time round", previousStatement: null, colour: cat.Control,
@@ -150,6 +154,7 @@ window.FlauxBlocks = (() => {
         block("flx_repeat_while"),
         block("flx_forever"),
         block("flx_repeat_range_by", { FROM: num(10), TO: num(1), BY: num(-1) }),
+        block("flx_wait", { VALUE: num(1) }),
         block("flx_stop"), block("flx_skip"),
       ]),
       category("Checks", [
@@ -341,6 +346,14 @@ window.FlauxBlocks = (() => {
           emit(`repeat ${b.getFieldValue("MODE") === "UNTIL" ? "until" : "while"} ${value(b, "COND")}`);
           body(b, "DO", indent + 1); emit("end"); break;
         case "flx_forever": emit("repeat forever"); body(b, "DO", indent + 1); emit("end"); break;
+        case "flx_wait": {
+          // a plain number gets its unit glued on (wait 2s); anything else gets the word (wait delay seconds)
+          const unit = b.getFieldValue("UNIT"), child = b.getInputTargetBlock("VALUE");
+          const n = child && child.type === "flx_number" ? child.getFieldValue("NUM").trim() : null;
+          if (n && /^\d[\d_]*(\.\d+)?$/.test(n)) emit(`wait ${n}${unit}`);
+          else emit(`wait ${value(b, "VALUE")} ${{ s: "seconds", m: "minutes", h: "hours", d: "days" }[unit]}`);
+          break;
+        }
         case "flx_stop": emit("stop"); break;
         case "flx_skip": emit("skip"); break;
         case "flx_return": emit(`return ${value(b, "VALUE")}`); break;

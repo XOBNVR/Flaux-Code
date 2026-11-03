@@ -13,6 +13,8 @@
  *   io.cancelled() -> bool        true after Stop was pressed
  *   io.loadPicture(name) -> Promise<image or null>
  *   io.beep(pitch, seconds)       io.now() (milliseconds)
+ *   io.sleep(ms) -> Promise       (optional) waits, but finishes early when
+ *                                 Stop is pressed; used by `wait`
  */
 (function (root) {
   "use strict";
@@ -65,6 +67,21 @@
     out += p.message + "\n";
     if (p.fix) out += "\nHow to fix it:\n  " + p.fix + "\n";
     return out;
+  }
+
+  // Give the browser (or Node) a turn, without setTimeout's 4 ms minimum.
+  let channel = null;
+  const wakeUps = [];
+  function nextTask() {
+    if (typeof setImmediate === "function") return new Promise((resolve) => setImmediate(resolve));
+    if (typeof MessageChannel === "function") {
+      if (!channel) {
+        channel = new MessageChannel();
+        channel.port1.onmessage = () => { const resolve = wakeUps.shift(); if (resolve) resolve(); };
+      }
+      return new Promise((resolve) => { wakeUps.push(resolve); channel.port2.postMessage(0); });
+    }
+    return new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   function squash(text) { return String(text).toLowerCase().replace(/[ _-]/g, ""); }
@@ -133,10 +150,38 @@
       if (a > b) fail(line, "Put the smaller number first, like random(0.0, 1.0).", "random(a, b) has the bigger number first.");
       return a + (b - a) * Math.random();
     };
+    // Loops call this every 1000 steps. About every 12 ms it gives the page a
+    // turn, so clicks (like Stop), drawing and the output panel keep working
+    // while a long loop runs.
+    let lastBreath = io.now();
     fx.breathe = async () => {
       fx.steps = 0;
       if (io.cancelled()) throw new FlauxCancelled();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (io.now() - lastBreath < 12) return;
+      await nextTask();
+      lastBreath = io.now();
+      if (io.cancelled()) throw new FlauxCancelled();
+    };
+
+    // `wait 2s`: amount times the unit's seconds. Stop works straight away,
+    // even in the middle of a long wait.
+    fx.wait = async (amount, unit, line) => {
+      if (Number.isNaN(amount))
+        fail(line, "Check the calculation before the unit. It must give a number, like `wait 1s`.",
+          "`wait` was given something that isn't a number.");
+      if (amount < 0)
+        fail(line, "Waiting goes forwards only, so the time must be 0 or more. You could check it first:\n\n" +
+          "      if delay > 0\n          wait delay seconds\n      end", "You can't wait for a negative amount of time.");
+      const end = io.now() + amount * unit * 1000;
+      for (;;) {
+        if (io.cancelled()) throw new FlauxCancelled();
+        const left = end - io.now();
+        if (left <= 0) break;
+        const ms = Math.min(left, io.sleep ? 60000 : 50);   // short naps if Stop can't wake us
+        await (io.sleep ? io.sleep(ms) : new Promise((resolve) => setTimeout(resolve, ms)));
+      }
+      fx.steps = 0;
+      lastBreath = io.now();
     };
 
     const numberText = /^\s*[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?\s*$/i;

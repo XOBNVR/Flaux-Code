@@ -12,6 +12,7 @@ covers everything in Flaux 0.1.
 - [Making choices: if](#making-choices-if)
 - [Checks and comparisons](#checks-and-comparisons)
 - [Loops: repeat](#loops-repeat)
+- [Waiting](#waiting)
 - [Lists](#lists)
 - [Functions](#functions)
 - [Built-in functions](#built-in-functions)
@@ -227,6 +228,39 @@ end
 Inside any `repeat`:
 - `stop` leaves the loop straight away.
 - `skip` jumps to the next time around.
+
+## Waiting
+
+`wait` pauses the program for a while. Glue a unit to the number: `s` for
+seconds, `m` for minutes, `h` for hours and `d` for days.
+
+```
+wait 1s      # one second
+wait 0.5s    # half a second
+wait 2m      # two minutes
+wait 1h      # an hour
+wait 1d      # a day
+```
+
+For a variable or a sum, write the unit as a word after it: `seconds`,
+`minutes`, `hours` or `days` (`second`, `minute`, `hour` and `day` work too):
+
+```
+set delay to 3
+wait delay seconds
+wait delay * 2 minutes
+wait 1 hour
+```
+
+`wait 5` on its own is a mistake, because Flaux can't tell if you mean 5
+seconds or 5 minutes. The time can be a decimal, and it can't be negative.
+
+Everything the program said before a `wait` is shown straight away. In a
+game, the window keeps working while the program waits, and closing it still
+ends the program. `wait` doesn't put the picture on screen: call `show()`
+first if you want to see what you drew. (For a game loop, use `show()`, which
+already waits for the next frame.) In Flaux Studio, the Stop button stops a
+wait straight away.
 
 ## Lists
 
@@ -548,7 +582,7 @@ compares with C++, C# and Python.
 These words have special meanings, so they can't be used as names:
 
 `add` `and` `else` `end` `false` `function` `if` `is` `mod` `not` `or`
-`repeat` `return` `say` `set` `skip` `stop` `subtract` `true`
+`repeat` `return` `say` `set` `skip` `stop` `subtract` `true` `wait`
 
 Built-in function names (like `window`, `circle` or `random`) can be used
 for variables, but not for your own functions.

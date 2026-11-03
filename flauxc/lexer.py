@@ -6,6 +6,8 @@ Token kinds:
                    ("text", "plain text") or ("expr", [tokens], line, col)
                  so "Hi {name}!" becomes text, an expression, then text.
     name         words: variable names, function names and keywords
+    unit         a time unit glued to a number, for `wait`: `2s` is the
+                 number 2 then the unit "s" (s, m, h or d)
     op           symbols like + - * / ( ) [ ] , = < > <= >= != //
     newline      end of a line (newlines inside ( ) or [ ] are ignored)
     eof          end of the file
@@ -35,6 +37,12 @@ class Token:
 
 TWO_CHAR_OPS = {"<=", ">=", "!=", "==", "//"}
 ONE_CHAR_OPS = set("+-*/^%()[],=<>")
+# Time units that can be glued to a number, for `wait 2s` (see parser.stmt_wait).
+TIME_UNITS = ("s", "m", "h", "d")
+# Other ways people write times, glued to a number: what Flaux writes instead.
+TIME_WORDS = {"sec": "s", "secs": "s", "second": "s", "seconds": "s", "min": "m", "mins": "m",
+              "minute": "m", "minutes": "m", "hr": "h", "hrs": "h", "hour": "h", "hours": "h",
+              "day": "d", "days": "d"}
 ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\", "{": "{", "}": "}"}
 
 # Words from other languages that start a block ending in `:`.
@@ -284,10 +292,29 @@ class Lexer:
                 self.advance()
             word = self.src[start:self.i]
             digits = self.src[start:digits_end]
+            suffix = word[len(digits):]
+            if suffix in TIME_UNITS:  # wait 2s: a number, then its unit
+                self.add_number(digits, is_float, line, col)
+                self.add("unit", suffix, line, col + len(digits), len(suffix))
+                return
+            if suffix.lower() in ("ms", "msec", "millisecond", "milliseconds"):
+                seconds = float(digits.replace("_", "")) / 1000
+                self.error("Flaux measures time in seconds, minutes, hours and days, not milliseconds.",
+                           line, col, self.i - start,
+                           hint="There are 1000 milliseconds in a second. Change the line to:",
+                           fix=f"{seconds:g}s")
+            if suffix.lower() in TIME_WORDS:
+                self.error(f"Flaux writes this time as `{digits}{TIME_WORDS[suffix.lower()]}`.",
+                           line, col, self.i - start,
+                           hint="Glue s (seconds), m (minutes), h (hours) or d (days) to the number, or write "
+                                "the whole word after a space, like `wait 2 seconds`. Change the line to:",
+                           fix=digits + TIME_WORDS[suffix.lower()])
             self.error("Names can't start with a number.", line, col, self.i - start,
                        hint="Put the number at the end of the name instead. Change the line to:",
                        fix=word[len(digits):] + digits)
-        text = self.src[start:self.i]
+        self.add_number(self.src[start:self.i], is_float, line, col)
+
+    def add_number(self, text, is_float, line, col):
         clean = text.replace("_", "")
         if is_float:
             self.add("float", float(clean), line, col, len(text))

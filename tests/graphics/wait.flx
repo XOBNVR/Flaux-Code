@@ -1,0 +1,15 @@
+# frames: 3
+# pixel: 100 100 #ffe135
+# pixel: 10 10 #e8303a
+# A game can wait, and its window keeps going afterwards.
+window(200, 200)
+clear("navy")
+show()
+wait 0.05s
+set pause to 0.01
+repeat 2 times
+    clear("red")
+    circle(100, 100, 40, "yellow")
+    wait pause seconds
+    show()
+end

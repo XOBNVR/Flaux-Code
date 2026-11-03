@@ -1,0 +1,4 @@
+# expect: is that seconds, minutes, hours or days?
+# expect: wait pause seconds
+set pause to 2
+wait pause

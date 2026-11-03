@@ -1,0 +1,4 @@
+# expect: `wait` needs a number of seconds, but this is text.
+# expect: wait number(answer) seconds
+set answer to "2"
+wait answer seconds
