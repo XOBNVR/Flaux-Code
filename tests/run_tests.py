@@ -11,8 +11,12 @@ tests/graphics/NAME.flx   graphics programs, run without a real screen. Header
                           lines: `# frames: N` (stop after N frames), `# hold: keys`
                           (pretend these keys are held), `# mouse: x,y` (pretend
                           the mouse is there in the real window), `# mouse_move: dx,dy`
-                          (pretend the mouse moves that far every frame), `# pixel: x y #rrggbb`
-                          (that pixel of the last frame must be this colour), or
+                          (pretend the mouse moves that far every frame), `# screen: WxH`
+                          (pretend the screen is that big, for fullscreen), `# pixel: x y #rrggbb`
+                          (that pixel of the last frame must be this colour), `# canvas: WxH`
+                          and `# full_pixel: x y #rrggbb` (the canvas's real size, and a pixel
+                          of it: fullscreen draws at the screen's resolution), `# again_with:
+                          NAME=value` (run it again with that set, same checks), or
                           `# expect: ...` for programs that must fail. If NAME.out
                           exists, what the program says must match it.
                           Skipped if SDL2 isn't installed.
@@ -55,6 +59,36 @@ def bmp_pixel(path, x, y):
     row = height - 1 - y if height > 0 else y
     i = offset + row * row_size + x * (bpp // 8)
     return f"#{data[i + 2]:02x}{data[i + 1]:02x}{data[i]:02x}"
+
+
+def bmp_size(path):
+    """The width and height of a .bmp picture."""
+    data = open(path, "rb").read()
+    return int.from_bytes(data[18:22], "little", signed=True), abs(int.from_bytes(data[22:26], "little", signed=True))
+
+
+def graphics_checks(path, header, code, out, err, shot, full_shot):
+    """What's wrong with a graphics test's run (see the top of this file)."""
+    problems = [] if code == 0 else [f"exit {code}: {err}"]
+    if os.path.exists(path[:-4] + ".out"):
+        expected = open(path[:-4] + ".out", encoding="utf-8").read()
+        if out != expected:
+            problems.append(f"--- expected\n{expected}--- got\n{out}")
+    for spec in header.get("pixel", []):
+        x, y, want = spec.split()
+        got = bmp_pixel(shot, int(x), int(y)) if code == 0 else "?"
+        if got != want.lower():
+            problems.append(f"pixel {x},{y} is {got}, expected {want}")
+    for spec in header.get("canvas", []):
+        got = "x".join(map(str, bmp_size(full_shot))) if code == 0 else "?"
+        if got != spec:
+            problems.append(f"the canvas is {got}, expected {spec}")
+    for spec in header.get("full_pixel", []):
+        x, y, want = spec.split()
+        got = bmp_pixel(full_shot, int(x), int(y)) if code == 0 else "?"
+        if got != want.lower():
+            problems.append(f"canvas pixel {x},{y} is {got}, expected {want}")
+    return problems
 
 
 def build_and_run(path, stdin, tmp, env=None):
@@ -152,27 +186,25 @@ def main():
                     key, _, value = l[2:].partition(":")
                     header.setdefault(key.strip(), []).append(value.strip())
             shot = os.path.join(tmp, os.path.basename(path)[:-4] + ".bmp")
+            full_shot = os.path.join(tmp, os.path.basename(path)[:-4] + "-full.bmp")
             env = {"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "FLAUX_FAST": "1",
                    "FLAUX_FRAMES": header.get("frames", ["1"])[0], "FLAUX_SCREENSHOT": shot,
                    "FLAUX_HOLD_KEYS": ",".join(header.get("hold", [])),
                    "FLAUX_MOUSE": header.get("mouse", [""])[0],
-                   "FLAUX_MOUSE_MOVE": header.get("mouse_move", [""])[0]}
+                   "FLAUX_MOUSE_MOVE": header.get("mouse_move", [""])[0],
+                   "FLAUX_SCREEN": header.get("screen", [""])[0], "FLAUX_SCREENSHOT_FULL": full_shot}
             code, out, err = build_and_run(path, "", tmp, env)
             if "expect" in header:
                 missing = [e for e in header["expect"] if e not in err]
                 ok = code != 0 and not missing
                 detail = f"exit {code}, missing {missing}\n{err}"
             else:
-                problems = [] if code == 0 else [f"exit {code}: {err}"]
-                if os.path.exists(path[:-4] + ".out"):
-                    expected = open(path[:-4] + ".out", encoding="utf-8").read()
-                    if out != expected:
-                        problems.append(f"--- expected\n{expected}--- got\n{out}")
-                for spec in header.get("pixel", []):
-                    x, y, want = spec.split()
-                    got = bmp_pixel(shot, int(x), int(y)) if code == 0 else "?"
-                    if got != want.lower():
-                        problems.append(f"pixel {x},{y} is {got}, expected {want}")
+                problems = graphics_checks(path, header, code, out, err, shot, full_shot)
+                # `# again_with: NAME=value`: the same checks again with that set (another way of drawing)
+                for extra in header.get("again_with", []):
+                    key, _, value = extra.partition("=")
+                    code, out, err = build_and_run(path, "", tmp, {**env, key.strip(): value.strip()})
+                    problems += [f"({extra}) {p}" for p in graphics_checks(path, header, code, out, err, shot, full_shot)]
                 ok, detail = not problems, "\n".join(problems)
             if ok:
                 passed += 1

@@ -409,6 +409,16 @@ the screen is a different shape), and **your program doesn't change**: the
 window is still 800 by 600 to it, and `mouse_x()` and `mouse_y()` still give
 places in those pixels.
 
+In fullscreen (and on sharp screens) games are drawn at the screen's full
+resolution: your program still uses its `window(...)` coordinates, but every
+pixel of the screen gets drawn, so the game looks sharper.
+
+- Triangles, circles and lines get smooth, sharp edges instead of big blocky
+  steps, so a 3D game made of triangles looks much better.
+- Rectangles, dots, text and pictures stay on whole pixels of your window, so
+  letters and pixel art keep their blocky look.
+- `screenshot(...)` still saves a picture the size of your window.
+
 - **Windows app** (and `flaux run`): press **F11** (or **Alt+Enter**) to switch
   fullscreen on and off. These keys are kept for that, so `key_down("f11")`
   is never true, and neither is `"enter"` while Alt is held.
