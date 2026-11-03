@@ -14,14 +14,14 @@ first. Flaux programs read almost like a sentence, but they run as fast as
 C++, one of the fastest languages there is. Type your program in words, or
 build it by snapping blocks together.
 
-**[&#9654; Try Flaux in your browser](https://xobnvr.github.io/Flaux-Code/)** (nothing to install), or
-**[&#11015; download it for Windows](https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe)**.
+**[&#11015; Download Flaux for Windows](https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe)**, or
+[put Flaux Studio on your own website](#flaux-studio-on-your-website).
 
 ---
 
 ## Contents
 
-1. [Install Flaux on Windows](#install-flaux-on-windows) (or [use it in your browser](#flaux-in-your-browser))
+1. [Install Flaux on Windows](#install-flaux-on-windows) (or [put it on your website](#flaux-studio-on-your-website))
 2. [Flaux Studio](#flaux-studio)
 3. [Run your program with a batch file](#run-your-program-with-a-batch-file)
 4. [Learn Flaux in 12 lessons](#learn-flaux-in-12-lessons)
@@ -64,12 +64,20 @@ the SDL2 graphics library), so there's nothing else to download. It doesn't
 need an administrator, and it works on Windows 10 and 11. To remove it, go
 to **Settings, Apps** and uninstall **Flaux**.
 
-### Flaux in your browser
+### Flaux Studio on your website
 
-Don't want to install anything, or not on Windows? Open
-**[Flaux Studio in your browser](https://xobnvr.github.io/Flaux-Code/)**. It's the same
-Flaux Studio, with the same lessons, games, block editor and friendly error
-messages. The first visit downloads about 10 MB; after that it opens quickly.
+Flaux Studio also comes as a website, so people can code in their browser
+with nothing to install. It's the same Flaux Studio, with the same lessons,
+games, block editor and friendly error messages.
+
+1. Download **[FlauxStudio-web.zip](https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxStudio-web.zip)**.
+2. Unzip it, and upload **everything inside** to your website (any web host
+   works, and it can go in a folder like `yoursite.com/flaux/`).
+3. Open your website's address. That's it.
+
+The zip has a `CLAUDE.md` file that explains every file, how to host it and
+how to update it. Visitors download about 10 MB the first time; after that
+it opens quickly.
 
 A few things are different in the browser:
 
@@ -908,4 +916,4 @@ release, which is what the download button gives you.
 - [x] Pictures from files (sprites) for games
 - [x] A Windows installer and a beginner code editor (Flaux Studio)
 - [x] A drag-and-drop block editor that writes Flaux for you
-- [x] Flaux Studio in your web browser
+- [x] Flaux Studio as a website, for your own web host

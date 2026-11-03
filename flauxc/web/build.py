@@ -1,5 +1,6 @@
 """Builds Flaux Studio for the web: a folder of plain files any web host can
-serve (the GitHub build puts it on GitHub Pages).
+serve. The GitHub build zips it as FlauxStudio-web.zip and attaches it
+to each release.
 
     python3 -m flauxc.web.build OUTPUT_FOLDER --pyodide PYODIDE_FOLDER
 
@@ -86,6 +87,10 @@ def build(out, pyodide):
             if os.path.exists(src):
                 shutil.copyfile(src, os.path.join(out, "pyodide", name))
     open(os.path.join(out, ".nojekyll"), "w").close()   # serve every file as it is (GitHub Pages)
+    with open(os.path.join(out, ".htaccess"), "w") as fh:   # file types, for Apache servers
+        fh.write("AddType application/wasm .wasm\nAddType text/javascript .mjs .js\n"
+                 "AddType application/json .json\n")
+    shutil.copyfile(os.path.join(HERE, "site-CLAUDE.md"), os.path.join(out, "CLAUDE.md"))
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(out) for f in fs) / 1e6
     print(f"Flaux Studio for the web is in {out} ({size:.1f} MB)")
 

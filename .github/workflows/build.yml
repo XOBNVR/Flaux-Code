@@ -95,30 +95,16 @@ jobs:
           python3 -m http.server --directory site 8790 --bind 127.0.0.1 &
           sleep 1
           node tests/web_studio_test.js http://127.0.0.1:8790/
-      - uses: actions/upload-pages-artifact@v3
+      - name: Zip the website (to upload to any website)
+        run: cd site && zip -r -9 -q ../FlauxStudio-web.zip . && ls -l ../FlauxStudio-web.zip
+      - uses: actions/upload-artifact@v4
         with:
-          path: site
-
-  # Puts Flaux Studio on the web at https://xobnvr.github.io/Flaux-Code/
-  # (needs GitHub Pages switched on: Settings, Pages, Source: GitHub Actions)
-  deploy-web:
-    name: Put Flaux Studio on the web
-    needs: web
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v4
+          name: FlauxStudio-web
+          path: FlauxStudio-web.zip
 
   # Every change to main that passes everything above, on Linux AND Windows,
-  # becomes the README's download: release v<version>, with FlauxSetup.exe.
+  # becomes the README's download: release v<version>, with FlauxSetup.exe
+  # and FlauxStudio-web.zip (Flaux Studio for your own website).
   release:
     name: Publish the installer
     needs: [linux, windows, web]
@@ -132,6 +118,10 @@ jobs:
         with:
           name: FlauxSetup
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: FlauxStudio-web
+          path: dist
       - name: Publish FlauxSetup.exe as a release
         uses: softprops/action-gh-release@v2
         with:
@@ -139,7 +129,9 @@ jobs:
           name: Flaux ${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           make_latest: true
-          files: dist/FlauxSetup.exe
+          files: |
+            dist/FlauxSetup.exe
+            dist/FlauxStudio-web.zip
           body: |
             ## Install Flaux on Windows
 
@@ -151,4 +143,8 @@ jobs:
 
             See the [README](https://github.com/XOBNVR/Flaux-Code#readme) for the lessons.
 
-            _Built and tested automatically: every test passed on Windows and Linux (including the block editor), and this exact installer was installed and tried out before being published._
+            ## Flaux Studio for your website
+
+            **FlauxStudio-web.zip** is Flaux Studio as a website: unzip it and upload everything inside to any web host. Its CLAUDE.md explains each file and how to host it.
+
+            _Built and tested automatically: every test passed on Windows and Linux (including the block editor), this exact installer was installed and tried out, and the website was tested in a real browser before being published._
