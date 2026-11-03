@@ -1,0 +1,4 @@
+# expect: This `[` is never closed with `]`.
+# expect: set nums to [1, 2, 3]
+set nums to [1, 2, 3
+say nums

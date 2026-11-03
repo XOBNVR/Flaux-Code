@@ -44,8 +44,22 @@ say 42
 say 2 + 2
 ```
 
-`say` shows one thing per line. To show several things, join them with `+`
-or put them inside text with `{ }` (see [Text](#text)).
+Brackets are fine too, if you're used to `print(...)` from other languages:
+
+```
+say("Hello, world!")
+```
+
+Give `say` several things, separated by commas, and it shows them on one
+line with a space between each:
+
+```
+say "Score:", 10              # Score: 10
+say("Lives:", 3, "Level:", 2) # Lives: 3 Level: 2
+say()                         # an empty line
+```
+
+You can also put values inside text with `{ }` (see [Text](#text)).
 
 ## Variables
 

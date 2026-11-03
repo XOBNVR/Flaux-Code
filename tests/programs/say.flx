@@ -1,0 +1,17 @@
+# Every way to use `say`
+say "hi"
+say("hi")
+say("Score:", 10)
+say "Lives:", 3, "Alive:", true
+say()
+say("")
+set name to "Sam"
+say(name)
+say("Hi {name}!")
+say("Total:", 2 + 3)
+say (1 + 2) * 3
+say(1.5, [1, 2], "end")
+say(
+    "brackets can",
+    "go over lines"
+)

@@ -1,0 +1,3 @@
+# expect: The things to say are separated by commas.
+# expect: say("Score:", 10)
+say("Score:" 10)

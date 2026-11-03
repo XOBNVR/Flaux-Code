@@ -1,4 +1,0 @@
-# expect: `say` shows one thing at a time.
-# expect: How to fix it:
-# expect: say "Score:" + " " + 10
-say "Score:", 10

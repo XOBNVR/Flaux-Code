@@ -51,7 +51,7 @@ OTHER_LANGUAGE_WORDS = {
 
 EXAMPLES = {
     "set": "set score to 0\nset name to \"Sam\"\nset nums to [1, 2, 3]",
-    "say": "say \"Hello!\"\nsay score\nsay \"Score: {score}\"",
+    "say": "say \"Hello!\"\nsay(\"Hello!\")\nsay \"Score:\", score\nsay \"Score: {score}\"",
     "add": "add 1 to score\nadd \"Sam\" to names",
     "subtract": "subtract 1 from lives",
     "if": "if score > 10\n    say \"You win!\"\nelse\n    say \"Keep going\"\nend",
@@ -133,13 +133,29 @@ class Parser:
                              example=example)
         return self.next()
 
+    def ran_off_line(self):
+        """True if the next token is the end, or is on a later line than the
+        last one. Inside unclosed brackets the lexer joins lines together, so
+        this is how we notice a bracket that was never closed."""
+        tok = self.peek()
+        prev = self.toks[max(self.i - 1, 0)]
+        return tok.kind in ("newline", "eof") or tok.line != prev.line
+
+    def unclosed(self, opener, close):
+        """Error for a bracket that is never closed, with the fix: close it
+        straight after the last thing typed."""
+        prev = self.toks[max(self.i - 1, 0)]
+        text = self.line_text(prev.line)
+        end = prev.col - 1 + prev.length
+        return self.error(opener, f"This `{opener.value}` is never closed with `{close}`.",
+                          hint=f"Every `{opener.value}` needs a matching `{close}`. Add it:",
+                          fix_lines=[(prev.line, text[:end] + close + text[end:])])
+
     def expect_close(self, op, opener, why):
         if not self.at_op(op):
             tok = self.peek()
-            if tok.kind in ("newline", "eof"):
-                raise self.error(opener, f"This `{opener.value}` is never closed with `{op}`.",
-                                 hint=f"Every `{opener.value}` needs a matching `{op}`. Add it:",
-                                 fix_line=self.insert_fix(tok, op).replace(" " + op, op))
+            if self.ran_off_line():
+                raise self.unclosed(opener, op)
             raise self.error(tok, f"{why} I expected `{op}` here, but found {describe_token(tok)}.",
                              hint="Check for a missing comma or bracket.")
         return self.next()
@@ -247,9 +263,8 @@ class Parser:
             open_tok = self.next()
             seen = set()
             while not self.at_op(")"):
-                if self.at_line_end():
-                    raise self.error(open_tok, "This `(` is never closed with `)`.",
-                                     fix_line=self.line_text(open_tok.line).rstrip() + ")")
+                if self.ran_off_line() and self.toks[self.i - 1] is not open_tok:
+                    raise self.unclosed(open_tok, ")")
                 p = self.name_token("Inputs to a function are names.",
                                     example="function area(width, height)\n    return width * height\nend")
                 if p.value in seen:
@@ -259,6 +274,8 @@ class Parser:
                 params.append(N.Name(p.value, **self.pos(p)))
                 if self.at_op(","):
                     self.next()
+                elif not self.at_op(")") and self.ran_off_line():
+                    raise self.unclosed(open_tok, ")")
                 elif self.peek().kind == "name":
                     raise self.error(self.peek(), "Inputs to a function are separated by commas.",
                                      hint="Add a comma:",
@@ -433,21 +450,46 @@ class Parser:
         if self.at_line_end():
             raise self.error(start, "`say` needs something to say.",
                              hint="Put text in quotes, or a variable, after `say`:", example=EXAMPLES["say"])
-        value = self.parse_expression()
-        if self.at_op(","):
-            items = [value]
+        if self.at_op("(") and self.brackets_fill_line():
+            # say("hi") or say("Score:", 10), like print(...) in other languages
+            open_tok = self.next()
+            values = []
+            while not self.at_op(")"):
+                if self.peek().kind == "eof":
+                    raise self.unclosed(open_tok, ")")
+                values.append(self.parse_expression())
+                if self.at_op(","):
+                    self.next()
+                elif not self.at_op(")"):
+                    tok = self.peek()
+                    raise self.error(tok, "The things to say are separated by commas.",
+                                     hint="Add a comma:",
+                                     fix_line=self.insert_fix(tok, ",").replace(" , ", ", "))
+            self.next()
+        else:
+            values = [self.parse_expression()]
             while self.at_op(","):
                 self.next()
-                items.append(self.parse_expression())
-            joined = ' + " " + '.join(self.text(item) for item in items)
-            raise self.error(start, "`say` shows one thing at a time.",
-                             hint="Join the pieces together with + (text and numbers can be mixed). "
-                                  "Change the line to:",
-                             fix_line=self.indent_of(start.line) + "say " + joined,
-                             example='say "Score: {score}, lives: {lives}"')
+                values.append(self.parse_expression())
         pos = self.span(start)
         self.end_of_line()
-        return N.Say(value, **pos)
+        return N.Say(values, **pos)
+
+    def brackets_fill_line(self):
+        """True if the `(` here closes right at the end of the line, as in
+        say("hi"). False for things like say (1 + 2) * 3."""
+        depth = 0
+        for j in range(self.i, len(self.toks)):
+            tok = self.toks[j]
+            if tok.kind in ("newline", "eof"):
+                return False
+            if tok.kind == "op" and tok.value in ("(", "["):
+                depth += 1
+            elif tok.kind == "op" and tok.value in (")", "]"):
+                depth -= 1
+                if depth == 0:
+                    return self.toks[j + 1].kind in ("newline", "eof")
+        return False
 
     def condition(self, keyword):
         if self.at_line_end():
@@ -754,16 +796,14 @@ class Parser:
                 open_tok = self.next()
                 args = []
                 while not self.at_op(")"):
-                    if self.at_line_end():
-                        raise self.error(open_tok, "This `(` is never closed with `)`.",
-                                         hint="Every `(` needs a matching `)`. Add it:",
-                                         fix_line=self.line_text(open_tok.line).rstrip() + ")")
+                    if self.peek().kind in ("newline", "eof"):
+                        raise self.unclosed(open_tok, ")")
                     args.append(self.parse_expression())
                     if not self.at_op(")"):
                         if not self.at_op(","):
                             tok = self.peek()
-                            if tok.kind in ("newline", "eof"):
-                                continue
+                            if self.ran_off_line():
+                                raise self.unclosed(open_tok, ")")
                             raise self.error(tok, "Inputs to a function are separated by commas.",
                                              hint="Add a comma:",
                                              fix_line=self.insert_fix(tok, ",").replace(" , ", ", "))
@@ -816,16 +856,14 @@ class Parser:
             self.next()
             items = []
             while not self.at_op("]"):
-                if self.at_line_end():
-                    raise self.error(tok, "This `[` is never closed with `]`.",
-                                     hint="A list starts with [ and ends with ]. Add the ]:",
-                                     fix_line=self.line_text(tok.line).rstrip() + "]")
+                if self.peek().kind in ("newline", "eof"):
+                    raise self.unclosed(tok, "]")
                 items.append(self.parse_expression())
                 if not self.at_op("]"):
                     if not self.at_op(","):
                         nxt = self.peek()
-                        if nxt.kind in ("newline", "eof"):
-                            continue
+                        if self.ran_off_line():
+                            raise self.unclosed(tok, "]")
                         raise self.error(nxt, "Items in a list are separated by commas.",
                                          hint="Add a comma:",
                                          fix_line=self.insert_fix(nxt, ",").replace(" , ", ", "))

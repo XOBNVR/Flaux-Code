@@ -83,7 +83,7 @@ class Subtract(Node):
 
 
 class Say(Node):
-    fields = ("value",)
+    fields = ("values",)  # say a, b  or  say(a, b): shown with spaces between
 
 
 class If(Node):

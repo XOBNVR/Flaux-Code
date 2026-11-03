@@ -1,0 +1,4 @@
+# expect: This `(` is never closed with `)`.
+# expect: say("hi")
+say("hi"
+say "next"

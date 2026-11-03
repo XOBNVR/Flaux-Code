@@ -1,0 +1,5 @@
+# expect: This `(` is never closed with `)`.
+# expect: function f(a, b)
+function f(a, b
+  say a
+end

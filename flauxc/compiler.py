@@ -612,14 +612,29 @@ class Compiler:
         getattr(self, "s_" + type(s).__name__)(s)
 
     def s_Say(self, s):
-        c, t = self.expr(s.value)
-        self.no_void(s.value, t, "say")
-        if t == UNK:
+        results = []
+        for value in s.values:
+            c, t = self.expr(value)
+            self.no_void(value, t, "say")
+            results.append((c, t))
+        if any(t == UNK for _, t in results):
             return
-        if is_list(t):
-            self.emit(f"fx_say_text({self.to_text(c, t)});")
-        else:
-            self.emit(f"{SAY_FUNCS[t]}({c});")
+        if not results:  # say() shows an empty line
+            self.emit('fx_say_text(FX_LIT(""));')
+            return
+        if len(results) == 1:
+            c, t = results[0]
+            if is_list(t):
+                self.emit(f"fx_say_text({self.to_text(c, t)});")
+            else:
+                self.emit(f"{SAY_FUNCS[t]}({c});")
+            return
+        parts = []
+        for i, (c, t) in enumerate(results):  # several things: put a space between them
+            if i:
+                parts.append('FX_LIT(" ")')
+            parts.append(self.to_text(c, t))
+        self.emit(f"fx_say_text(fx_join((fx_text[]){{{', '.join(parts)}}}, {len(parts)}));")
 
     def s_Set(self, s):
         target = s.target
