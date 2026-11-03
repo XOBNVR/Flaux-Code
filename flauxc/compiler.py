@@ -312,6 +312,14 @@ class Compiler:
     # ================================================================ driver
 
     def compile(self):
+        """The whole program as C code."""
+        main_code, func_codes = self.check()
+        return self.assemble_c(main_code, func_codes)
+
+    def check(self):
+        """Work out every type and find every problem (raises FlauxError).
+        Afterwards the compiler knows the type of everything, which the
+        JavaScript backend (jsgen.py) uses too."""
         for _ in range(1000):
             self.changed = False
             self.walk(self.main)
@@ -332,6 +340,9 @@ class Compiler:
         while i < len(self.used):  # walking a function can discover more functions
             func_codes.append(self.walk(self.used[i]))
             i += 1
+        return main_code, func_codes
+
+    def assemble_c(self, main_code, func_codes):
         prototypes = [self.signature(s) + ";" for s in self.used]
         list_defs = [self.list_def(t) for t in self.list_order]
 

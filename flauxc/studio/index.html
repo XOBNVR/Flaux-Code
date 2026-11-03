@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flaux Studio</title>
-<link rel="icon" type="image/png" href="/picture?name=icon.png">
+<link rel="icon" type="image/png" href="icon.png">
 <style>
 :root {
   --bg: #f4f5fb; --panel: #ffffff; --line: #dfe2ee; --text: #1d2033; --muted: #6a6f87;
@@ -128,7 +128,7 @@ main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr
                color: var(--muted); }
 .tabs button.active { background: var(--bg); color: var(--text); }
 .panel { min-height: 0; overflow: auto; }
-#output-panel { display: grid; grid-template-rows: 1fr auto; min-height: 0; }
+#output-panel { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; }
 #console { margin: 0; padding: 14px; overflow: auto; font-family: var(--mono); font-size: 15px; line-height: 1.5;
            white-space: pre-wrap; word-break: break-word; background: var(--console-bg); color: var(--text); }
 #console .err { color: var(--console-err); }
@@ -169,11 +169,23 @@ dialog::backdrop { background: rgba(20, 22, 40, .45); }
              border-radius: 8px; }
 .hint { color: var(--muted); font-size: 13.5px; margin-top: 8px; }
 [hidden] { display: none !important; }
+/* the web version: things only it has, and a game panel */
+.web-only { display: none !important; }
+html.web .web-only { display: inline-flex !important; }
+html.web .native-only { display: none !important; }
+#game { border-bottom: 1px solid var(--line); padding: 10px; background: var(--console-bg); display: flex;
+        flex-direction: column; align-items: center; gap: 6px; }
+#game-title { font-size: 13px; color: var(--muted); }
+#game-canvas { max-width: 100%; max-height: 52vh; image-rendering: pixelated; background: #000; border-radius: 6px;
+               outline: none; box-shadow: 0 2px 10px var(--shadow); }
+#game-canvas:focus { box-shadow: 0 0 0 3px var(--accent-2); }
+a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+            padding: 7px 12px; white-space: nowrap; align-items: center; }
 </style>
 </head>
 <body>
 <header>
-  <div class="brand"><img class="logo" src="/picture?name=icon.png" alt="">Flaux Studio</div>
+  <div class="brand"><img class="logo" src="icon.png" alt="">Flaux Studio</div>
   <button id="btn-new" title="New program (Ctrl+N)">New</button>
   <button id="btn-open" title="Open a program (Ctrl+O)">Open</button>
   <button id="btn-save" title="Save (Ctrl+S)">Save</button>
@@ -183,6 +195,9 @@ dialog::backdrop { background: rgba(20, 22, 40, .45); }
   </div>
   <span id="filename"></span>
   <div class="spacer"></div>
+  <button id="btn-pictures" class="small web-only" title="Add pictures for image(...)">&#128444; Pictures</button>
+  <a class="get-app web-only" href="https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe"
+     title="Flaux for Windows: runs programs much faster, and games get their own window">&#11015; Windows app</a>
   <button id="btn-theme" class="small" title="Night mode / day mode"></button>
   <button id="btn-smaller" class="small" title="Smaller text">A&minus;</button>
   <button id="btn-bigger" class="small" title="Bigger text">A+</button>
@@ -230,6 +245,10 @@ dialog::backdrop { background: rgba(20, 22, 40, .45); }
       <button data-tab="learn">Learn</button>
     </nav>
     <div id="output-panel" class="panel">
+      <div id="game" hidden>
+        <canvas id="game-canvas" tabindex="0" width="800" height="600"></canvas>
+        <div id="game-title"></div>
+      </div>
       <pre id="console"></pre>
       <form id="input-row" hidden>
         <input id="input" autocomplete="off" placeholder="Type your answer here and press Enter">
@@ -255,7 +274,11 @@ dialog::backdrop { background: rgba(20, 22, 40, .45); }
     <div class="list" id="open-examples"></div>
   </div>
   <div class="d-foot">
-    <button id="open-folder">Show my programs folder</button>
+    <button id="open-folder" class="native-only">Show my programs folder</button>
+    <button id="open-computer" class="web-only">Open a .flx file from this computer</button>
+    <button id="download-program" class="web-only">Download this program</button>
+    <input type="file" id="open-file" accept=".flx,.txt" hidden>
+    <input type="file" id="picture-files" accept="image/png,image/jpeg,image/gif,image/bmp" multiple hidden>
     <div class="spacer"></div>
     <button id="open-cancel">Cancel</button>
   </div>
@@ -274,10 +297,11 @@ dialog::backdrop { background: rgba(20, 22, 40, .45); }
   </div>
 </dialog>
 
-<script src="/blockly/blockly_compressed.js"></script>
-<script src="/blockly/blocks_compressed.js"></script>
-<script src="/blockly/msg/en.js"></script>
-<script src="/blocks.js"></script>
+<script src="blockly/blockly_compressed.js"></script>
+<script src="blockly/blocks_compressed.js"></script>
+<script src="blockly/msg/en.js"></script>
+<script src="blocks.js"></script>
+<!--@WEB@-->
 <script>
 "use strict";
 const TOKEN = "@@TOKEN@@";
@@ -318,6 +342,7 @@ const state = { mode: "code", genIds: [], blocksEdited: false, codeBeforeBlocks:
 
 // ------------------------------------------------------------------ server
 async function api(path, data = {}) {
+  if (window.FlauxWeb) return FlauxWeb.api(path, data);   // Flaux Studio on the web
   const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json",
     "X-Flaux-Token": TOKEN }, body: JSON.stringify(data) });
   if (!res.ok) throw new Error("Flaux Studio's helper stopped. Close this window and open Flaux Studio again.");
@@ -617,11 +642,12 @@ $("input-row").addEventListener("submit", async (e) => {
 // ------------------------------------------------------------------ files
 function setDirty(d) { state.dirty = d; showName(); }
 function showName() {
-  const name = state.path ? state.path.split(/[\\/]/).pop() : "untitled.flx";
+  const name = state.path ? state.path.split(/[\\/:]/).pop() : "untitled.flx";
   $("filename").innerHTML = `<b>${esc(name)}</b>${state.dirty ? " • not saved" : ""}` +
     (state.example ? " (example: Save makes your own copy)" : "");
   document.title = `${name} - Flaux Studio`;
-  $("where").textContent = state.path ? state.path : "";
+  $("where").textContent = !state.path ? "" : state.path.startsWith("mine:") ? "Saved in this browser"
+    : state.path.startsWith("example:") ? "Example" : state.path;
 }
 
 async function openFile(path) {
@@ -643,7 +669,7 @@ function confirmLose() {
 async function save(quiet = false) {
   if (!state.path || state.example) {
     const d = $("save-dialog");
-    const base = state.path ? state.path.split(/[\\/]/).pop().replace(/\.flx$/, "") : "";
+    const base = state.path ? state.path.split(/[\\/:]/).pop().replace(/\.flx$/, "") : "";
     $("save-name").value = state.example ? "my_" + base : base;
     $("save-where").textContent = `It will be saved in ${state.info ? state.info.home : "your Flaux folder"}.`;
     d.showModal(); $("save-name").select();
@@ -888,6 +914,34 @@ document.addEventListener("keydown", (e) => {
   else if (ctrl && e.key === "-") { e.preventDefault(); setSize(codeSize() - 2); }
 });
 window.addEventListener("beforeunload", (e) => { if (state.dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+// ------------------------------------------------------------- web version
+window.setWebStatus = (text, kind) => status(text, kind);
+if (window.FlauxWeb) {
+  $("open-computer").addEventListener("click", () => $("open-file").click());
+  $("open-file").addEventListener("change", () => {
+    const file = $("open-file").files[0];
+    if (!file) return;
+    FlauxWeb.openFromComputer(file, (path) => {
+      $("open-file").value = "";
+      if (path) openFile(path); else status("This browser is out of room for saving programs.", "bad");
+    });
+  });
+  $("download-program").addEventListener("click", () => {
+    const name = state.path ? state.path.split(/[:/]/).pop() : "my_program.flx";
+    FlauxWeb.download(name, code.value);
+  });
+  $("btn-pictures").addEventListener("click", () => $("picture-files").click());
+  $("picture-files").addEventListener("change", () => {
+    const files = $("picture-files").files;
+    if (!files.length) return;
+    FlauxWeb.addPictures(files, (added) => {
+      $("picture-files").value = "";
+      if (!added) return status("These pictures are too big to keep in this browser.", "bad");
+      status(`Added ${added.join(", ")}. Use it like this: image("${added[0]}", 100, 100)`, "good");
+    });
+  });
+}
 
 (async function start() {
   try { const s = localStorage.getItem("flaux-size"); if (s) setSize(Number(s)); } catch (e) {}

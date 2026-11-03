@@ -14,11 +14,14 @@ first. Flaux programs read almost like a sentence, but they run as fast as
 C++, one of the fastest languages there is. Type your program in words, or
 build it by snapping blocks together.
 
+**[&#9654; Try Flaux in your browser](https://xobnvr.github.io/Flaux-Code/)** (nothing to install), or
+**[&#11015; download it for Windows](https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe)**.
+
 ---
 
 ## Contents
 
-1. [Install Flaux on Windows](#install-flaux-on-windows)
+1. [Install Flaux on Windows](#install-flaux-on-windows) (or [use it in your browser](#flaux-in-your-browser))
 2. [Flaux Studio](#flaux-studio)
 3. [Run your program with a batch file](#run-your-program-with-a-batch-file)
 4. [Learn Flaux in 12 lessons](#learn-flaux-in-12-lessons)
@@ -60,6 +63,23 @@ Everything Flaux needs comes inside the installer (Python, a C compiler and
 the SDL2 graphics library), so there's nothing else to download. It doesn't
 need an administrator, and it works on Windows 10 and 11. To remove it, go
 to **Settings, Apps** and uninstall **Flaux**.
+
+### Flaux in your browser
+
+Don't want to install anything, or not on Windows? Open
+**[Flaux Studio in your browser](https://xobnvr.github.io/Flaux-Code/)**. It's the same
+Flaux Studio, with the same lessons, games, block editor and friendly error
+messages. The first visit downloads about 10 MB; after that it opens quickly.
+
+A few things are different in the browser:
+
+- **Your programs are saved in that browser.** Use **Download this program**
+  (in **Open**) to keep a copy on your computer, and **Open a .flx file from
+  this computer** to bring one in.
+- **Games appear above the output.** Click the game so it gets the keys.
+- **Pictures:** click **Pictures** to add your own picture files.
+- **Speed:** programs run as JavaScript, which is fine for learning and
+  games but much slower than the Windows app for heavy number-crunching.
 
 ---
 
@@ -850,6 +870,8 @@ your .flx file → lexer → parser → type checker → C code → gcc/clang �
 | [`flauxc/errors.py`](flauxc/errors.py) | turns problems into friendly, teaching messages |
 | [`flauxc/cli.py`](flauxc/cli.py) | the `flaux` command |
 | [`flauxc/studio/`](flauxc/studio/) | Flaux Studio: a tiny local web server and the editor page |
+| [`flauxc/jsgen.py`](flauxc/jsgen.py) | the second backend: turns Flaux into JavaScript for the web version |
+| [`flauxc/web/`](flauxc/web/) | Flaux Studio on the web: the JavaScript runtime (`fx.js`), the page's helper (`web.js`), Python's side (`web_api.py`) and the site builder (`build.py`) |
 | [`flauxc/studio/blocks.py`](flauxc/studio/blocks.py), [`blocks.js`](flauxc/studio/blocks.js) | the block editor: code to blocks, and blocks to code (built on [Blockly](https://developers.google.com/blockly)) |
 | [`installer/`](installer/) | the Windows installer (Inno Setup), `flaux.exe`, and its build scripts |
 | [`assets/`](assets/) | the Flaux icon, and the script that makes every size of it |
@@ -862,6 +884,8 @@ Useful commands:
 ./flaux c game.flx              # see the C code Flaux makes
 python3 tests/run_tests.py      # run all the tests
 python3 tests/blocks_roundtrip.py   # every program through the block editor and back
+python3 tests/js_tests.py       # every test program on the web version, with Node
+python3 -m flauxc.web.build site --pyodide <folder>   # build Flaux Studio for the web
 python3 benchmarks/run.py       # race Flaux against C++, C# and Python
 ./flaux studio                  # open Flaux Studio
 ```
@@ -884,3 +908,4 @@ release, which is what the download button gives you.
 - [x] Pictures from files (sprites) for games
 - [x] A Windows installer and a beginner code editor (Flaux Studio)
 - [x] A drag-and-drop block editor that writes Flaux for you
+- [x] Flaux Studio in your web browser

@@ -344,6 +344,9 @@ def make_handler(studio):
                     with open(file, "rb") as fh:
                         return self.send(200, fh.read(), kind)
                 return self.send(404, "Not found", "text/plain")
+            if url.path == "/icon.png":
+                with open(os.path.join(HERE, "icon.png"), "rb") as fh:
+                    return self.send(200, fh.read(), "image/png")
             if url.path == "/blocks.js":
                 with open(os.path.join(HERE, "blocks.js"), "rb") as fh:
                     return self.send(200, fh.read(), "text/javascript")

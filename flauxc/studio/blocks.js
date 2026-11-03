@@ -399,7 +399,7 @@ window.FlauxBlocks = (() => {
     themeSet = themes();
     ws = Blockly.inject(div, {
       toolbox: toolbox(), renderer: "zelos", theme: options.dark ? themeSet.dark : themeSet.light,
-      media: "/blockly/media/", trashcan: true, sounds: true,
+      media: "blockly/media/", trashcan: true, sounds: true,
       zoom: { controls: true, wheel: false, startScale: 0.85, maxScale: 2.5, minScale: 0.35, scaleSpeed: 1.15 },
       move: { scrollbars: true, drag: true, wheel: true },
     });
