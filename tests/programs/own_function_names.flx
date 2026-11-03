@@ -1,0 +1,9 @@
+# Your own functions can use names like loop and do
+function loop()
+    say "looping"
+end
+function do(n)
+    say n
+end
+loop()
+do(5)

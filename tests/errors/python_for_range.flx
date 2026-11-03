@@ -1,0 +1,4 @@
+# expect: Flaux doesn't use `for`.
+# expect: repeat with i from 1 to 10
+for i in range(1, 11):
+    say i

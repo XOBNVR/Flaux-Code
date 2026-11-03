@@ -6,6 +6,7 @@
 
 tests/programs/NAME.flx   is run, and its output must match NAME.out exactly.
                           If NAME.in exists it is used as the typed input.
+examples/**/*.flx         must compile (they're used in the README).
 tests/errors/NAME.flx     must fail. Every `# expect: ...` line at the top
                           must appear in the error message. A `# stdin: ...`
                           line gives the typed input.
@@ -70,6 +71,17 @@ def main():
                 failures.append((name, f"exit {code}, missing {missing}\n{err}"))
             else:
                 passed += 1
+
+    # Every example and lesson (the README uses them) must still compile.
+    for path in sorted(glob.glob(os.path.join(ROOT, "examples", "**", "*.flx"), recursive=True)):
+        name = os.path.relpath(path, ROOT)
+        if pattern not in name:
+            continue
+        try:
+            compile_source(open(path, encoding="utf-8").read(), os.path.basename(path))
+            passed += 1
+        except FlauxError as e:
+            failures.append((name, e.render(os.path.basename(path), open(path).read())))
 
     for name, detail in failures:
         print(f"FAIL {name}\n{detail}\n")

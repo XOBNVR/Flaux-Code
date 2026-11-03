@@ -37,6 +37,10 @@ TWO_CHAR_OPS = {"<=", ">=", "!=", "==", "//"}
 ONE_CHAR_OPS = set("+-*/^%()[],=<>")
 ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\", "{": "{", "}": "}"}
 
+# Words from other languages that start a block ending in `:`.
+FOREIGN_BLOCK_WORDS = {"for", "foreach", "while", "until", "def", "func", "fn", "fun",
+                       "elif", "elsif", "elseif", "loop", "do"}
+
 BLOCK_EXAMPLE = """\
 if score > 10
     say "You win!"
@@ -52,7 +56,11 @@ class Lexer:
         self.col = col
         self.inner = inner  # True when lexing an expression inside "{...}"
         self.tokens = []
+        self.first_error = None  # see run()
         self.depth = 0  # how many ( or [ are open
+        # names of the program's own functions, so `function loop()` isn't
+        # mistaken for a word from another language
+        self.own_functions = set(re.findall(r"^\s*function\s+(\w+)", "\n".join(self.full_lines), re.M))
 
     # ------------------------------------------------------------ helpers
 
@@ -83,47 +91,89 @@ class Lexer:
     # --------------------------------------------------------------- main
 
     def run(self):
+        """Split the source into tokens.
+
+        A problem with a symbol doesn't stop us straight away: we note the
+        first one, skip the rest of that line, and keep going. That way the
+        parser can still report an earlier problem first, so errors always
+        come in the order you read the program."""
         while self.i < len(self.src):
-            ch = self.peek()
-            if ch == "\n":
-                if (self.depth == 0 and not self.inner and self.tokens
-                        and self.tokens[-1].kind != "newline"):
-                    self.add("newline", None, self.line, self.col, 1)
-                self.advance()
-            elif ch in " \t\r":
-                self.advance()
-            elif ch == "#":
+            try:
+                self.step()
+            except FlauxError as e:
+                if self.inner:
+                    raise
+                if self.first_error is None:
+                    self.first_error = e
+                self.depth = 0
                 while self.i < len(self.src) and self.peek() != "\n":
                     self.advance()
-            elif ch.isdigit():
-                self.number()
-            elif ch.isascii() and (ch.isalpha() or ch == "_"):
-                self.name()
-            elif ch == '"':
-                self.string()
-            else:
-                two = ch + self.peek(1)
-                line, col = self.line, self.col
-                if two in TWO_CHAR_OPS:
-                    self.advance()
-                    self.advance()
-                    self.add("op", two, line, col, 2)
-                elif ch in ONE_CHAR_OPS:
-                    self.advance()
-                    if ch in "([":
-                        self.depth += 1
-                    elif ch in ")]":
-                        self.depth = max(0, self.depth - 1)
-                    self.add("op", ch, line, col, 1)
-                else:
-                    self.bad_symbol(ch)
         if not self.inner:
             if self.tokens and self.tokens[-1].kind != "newline":
                 self.add("newline", None, self.line, self.col, 1)
             self.add("eof", None, self.line, self.col, 1)
         return self.tokens
 
+    def step(self):
+        """Read one token (or skip one space, comment or newline)."""
+        ch = self.peek()
+        if ch == "\n":
+            if (self.depth == 0 and not self.inner and self.tokens
+                    and self.tokens[-1].kind != "newline"):
+                self.add("newline", None, self.line, self.col, 1)
+            self.advance()
+        elif ch in " \t\r":
+            self.advance()
+        elif ch == "#":
+            while self.i < len(self.src) and self.peek() != "\n":
+                self.advance()
+        elif ch.isdigit():
+            self.number()
+        elif ch.isascii() and (ch.isalpha() or ch == "_"):
+            self.name()
+        elif ch == '"':
+            self.string()
+        else:
+            two = ch + self.peek(1)
+            line, col = self.line, self.col
+            if two in TWO_CHAR_OPS:
+                self.advance()
+                self.advance()
+                self.add("op", two, line, col, 2)
+            elif ch in ONE_CHAR_OPS:
+                self.advance()
+                if ch in "([":
+                    self.depth += 1
+                elif ch in ")]":
+                    self.depth = max(0, self.depth - 1)
+                self.add("op", ch, line, col, 1)
+            elif ch == ":" and self.foreign_block_colon():
+                self.advance()  # the parser will translate the whole line
+            else:
+                self.bad_symbol(ch)
+
+    def foreign_line(self):
+        """True if this line starts with a block word from another language,
+        like `for`, `while` or `def`. The parser translates the whole line."""
+        first = re.match(r"\s*([A-Za-z_]+)", self.line_text())
+        return (first is not None and first.group(1) in FOREIGN_BLOCK_WORDS
+                and first.group(1) not in self.own_functions)
+
+    def foreign_block_colon(self):
+        """A `:` ending a line like `for pet in pets:` or `while x < 5:`."""
+        after = self.line_text()[self.col:]
+        return after.split("#")[0].strip() == "" and self.foreign_line()
+
     def bad_symbol(self, ch):
+        if ch in ":;{}" and self.foreign_line():
+            # e.g. `for (int i = 0; i < 10; i++) {`: skip the rest of the line
+            # and let the parser show the whole line in Flaux.
+            while self.i < len(self.src) and self.peek() != "\n":
+                self.advance()
+            return
+        self._bad_symbol(ch)
+
+    def _bad_symbol(self, ch):
         """A symbol Flaux doesn't use. Most come from other languages, so
         explain the Flaux way and show the fixed line."""
         text = self.line_text()
@@ -180,6 +230,21 @@ class Lexer:
         if ch == ".":
             if self.peek(1).isdigit():
                 self.error("Decimal numbers need a digit before the dot.", fix="0.")
+            call = re.match(r"((?:[A-Za-z_]+\.)*)([A-Za-z_]+)\((.*)\)\s*;?\s*(#.*)?$", after)
+            word = re.search(r"([A-Za-z_][A-Za-z0-9_]*)$", before)
+            if call and word:
+                method, inside = call.group(2), call.group(3).strip()
+                start_col = self.col - len(word.group(1))
+                whole = word.group(1) + "." + call.group(1) + method
+                if method in ("log", "WriteLine", "Write", "println", "print", "printf", "info"):
+                    self.error(f"Flaux uses `say` instead of `{whole}`.",
+                               col=start_col, length=len(whole),
+                               hint="Change the line to:", fix_line=indent + "say " + inside)
+                if method in ("append", "push", "Add", "add", "insert") and inside:
+                    self.error(f"To put something in a list, Flaux uses `add ... to ...`.",
+                               col=start_col, length=len(whole),
+                               hint="Change the line to:",
+                               fix_line=indent + f"add {inside} to {word.group(1)}")
             m = re.match(r"\.(length|size|count|len)\b(\(\))?", after and "." + after)
             word = re.search(r"([A-Za-z_][A-Za-z0-9_]*)$", before)
             if m and word:

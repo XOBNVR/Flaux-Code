@@ -1,0 +1,4 @@
+# expect: To put something in a list, Flaux uses `add ... to ...`.
+# expect: add 4 to nums
+set nums to [1, 2]
+nums.append(4)

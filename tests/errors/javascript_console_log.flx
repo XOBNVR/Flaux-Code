@@ -1,0 +1,3 @@
+# expect: Flaux uses `say` instead of `console.log`.
+# expect: say "hi"
+console.log("hi")

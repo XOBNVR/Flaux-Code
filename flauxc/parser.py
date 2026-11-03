@@ -78,6 +78,9 @@ class Parser:
         self.i = 0
         self.in_function = False
         self.lines = source.splitlines()
+        self.own_functions = {tokens[i + 1].value for i in range(len(tokens) - 1)
+                              if tokens[i].kind == "name" and tokens[i].value == "function"
+                              and tokens[i + 1].kind == "name"}
 
     # ------------------------------------------------------------ helpers
 
@@ -308,7 +311,8 @@ class Parser:
             handler = getattr(self, "stmt_" + tok.value, None)
             if handler is not None and tok.value in RESERVED | {"function"}:
                 return handler()
-            if tok.value in OTHER_LANGUAGE_WORDS and not (self.at_op("=", 1) or self.at_word("to", 1)):
+            if (tok.value in OTHER_LANGUAGE_WORDS and tok.value not in self.own_functions
+                    and not (self.at_op("=", 1) or self.at_word("to", 1))):
                 self.other_language(tok)
             self.check_shortcut_maths(tok)
         start = tok
@@ -372,11 +376,37 @@ class Parser:
             example = EXAMPLES[first]
         if flaux == "repeat with":
             example = "repeat with i from 1 to 10\n    say i\nend\n\nrepeat with name in names\n    say name\nend"
-            if rest.startswith("(") or "range" in rest or ";" in rest:
-                fix_line = None
+            fix_line = self.translate_for(rest, indent)
         raise self.error(tok, f"Flaux doesn't use `{tok.value}`. The Flaux word for this is `{flaux}`.",
                          hint="Change the line to:" if fix_line else "Here's how it looks in Flaux:",
                          fix_line=fix_line, example=None if fix_line else example)
+
+    def translate_for(self, rest, indent):
+        """Turn a Python/JS/C# `for` loop into `repeat with`, when we can."""
+        import re
+        rest = rest.rstrip(":{ ").strip()
+
+        def minus_one(x):  # range(1, 11) stops before 11, so Flaux counts to 10
+            return str(int(x) - 1) if x.lstrip("-").isdigit() else f"{x} - 1"
+
+        m = re.fullmatch(r"\(?\s*(?:var |let |const |int |long )?(\w+)\s+(?:in|of)\s+range\((.*)\)\s*\)?", rest)
+        if m:
+            var, args = m.group(1), [a.strip() for a in m.group(2).split(",")]
+            if len(args) == 1:
+                return f"{indent}repeat with {var} from 0 to {minus_one(args[0])}"
+            if len(args) == 2:
+                return f"{indent}repeat with {var} from {args[0]} to {minus_one(args[1])}"
+            if len(args) == 3:
+                return f"{indent}repeat with {var} from {args[0]} to {minus_one(args[1])} by {args[2]}"
+        m = re.fullmatch(r"\(?\s*(?:var |let |const |string |int )?(\w+)\s+(?:in|of)\s+(\w+)\s*\)?", rest)
+        if m:
+            return f"{indent}repeat with {m.group(1)} in {m.group(2)}"
+        m = re.fullmatch(r"\(\s*(?:var |let |int |long )?(\w+)\s*=\s*(\w+)\s*;\s*\1\s*(<=?)\s*([^;]+);\s*\1(?:\+\+|\s*\+=\s*1)\s*\)", rest)
+        if m:
+            var, start, op, end = m.group(1), m.group(2), m.group(3), m.group(4).strip()
+            end = end if op == "<=" else minus_one(end)
+            return f"{indent}repeat with {var} from {start} to {end}"
+        return None
 
     def check_shortcut_maths(self, tok):
         """Catch `x += 1`, `x -= 1`, `x++` and `x--` from other languages."""

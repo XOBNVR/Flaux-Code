@@ -1,0 +1,4 @@
+# expect: Flaux uses `say` instead of `Console.WriteLine`.
+# expect: say "Score: " + score
+set score to 5
+Console.WriteLine("Score: " + score);

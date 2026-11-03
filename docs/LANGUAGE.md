@@ -27,7 +27,8 @@ covers everything in Flaux 0.1.
 Flaux programs are text files ending in `.flx`.
 
 ```bash
-./flaux run hello.flx        # compile and run
+./flaux hello.flx            # run a program
+./flaux run hello.flx        # the same thing, written out in full
 ./flaux build hello.flx      # make a program called "hello" you can share
 ./flaux check hello.flx      # look for mistakes without running
 ./flaux c hello.flx          # see the C code Flaux makes

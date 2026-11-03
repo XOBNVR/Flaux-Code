@@ -1603,7 +1603,18 @@ class Compiler:
 
 def compile_source(source, filename="program.flx"):
     """Compile Flaux source code to C source code."""
-    from .lexer import tokenize
-    from .parser import parse
-    program = parse(tokenize(source), source)
+    from .lexer import Lexer
+    from .parser import Parser
+    lexer = Lexer(source)
+    tokens = lexer.run()
+    parser = Parser(tokens, source)
+    try:
+        program = parser.parse_program()
+    except FlauxError:
+        # Report whichever problem comes first in the file.
+        if lexer.first_error and parser.peek().line >= lexer.first_error.line:
+            raise lexer.first_error
+        raise
+    if lexer.first_error:
+        raise lexer.first_error
     return Compiler(program, filename, source).compile()

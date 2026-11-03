@@ -1,5 +1,6 @@
 """The `flaux` command.
 
+    flaux hello.flx               compile and run a program (same as `flaux run`)
     flaux run  hello.flx          compile and run a program
     flaux build hello.flx         make a standalone program you can share
     flaux check hello.flx         just look for mistakes
@@ -143,6 +144,10 @@ def main(argv=None):
     p.add_argument("-o", "--output", help="write the C code to this file")
     p.set_defaults(func=cmd_c)
 
+    # Shortcut: `flaux game.flx` means `flaux run game.flx`.
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and not argv[0].startswith("-") and argv[0] not in ("run", "build", "check", "c"):
+        argv.insert(0, "run")
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()

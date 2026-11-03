@@ -1,0 +1,6 @@
+# expect: Flaux doesn't use `foreach`.
+# expect: repeat with pet in pets
+set pets to ["cat"]
+foreach (var pet in pets) {
+    say pet
+}
