@@ -38,6 +38,9 @@ C++, one of the fastest languages there is.
 
 <p><a href="https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe"><b>&#11015; Download Flaux for Windows (FlauxSetup.exe)</b></a></p>
 
+(Or open the [Releases page](https://github.com/XOBNVR/Flaux-Code/releases) and click
+**FlauxSetup.exe** under the newest release.)
+
 **2.** Double-click `FlauxSetup.exe`.
 
 > Windows might show a blue box saying **"Windows protected your PC"**.
@@ -843,8 +846,9 @@ Every change pushed to GitHub is tested on Linux and on Windows
 ([`.github/workflows/build.yml`](.github/workflows/build.yml)). The Windows
 run also builds `FlauxSetup.exe`, installs it, and uses it the way a
 beginner would: Flaux Studio, the `flaux` command, a batch file exactly like
-the one above, a graphics game, and uninstalling. Pushing a tag like
-`v0.2.0` publishes the installer as a GitHub release.
+the one above, a graphics game, and uninstalling. When all of that passes
+on `main`, the build publishes that exact installer as the latest GitHub
+release, which is what the download button gives you.
 
 ### Coming next
 
