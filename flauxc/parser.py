@@ -59,6 +59,8 @@ EXAMPLES = {
               "repeat while lives > 0\n    subtract 1 from lives\nend\n\nrepeat with name in names\n    say name\nend",
     "function": "function greet(name)\n    say \"Hello, {name}!\"\nend\n\ngreet(\"Sam\")",
     "return": "function double(x)\n    return x * 2\nend",
+    "shader": "shader stripes\n    if floor(x * 4) mod 2 = 0\n        return \"white\"\n    end\n    return \"red\"\nend\n\n"
+              "cube(0, 0, 0, 1, stripes)",
 }
 
 
@@ -77,6 +79,7 @@ class Parser:
         self.toks = tokens
         self.i = 0
         self.in_function = False
+        self.depth = 0   # how many blocks deep we are
         self.lines = source.splitlines()
         self.own_functions = {tokens[i + 1].value for i in range(len(tokens) - 1)
                               if tokens[i].kind == "name" and tokens[i].value == "function"
@@ -210,6 +213,8 @@ class Parser:
         while self.peek().kind != "eof":
             if self.at_word("function"):
                 funcs.append(self.parse_function())
+            elif self.at_shader():
+                main.append(self.parse_statement())   # kept in place, for the block editor
             else:
                 main.append(self.parse_statement())
             self.skip_newlines()
@@ -235,11 +240,13 @@ class Parser:
         """Parse statements until one of the `enders` words starts a line."""
         body = []
         self.skip_newlines()
+        self.depth += 1
         while True:
             tok = self.peek()
             if tok.kind == "eof":
                 raise self.missing_end(opener, kind)
             if tok.kind == "name" and tok.value in enders:
+                self.depth -= 1
                 return body
             body.append(self.parse_statement())
             self.skip_newlines()
@@ -259,6 +266,27 @@ class Parser:
         node.end_line = self.last_end_line
         node.else_lines = list(else_lines)
         return node
+
+    def at_shader(self):
+        """`shader name` on a line by itself starts a shader."""
+        return (self.at_word("shader") and self.peek(1).kind == "name"
+                and self.peek(2).kind in ("newline", "eof"))
+
+    def parse_shader(self):
+        start = self.next()  # 'shader'
+        if self.in_function or self.depth:
+            raise self.error(start, "Shaders can't go inside an `if`, a `repeat` or a function.",
+                             hint="Move the whole shader (from `shader` down to its `end`) so it starts at the "
+                                  "left edge, outside any other block.",
+                             example=EXAMPLES["shader"])
+        name_tok = self.name_token("A shader needs a name.", example=EXAMPLES["shader"])
+        pos = self.span(start)
+        self.end_of_line()
+        self.in_function = True
+        body = self.parse_block(start, {"end"}, "shader")
+        self.in_function = False
+        self.finish_block(start, "shader")
+        return self.ended(N.ShaderDef(name_tok.value, body, **pos))
 
     def parse_function(self):
         start = self.next()  # 'function'
@@ -324,6 +352,8 @@ class Parser:
 
     def parse_statement_inner(self):
         tok = self.peek()
+        if self.at_shader():
+            return self.parse_shader()
         if tok.kind == "name":
             handler = getattr(self, "stmt_" + tok.value, None)
             if handler is not None and tok.value in RESERVED | {"function"}:

@@ -1,0 +1,15 @@
+# a screen effect turns every colour inside out
+# frames: 1
+# pixel: 5 5 #d09012
+# pixel: 20 20 #17cfc5
+# pixel: 150 150 #ffffff
+shader invert
+    return rgb(255 - red, 255 - green, 255 - blue)
+end
+
+window(200, 200)
+clear("blue")
+rect(10, 10, 30, 30, "red")
+rect(120, 120, 60, 60, "black")
+effect(invert)
+show()

@@ -1,0 +1,13 @@
+# 2D drawing in a 3D window (sky(...) makes it one): same pixels as 2D
+# frames: 1
+# pixel: 5 5 #2f6fed
+# pixel: 20 20 #e8303a
+# pixel: 100 100 #ffe135
+# pixel: 150 20 #ffffff
+# pixel: 10 182 #ffffff
+window(200, 200)
+sky("blue")
+rect(10, 10, 30, 30, "red")
+circle(100, 100, 25, "yellow")
+line(150, 0, 150, 50, "white")
+write("Hi", 10, 180, "white", 1)

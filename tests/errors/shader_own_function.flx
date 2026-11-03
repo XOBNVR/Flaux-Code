@@ -1,0 +1,11 @@
+# expect: Shaders can't use your own functions, like `half`.
+function half(n)
+    return n / 2
+end
+
+shader glow
+    return rgb(half(255), 0, 0)
+end
+
+window(100, 100)
+cube(0, 0, 0, 1, glow)

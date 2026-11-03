@@ -1,0 +1,18 @@
+# a screen effect can look at other pixels, and use the program's numbers
+# frames: 1
+# pixel: 5 100 #000000
+# pixel: 75 100 #ff0000
+# pixel: 125 100 #000000
+# pixel: 175 100 #00ff00
+shader shift
+    if x < split
+        return rgb(red_at(x + 100, y), 0, 0)
+    end
+    return rgb(0, green, 0)
+end
+
+window(200, 200)
+clear("black")
+rect(150, 0, 50, 200, "#ffffff")
+set split to 100
+effect(shift)

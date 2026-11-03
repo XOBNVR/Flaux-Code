@@ -1,0 +1,8 @@
+# expect: The shader `glow` uses `power`, but there's no `power` here.
+# expect: so make `power`
+shader glow
+    return rgb(255 * power, 0, 0)
+end
+
+window(100, 100)
+cube(0, 0, 0, 1, glow)

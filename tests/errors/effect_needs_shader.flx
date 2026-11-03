@@ -1,0 +1,4 @@
+# expect: `effect` needs a shader, but this is text.
+# expect: shader darker
+window(100, 100)
+effect("blue")

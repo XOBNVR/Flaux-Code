@@ -9,10 +9,15 @@ tests/programs/NAME.flx   is run, and its output must match NAME.out exactly.
 examples/**/*.flx         must compile (they're used in the README).
 tests/graphics/NAME.flx   graphics programs, run without a real screen. Header
                           lines: `# frames: N` (stop after N frames), `# hold: keys`
-                          (pretend these keys are held), `# pixel: x y #rrggbb`
+                          (pretend these keys are held), `# buttons: a,b` (pretend
+                          these controller buttons are held), `# pixel: x y #rrggbb`
                           (that pixel of the last frame must be this colour), or
                           `# expect: ...` for programs that must fail.
                           Skipped if SDL2 isn't installed.
+tests/graphics3d/NAME.flx the same, for 3D and shaders (drawn with OpenGL, so they
+                          need Mesa's software OpenGL on a computer without a
+                          screen). `# near: x y #rrggbb` allows a few shades either
+                          way. FLAUX_SKIP_3D=1 skips them.
 tests/errors/NAME.flx     must fail. Every `# expect: ...` line at the top
                           must appear in the error message. A `# stdin: ...`
                           line gives the typed input.
@@ -52,6 +57,15 @@ def bmp_pixel(path, x, y):
     row = height - 1 - y if height > 0 else y
     i = offset + row * row_size + x * (bpp // 8)
     return f"#{data[i + 2]:02x}{data[i + 1]:02x}{data[i]:02x}"
+
+
+def near(got, want, within=24):
+    """True if two "#rrggbb" colours are within a few shades of each other."""
+    if not got.startswith("#"):
+        return False
+    a = [int(got[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(want[i:i + 2], 16) for i in (1, 3, 5)]
+    return all(abs(x - y) <= within for x, y in zip(a, b))
 
 
 def build_and_run(path, stdin, tmp, env=None):
@@ -128,13 +142,18 @@ def main():
             else:
                 passed += 1
 
-        graphics = sorted(glob.glob(os.path.join(HERE, "graphics", "*.flx")))
-        graphics = [p for p in graphics if pattern in "graphics/" + os.path.basename(p)]
+        graphics = sorted(glob.glob(os.path.join(HERE, "graphics", "*.flx")) +
+                          glob.glob(os.path.join(HERE, "graphics3d", "*.flx")))
+        graphics = [p for p in graphics if pattern in os.path.relpath(p, HERE).replace(os.sep, "/")]
         if graphics and not sdl_installed():
             print(f"(skipping {len(graphics)} graphics tests: SDL2 isn't installed)")
             graphics = []
+        three_d = [p for p in graphics if os.path.basename(os.path.dirname(p)) == "graphics3d"]
+        if three_d and os.environ.get("FLAUX_SKIP_3D"):
+            print(f"(skipping {len(three_d)} 3D tests: FLAUX_SKIP_3D is set)")
+            graphics = [p for p in graphics if p not in three_d]
         for path in graphics:
-            name = "graphics/" + os.path.basename(path)
+            name = os.path.relpath(path, HERE).replace(os.sep, "/")
             lines = open(path, encoding="utf-8").read().splitlines()
             header = {}
             for l in lines:
@@ -142,9 +161,16 @@ def main():
                     key, _, value = l[2:].partition(":")
                     header.setdefault(key.strip(), []).append(value.strip())
             shot = os.path.join(tmp, os.path.basename(path)[:-4] + ".bmp")
-            env = {"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "FLAUX_FAST": "1",
+            # 3D draws with OpenGL: on a test computer without a screen, SDL's
+            # "offscreen" driver and Mesa's software graphics card do that
+            # (on Windows, a real window: Flaux falls back to Mesa by itself
+            # when there's no graphics card, like on GitHub's test computers)
+            driver = ("windows" if os.name == "nt" else "offscreen") if path in three_d else "dummy"
+            env = {"SDL_VIDEODRIVER": driver,
+                   "SDL_AUDIODRIVER": "dummy", "FLAUX_FAST": "1",
                    "FLAUX_FRAMES": header.get("frames", ["1"])[0], "FLAUX_SCREENSHOT": shot,
-                   "FLAUX_HOLD_KEYS": ",".join(header.get("hold", []))}
+                   "FLAUX_HOLD_KEYS": ",".join(header.get("hold", [])),
+                   "FLAUX_HOLD_BUTTONS": ",".join(header.get("buttons", []))}
             code, out, err = build_and_run(path, "", tmp, env)
             if "expect" in header:
                 missing = [e for e in header["expect"] if e not in err]
@@ -157,6 +183,11 @@ def main():
                     got = bmp_pixel(shot, int(x), int(y)) if code == 0 else "?"
                     if got != want.lower():
                         problems.append(f"pixel {x},{y} is {got}, expected {want}")
+                for spec in header.get("near", []):   # lit 3D: within a few shades
+                    x, y, want = spec.split()
+                    got = bmp_pixel(shot, int(x), int(y)) if code == 0 else "?"
+                    if not near(got, want):
+                        problems.append(f"pixel {x},{y} is {got}, expected about {want}")
                 ok, detail = not problems, "\n".join(problems)
             if ok:
                 passed += 1

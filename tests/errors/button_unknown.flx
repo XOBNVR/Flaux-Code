@@ -1,0 +1,6 @@
+# expect: Flaux doesn't know the controller button "jmp".
+# expect: Controller buttons are "a", "b", "x", "y"
+window(100, 100)
+if button_down("jmp")
+    say "jump"
+end

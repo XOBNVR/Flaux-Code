@@ -1,0 +1,5 @@
+# expect: The shader `glow` never gives back a colour.
+# expect: return rgb(255, 200, 0)
+shader glow
+    set a to 1
+end

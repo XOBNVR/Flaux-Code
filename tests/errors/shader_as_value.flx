@@ -1,0 +1,7 @@
+# expect: `glow` is a shader. Shaders paint shapes, or the whole screen.
+# expect: cube(0, 0, 0, 1, glow)
+shader glow
+    return "red"
+end
+
+say glow

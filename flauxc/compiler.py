@@ -26,8 +26,9 @@ import os
 
 from . import graphics
 from . import nodes as N
+from .shadergen import shader_glsl
 from .errors import FlauxError
-from .types import (INT, FLOAT, BOOL, TEXT, VOID, UNK, ListT, TypeConflict,
+from .types import (INT, FLOAT, BOOL, TEXT, VOID, UNK, SHADER, ListT, TypeConflict,
                     is_list, is_num, has_unknown, resolve, merge, describe, mangle)
 
 RUNTIME_PATH = os.path.join(os.path.dirname(__file__), "runtime.h")
@@ -82,11 +83,51 @@ BUILTINS = {
     "image_width": "say image_width(\"ship.png\")",
     "image_height": "say image_height(\"ship.png\")",
     "text_width": "set w to text_width(\"GAME OVER\", 5)\nwrite(\"GAME OVER\", (800 - w) / 2, 280, \"red\", 5)",
+    "fps": "write(\"{fps()} frames a second\", 10, 10)",
+    "seconds": "set t to seconds()     # seconds since the window opened",
+    # game controllers
+    "button_down": "if button_down(\"a\")\n    say \"jump!\"\nend",
+    "button_pressed": "if button_pressed(\"start\")\n    set paused to not paused\nend",
+    "stick_x": "add stick_x() * 5 to x      # the left stick: -1 (left) to 1 (right)\n"
+               "add stick_x(\"right\") * 2 to angle",
+    "stick_y": "add stick_y() * 5 to y      # the left stick: -1 (down) to 1 (up)",
+    # 3D
+    "camera": "camera(0, 5, 10, 0, 0, 0)        # where the camera is (x, y, z), then the point it looks at\n"
+              "camera(0, 5, 10, 0, 0, 0, 90)    # ...seeing more (90 degrees wide)",
+    "sky": "sky(\"sky\")\nsky(\"blue\", \"white\")     # the colour at the top, then at the horizon",
+    "sun": "sun(1, 2, 1)              # the direction the sunlight comes from\n"
+           "sun(1, 2, 1, \"orange\")    # ...in a colour\nsun(0, 0, 0)              # no sun (night)",
+    "light": "light(0, 3, 0, \"yellow\")        # a lamp at x, y, z\n"
+             "light(0, 3, 0, \"yellow\", 20)    # ...that reaches 20 steps",
+    "fog": "fog(50)             # things fade into the sky, until 50 steps away they're gone\n"
+           "fog(30, \"gray\")     # grey fog\nfog(0)              # no fog",
+    "turn": "turn(0, 45, 0)              # turn the next shapes 45 degrees (around x, y, z)\n"
+            "cube(0, 0, 0, 1, \"red\")",
+    "cube": "cube(0, 0, 0, 1, \"red\")             # x, y, z, size, colour",
+    "box": "box(0, 0, 0, 4, 1, 2, \"brown\")      # x, y, z, width, height, depth, colour",
+    "ball": "ball(0, 1, 0, 0.5, \"orange\")        # x, y, z, radius, colour",
+    "cylinder": "cylinder(0, 1, 0, 0.5, 2, \"gray\")   # x, y, z, radius, height, colour",
+    "cone": "cone(0, 1, 0, 0.5, 2, \"green\")      # x, y, z, radius, height, colour",
+    "plane": "plane(0, 0, 0, 20, 20, \"green\")       # a flat floor: x, y, z, width, depth, colour\n"
+             "plane(0, 0, 0, 20, 20, \"grass.png\")   # ...covered in a picture",
+    "model": "model(\"tree.obj\", 0, 1, 0, 2)          # a 3D model file, x, y, z, size\n"
+             "model(\"tree.obj\", 0, 1, 0, 2, \"red\")   # ...painted red",
+    "effect": "effect(wobble)      # put the whole screen through the shader called wobble",
 }
+
+# Built-ins that draw in 3D (they need the OpenGL runtime).
+THREE_D_BUILTINS = {"camera", "sky", "sun", "light", "fog", "turn", "cube", "box", "ball", "cylinder", "cone",
+                    "plane", "model", "effect"}
+
+# Which input of a built-in can be a shader (to paint with).
+SHADER_INPUT = {"cube": 4, "box": 6, "ball": 4, "cylinder": 5, "cone": 5, "plane": 5, "model": 5, "effect": 0}
+
+MODEL_TYPES = (".obj",)
 
 GRAPHICS_BUILTINS = {"window", "show", "clear", "rect", "circle", "line", "triangle", "dot", "write", "key_down",
                      "key_pressed", "mouse_x", "mouse_y", "mouse_down", "mouse_clicked", "beep",
-                     "screenshot", "text_width", "image", "image_width", "image_height"}
+                     "screenshot", "text_width", "image", "image_width", "image_height", "fps", "seconds",
+                     "button_down", "button_pressed", "stick_x", "stick_y"} | THREE_D_BUILTINS
 
 PICTURE_TYPES = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 
@@ -300,6 +341,20 @@ class Compiler:
                                        fix=f"return {self.zero_example(giving.value)}",
                                        see=(giving.line, "The other `return` is here:"))
             self.funcs[f.name] = f
+        self.shaders = {}       # name -> ShaderDef
+        for st in program.main:
+            if isinstance(st, N.ShaderDef):
+                if st.name in BUILTINS or st.name in self.funcs:
+                    raise self.err(st, f"`{st.name}` is already the name of a function, so your shader needs "
+                                       f"a different name.",
+                                   hint="Change the line to:", fix_line=f"shader my_{st.name}")
+                if st.name in self.shaders:
+                    raise self.err(st, f"There's already a shader called `{st.name}`.",
+                                   hint="Each shader needs its own name.",
+                                   see=(self.shaders[st.name].line, "The first one is here:"))
+                self.shaders[st.name] = st
+        self.shader_ids = {name: i for i, name in enumerate(self.shaders)}
+        self.shader_uses = {}   # (name, kind) -> (glsl, outside names)
         self.main = Scope("main", program.main)
         self.specs = {}
         self.spec_count = 0
@@ -308,6 +363,7 @@ class Compiler:
         self.list_order = []
         self.list_set = set()
         self.uses_graphics = False
+        self.uses_3d = False
 
     # ================================================================ driver
 
@@ -331,6 +387,18 @@ class Compiler:
             raise FlauxError("Flaux got stuck working out the types in this program. "
                              "This is a bug in Flaux, please report it.")
 
+        # check shaders that are never used too (as either kind)
+        for name, shader in self.shaders.items():
+            if (name, "surface") in self.shader_uses or (name, "screen") in self.shader_uses:
+                continue
+            try:
+                shader_glsl(shader, "surface", self)
+            except FlauxError as first:
+                try:
+                    shader_glsl(shader, "screen", self)
+                except FlauxError:
+                    raise first
+
         self.emitting = True
         self.used = []
         self.used_set = set()
@@ -349,7 +417,10 @@ class Compiler:
         with open(RUNTIME_PATH, encoding="utf-8") as fh:
             runtime = fh.read()
         if self.uses_graphics:
-            runtime += f"\n#define FX_PROGRAM_DIR {c_string(self.program_dir or '')}\n" + graphics.runtime_c()
+            runtime += f"\n#define FX_PROGRAM_DIR {c_string(self.program_dir or '')}\n"
+            if self.uses_3d:
+                runtime += self.shader_tables()
+            runtime += graphics.runtime_c(three_d=self.uses_3d)
             main_code = main_code.replace("/*@FINISH@*/", "fx_g_finish();")
         else:
             main_code = main_code.replace("    /*@FINISH@*/\n", "")
@@ -370,6 +441,20 @@ class Compiler:
             "",
         ]
         return "\n".join(out)
+
+    def shader_tables(self):
+        """The shaders, as GLSL for the graphics card, for the 3D runtime."""
+        if not self.shaders:
+            return ""
+        names = list(self.shaders)
+        surface = [self.shader_uses.get((n, "surface"), (None,))[0] for n in names]
+        screen = [self.shader_uses.get((n, "screen"), (None,))[0] for n in names]
+        def table(name, items):
+            body = ",\n    ".join("NULL" if t is None else graphics.c_text(t) for t in items)
+            return f"static const char *const {name}[FX_SHADERS + 1] = {{\n    {body},\n    NULL\n}};"
+        return "\n".join([f"#define FX_SHADERS {len(names)}",
+                          table("fx_shader_names", names),
+                          table("fx_shader_surface", surface), table("fx_shader_screen", screen), ""])
 
     def walk(self, scope):
         self.scope = scope
@@ -662,6 +747,9 @@ class Compiler:
 
     def stmt(self, s):
         getattr(self, "s_" + type(s).__name__)(s)
+
+    def s_ShaderDef(self, s):
+        pass   # shaders become GLSL where they're used (see paint_arg)
 
     def s_Say(self, s):
         results = []
@@ -1104,6 +1192,13 @@ class Compiler:
             return f"v_{e.name}", t
         if e.name in self.scope.assigned:
             return "", UNK
+        if e.name in self.shaders:
+            if hint == SHADER:
+                return str(self.shader_ids[e.name]), SHADER
+            raise self.err(e, f"`{e.name}` is a shader. Shaders paint shapes, or the whole screen.",
+                           hint="Give it to a shape in place of its colour, or to effect(...):",
+                           example=f"cube(0, 0, 0, 1, {e.name})\neffect({e.name})",
+                           see=(self.shaders[e.name].line, f"`{e.name}` is made here:"))
         raise self.unknown_name(e)
 
     def x_ListLit(self, e, hint):
@@ -1343,7 +1438,8 @@ class Compiler:
         if f is not None:
             return self.call_user(e, f)
         if e.name in BUILTINS:
-            args = [self.expr(a) for a in e.args]
+            paint_at = SHADER_INPUT.get(e.name)
+            args = [self.expr(a, SHADER if i == paint_at else None) for i, a in enumerate(e.args)]
             for a, (_, t) in zip(e.args, args):
                 self.no_void(a, t, "use")
             return getattr(self, "b_" + e.name)(e, args)
@@ -1717,9 +1813,11 @@ class Compiler:
                                fix=f'"{close[0]}"' if close else None)
         return c
 
-    def graphics_call(self, code, t=VOID):
+    def graphics_call(self, code, t=VOID, three_d=False):
         if self.emitting:
             self.uses_graphics = True
+            if three_d:
+                self.uses_3d = True
         return code, t
 
     def b_window(self, e, args):
@@ -1819,30 +1917,36 @@ class Compiler:
         seconds = nums[1] if len(nums) > 1 else "0.1"
         return self.graphics_call(f"fx_g_beep({nums[0]}, {seconds}, {e.line})")
 
-    def picture_arg(self, e, args):
+    def picture_arg(self, e, args, index=0):
         """C code for a picture's file name, checking the file is really there."""
-        node, (c, t) = e.args[0], args[0]
+        node, (c, t) = e.args[index], args[index]
         self.need_text(e, node, t)
-        if (self.program_dir and isinstance(node, N.Str) and len(node.parts) == 1
-                and isinstance(node.parts[0], str)):
-            name = node.parts[0]
-            here = os.path.join(self.program_dir, name)
-            if not os.path.isfile(here) and not os.path.isfile(name):
-                try:
-                    pictures = [f for f in os.listdir(self.program_dir) if f.lower().endswith(PICTURE_TYPES)]
-                except OSError:
-                    pictures = []
-                close = difflib.get_close_matches(name, pictures, n=1, cutoff=0.5)
-                if close:
-                    raise self.err(node, f"I can't find the picture \"{name}\".",
-                                   hint=f"There's a picture called \"{close[0]}\" next to your program. "
-                                        f"Did you mean that? Change the line to:",
-                                   fix=f'"{close[0]}"')
-                raise self.err(node, f"I can't find the picture \"{name}\".",
-                               hint=f"Put the picture file in the same folder as your program "
-                                    f"({self.program_dir}), and check its name is exactly right, "
-                                    f"including the .png at the end.")
+        self.check_file(node, PICTURE_TYPES, "picture", ".png")
         return c
+
+    def check_file(self, node, kinds, what, example_ending):
+        """If node is a file name written in the program, check the file is there."""
+        if not (self.program_dir and isinstance(node, N.Str) and len(node.parts) == 1
+                and isinstance(node.parts[0], str)):
+            return
+        name = node.parts[0]
+        here = os.path.join(self.program_dir, name)
+        if os.path.isfile(here) or os.path.isfile(name):
+            return
+        try:
+            files = [f for f in os.listdir(self.program_dir) if f.lower().endswith(kinds)]
+        except OSError:
+            files = []
+        close = difflib.get_close_matches(name, files, n=1, cutoff=0.5)
+        if close:
+            raise self.err(node, f"I can't find the {what} \"{name}\".",
+                           hint=f"There's a {what} called \"{close[0]}\" next to your program. "
+                                f"Did you mean that? Change the line to:",
+                           fix=f'"{close[0]}"')
+        raise self.err(node, f"I can't find the {what} \"{name}\".",
+                       hint=f"Put the {what} file in the same folder as your program "
+                            f"({self.program_dir}), and check its name is exactly right, "
+                            f"including the {example_ending} at the end.")
 
     def b_image(self, e, args):
         if len(args) == 4:
@@ -1881,6 +1985,227 @@ class Compiler:
         (c, t), = args
         self.need_text(e, e.args[0], t)
         return self.graphics_call(f"fx_g_screenshot({c}, {e.line})")
+
+    def b_fps(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call("fx_fps()", INT)
+
+    def b_seconds(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call("fx_seconds()", FLOAT)
+
+    # ------------------------------------------------------ game controllers
+
+    def button_arg(self, e, args):
+        self.arity(e, args, 1)
+        node, (c, t) = e.args[0], args[0]
+        self.need_text(e, node, t)
+        if isinstance(node, N.Str) and len(node.parts) == 1 and isinstance(node.parts[0], str):
+            name = node.parts[0]
+            if not graphics.is_button(name):
+                close = difflib.get_close_matches(graphics.normalize(name), sorted(graphics.BUTTONS), n=1, cutoff=0.6)
+                raise self.err(node, f"Flaux doesn't know the controller button \"{name}\".",
+                               hint=(f"Did you mean \"{close[0]}\"? Change the line to:" if close
+                                     else graphics.BUTTON_HELP),
+                               fix=f'"{close[0]}"' if close else None)
+        return c
+
+    def b_button_down(self, e, args):
+        return self.graphics_call(f"fx_button_down({self.button_arg(e, args)}, {e.line})", BOOL)
+
+    def b_button_pressed(self, e, args):
+        return self.graphics_call(f"fx_button_pressed({self.button_arg(e, args)}, {e.line})", BOOL)
+
+    def stick(self, e, args, axis):
+        self.arity(e, args, 0, 1)
+        side = 'FX_LIT("left")'
+        if args:
+            node, (c, t) = e.args[0], args[0]
+            self.need_text(e, node, t)
+            if isinstance(node, N.Str) and len(node.parts) == 1 and isinstance(node.parts[0], str):
+                if graphics.normalize(node.parts[0]) not in ("left", "right"):
+                    raise self.err(node, "A controller has a \"left\" and a \"right\" stick.",
+                                   fix='"left"', hint="Change it to:")
+            side = c
+        return self.graphics_call(f"fx_stick_{axis}({side}, {e.line})", FLOAT)
+
+    def b_stick_x(self, e, args):
+        return self.stick(e, args, "x")
+
+    def b_stick_y(self, e, args):
+        return self.stick(e, args, "y")
+
+    # ------------------------------------------------------------------- 3D
+
+    def call_3d(self, code, t=VOID):
+        return self.graphics_call(code, t, three_d=True)
+
+    def shader_values(self, e, node, kind):
+        """Use the shader `node` as `kind` ("surface" or "screen"): its GLSL is
+        made once, and the C code for the numbers it uses from here is returned
+        (or None while their types are still being worked out)."""
+        name = node.name
+        key = (name, kind)
+        if key not in self.shader_uses:
+            self.shader_uses[key] = shader_glsl(self.shaders[name], kind, self)
+        _, outside = self.shader_uses[key]
+        values = []
+        for var in outside:
+            t = self.scope.vars.get(var)
+            if t is None and var in self.scope.assigned:
+                return None
+            if t is None:
+                where = "screen effects" if kind == "screen" else "shapes"
+                from .shadergen import INPUT_HELP
+                raise self.err(node, f"The shader `{name}` uses `{var}`, but there's no `{var}` here.",
+                               hint=f"Names a shader doesn't set itself come from where it's used, so make "
+                                    f"`{var}` (a number) before this line. In {where}, a shader already "
+                                    f"knows {INPUT_HELP[kind]}.",
+                               see=(self.shaders[name].line, f"`{name}` is made here:"))
+            if t == BOOL:
+                values.append(f"(v_{var} ? 1.0 : 0.0)")
+            elif is_num(t):
+                values.append(f"(double)v_{var}")
+            else:
+                raise self.err(node, f"The shader `{name}` uses `{var}`, which is {describe(t)} here. "
+                                     f"Shaders can only use numbers from the rest of the program.",
+                               see=(self.shaders[name].line, f"`{name}` is made here:"))
+        return values
+
+    def paint_arg(self, e, args, index):
+        """C code for what a shape is painted with: a colour, a picture or a shader."""
+        if len(args) <= index:
+            return 'FX_PAINT(FX_LIT("white"))'
+        node, (c, t) = e.args[index], args[index]
+        if t == SHADER:
+            values = self.shader_values(e, node, "surface")
+            if values is None:
+                return None
+            values += ["0"] * (4 - len(values))
+            return f"FX_SHADE({c}, {', '.join(values)})"
+        if t not in (TEXT, UNK):
+            raise self.err(node, f"A shape is painted with a colour (like \"red\"), a picture (like \"crate.png\") "
+                                 f"or a shader, but this is {describe(t)}.",
+                           hint=f"Here's how `{e.name}` is used:", example=BUILTINS[e.name])
+        literal = node.parts[0] if (isinstance(node, N.Str) and len(node.parts) == 1
+                                    and isinstance(node.parts[0], str)) else None
+        if literal is not None and literal.lower().endswith(PICTURE_TYPES):
+            self.check_file(node, PICTURE_TYPES, "picture", ".png")
+        else:
+            self.color_arg(e, args, index, "white")
+        return f"FX_PAINT({c})"
+
+    def shape3d(self, e, args, n, cfn):
+        self.arity(e, args, n, n + 1)
+        nums = self.numbers(e, args[:n])
+        paint = self.paint_arg(e, args, n)
+        if nums is None or paint is None:
+            return "", VOID
+        return self.call_3d(f"{cfn}({', '.join(nums)}, {paint}, {e.line})")
+
+    def b_cube(self, e, args):
+        return self.shape3d(e, args, 4, "fx_g_cube")
+
+    def b_box(self, e, args):
+        return self.shape3d(e, args, 6, "fx_g_box")
+
+    def b_ball(self, e, args):
+        return self.shape3d(e, args, 4, "fx_g_ball")
+
+    def b_cylinder(self, e, args):
+        return self.shape3d(e, args, 5, "fx_g_cylinder")
+
+    def b_cone(self, e, args):
+        return self.shape3d(e, args, 5, "fx_g_cone")
+
+    def b_plane(self, e, args):
+        return self.shape3d(e, args, 5, "fx_g_plane")
+
+    def b_model(self, e, args):
+        self.arity(e, args, 5, 6)
+        node, (fc, ft) = e.args[0], args[0]
+        self.need_text(e, node, ft)
+        if isinstance(node, N.Str) and len(node.parts) == 1 and isinstance(node.parts[0], str):
+            if not node.parts[0].lower().endswith(MODEL_TYPES):
+                raise self.err(node, "Models are .obj files.",
+                               hint="Save the model as .obj (in Blender: File, Export, Wavefront (.obj)), "
+                                    "and put it next to your program.", example=BUILTINS["model"])
+            self.check_file(node, MODEL_TYPES, "model", ".obj")
+        nums = []
+        for a, (c, t) in zip(e.args[1:5], args[1:5]):
+            self.need_num(e, a, t)
+            nums.append(None if t == UNK else self.conv(c, t, FLOAT))
+        paint = self.paint_arg(e, args, 5)
+        if ft == UNK or None in nums or paint is None:
+            return "", VOID
+        return self.call_3d(f"fx_g_model({fc}, {', '.join(nums)}, {paint}, {e.line})")
+
+    def b_camera(self, e, args):
+        self.arity(e, args, 6, 7)
+        nums = self.numbers(e, args)
+        if nums is None:
+            return "", VOID
+        fov = nums[6] if len(nums) == 7 else "60.0"
+        return self.call_3d(f"fx_g_camera({', '.join(nums[:6])}, {fov}, {e.line})")
+
+    def b_sky(self, e, args):
+        self.arity(e, args, 1, 2)
+        top = self.color_arg(e, args, 0, "black")
+        two = len(args) == 2
+        horizon = self.color_arg(e, args, 1, "black") if two else 'FX_LIT("")'
+        return self.call_3d(f"fx_g_sky({top}, {horizon}, {'true' if two else 'false'}, {e.line})")
+
+    def b_sun(self, e, args):
+        self.arity(e, args, 3, 4)
+        nums = self.numbers(e, args[:3])
+        color = self.color_arg(e, args, 3, "white")
+        if nums is None:
+            return "", VOID
+        return self.call_3d(f"fx_g_sun({', '.join(nums)}, {color}, {e.line})")
+
+    def b_light(self, e, args):
+        self.arity(e, args, 3, 5)
+        nums = self.numbers(e, args[:3])
+        color = self.color_arg(e, args, 3, "white")
+        reach = "10.0"
+        if len(args) == 5:
+            more = self.numbers(e, args, 4)
+            reach = more[0] if more else None
+        if nums is None or reach is None:
+            return "", VOID
+        return self.call_3d(f"fx_g_light({', '.join(nums)}, {color}, {reach}, {e.line})")
+
+    def b_fog(self, e, args):
+        self.arity(e, args, 1, 2)
+        nums = self.numbers(e, args[:1])
+        colored = len(args) == 2
+        color = self.color_arg(e, args, 1, "white") if colored else 'FX_LIT("")'
+        if nums is None:
+            return "", VOID
+        return self.call_3d(f"fx_g_fog({nums[0]}, {color}, {'true' if colored else 'false'}, {e.line})")
+
+    def b_turn(self, e, args):
+        self.arity(e, args, 3)
+        nums = self.numbers(e, args)
+        if nums is None:
+            return "", VOID
+        return self.call_3d(f"fx_g_turn({', '.join(nums)})")
+
+    def b_effect(self, e, args):
+        self.arity(e, args, 1)
+        node, (c, t) = e.args[0], args[0]
+        if t == UNK:
+            return "", VOID
+        if t != SHADER:
+            raise self.err(node, f"`effect` needs a shader, but this is {describe(t)}.",
+                           hint="Make a shader, then give its name to effect:",
+                           example="shader darker\n    return rgb(red / 2, green / 2, blue / 2)\nend\n\n"
+                                   "effect(darker)")
+        values = self.shader_values(e, node, "screen")
+        if values is None:
+            return "", VOID
+        vals = f"(float[]){{{', '.join(values)}}}" if values else "NULL"
+        return self.call_3d(f"fx_g_effect({c}, {vals}, {len(values)})")
 
 
 def compile_source(source, filename="program.flx", program_dir=None):

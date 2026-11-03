@@ -1,0 +1,4 @@
+# expect: Flaux doesn't know the colour "rde".
+# expect: Did you mean "red"?
+window(100, 100)
+cube(0, 0, 0, 1, "rde")

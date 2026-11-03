@@ -1,0 +1,8 @@
+# expect: Shaders can't use lists.
+shader glow
+    set c to [1, 2]
+    return "red"
+end
+
+window(100, 100)
+cube(0, 0, 0, 1, glow)

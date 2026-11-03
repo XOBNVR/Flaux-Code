@@ -1,0 +1,6 @@
+# expect: Shaders can't go inside an `if`, a `repeat` or a function.
+if true
+    shader glow
+        return "red"
+    end
+end

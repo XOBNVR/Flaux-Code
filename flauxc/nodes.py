@@ -126,6 +126,10 @@ class ExprStmt(Node):
     fields = ("expr",)
 
 
+class ShaderDef(Node):
+    fields = ("name", "body")  # shader name ... end: runs on the graphics card
+
+
 class FuncDef(Node):
     fields = ("name", "params", "body")  # params: list of Name nodes
 

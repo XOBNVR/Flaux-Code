@@ -1,0 +1,15 @@
+# a lit 3D scene: sky, ground, shapes, shadows
+# frames: 1
+# near: 160 5 #e0f2fd
+# near: 160 230 #32da5e
+# near: 100 120 #b02732
+# near: 180 120 #ab6414
+# near: 222 113 #2864de
+window(320, 240)
+sky("sky", "white")
+camera(0, 4, 8, 0, 0.5, 0)
+plane(0, 0, 0, 30, 30, "green")
+cube(-2, 0.5, 0, 1, "red")
+ball(0.5, 1, 0, 0.8, "orange")
+turn(0, 30, 0)
+box(2.5, 0.75, 0, 1, 1.5, 0.6, "blue")

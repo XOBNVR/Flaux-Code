@@ -20,6 +20,7 @@ BOOL = "bool"
 TEXT = "text"
 VOID = "void"
 UNK = "?"
+SHADER = "shader"   # a shader's name, given to a shape or effect(...)
 
 
 class TypeConflict(Exception):
@@ -84,6 +85,8 @@ def describe(t, plural=False):
         return "text"
     if t == VOID:
         return "nothing"
+    if t == SHADER:
+        return "shaders" if plural else "a shader"
     if is_list(t):
         if t[1] == UNK:
             return "lists" if plural else "a list"

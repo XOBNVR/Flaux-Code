@@ -2,7 +2,7 @@ name: Build and test
 
 on:
   push:
-    branches: [main]
+    branches: [main, "work/**"]   # work/... branches are tested, but only main is released
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install gcc and SDL2
-        run: sudo apt-get update && sudo apt-get install -y gcc libsdl2-dev
+      - name: Install gcc, SDL2 and Mesa (OpenGL without a graphics card, for the 3D tests)
+        run: sudo apt-get update && sudo apt-get install -y gcc libsdl2-dev libegl1 libegl-mesa0 libgl1-mesa-dri
       - name: Run all tests
         run: python3 tests/run_tests.py
       - name: Install a browser for the block editor test

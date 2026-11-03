@@ -1,0 +1,8 @@
+# expect: A shader gives back a colour, but this is a number.
+# expect: rgb(x * 255, x * 255, x * 255)
+shader shade
+    return x * 255
+end
+
+window(100, 100)
+cube(0, 0, 0, 1, shade)

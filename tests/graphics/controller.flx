@@ -1,0 +1,21 @@
+# game controller buttons and sticks (the test pretends "a" is held and the
+# left stick is pushed right)
+# frames: 1
+# buttons: a,stick=1
+# pixel: 10 10 #2ebd4e
+# pixel: 60 10 #000000
+# pixel: 150 50 #ffffff
+window(200, 100)
+set x to 100
+repeat forever
+    clear("black")
+    if button_down("a")
+        rect(0, 0, 50, 50, "green")
+    end
+    if button_down("b")
+        rect(50, 0, 50, 50, "red")
+    end
+    add stick_x() * 50 to x
+    rect(x - 5, 45, 10, 10, "white")
+    show()
+end

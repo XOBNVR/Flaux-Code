@@ -30,6 +30,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.environ.get("FLAUX_TOOLS") or ROOT
 BUNDLED_CC = os.path.join(TOOLS, "toolchain", "bin", "gcc" + EXE)
 BUNDLED_SDL = os.path.join(TOOLS, "sdl2")
+BUNDLED_MESA = os.path.join(TOOLS, "mesa")   # software OpenGL, for PCs without a good graphics card
 
 
 class CliError(Exception):
@@ -114,6 +115,9 @@ def compile_c(c_code, out_path):
     if "#define FX_USES_GRAPHICS" in c_code:
         cflags, libs = sdl_flags()
         cflags = cflags + ["-I", os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")]
+        if "#define FX_USES_3D" in c_code and WINDOWS and os.path.isfile(os.path.join(BUNDLED_MESA, "opengl32.dll")):
+            mesa = os.path.abspath(BUNDLED_MESA).replace("\\", "/")
+            cflags.append(f'-DFX_SOFTWARE_GL="{mesa}"')
     with tempfile.TemporaryDirectory() as tmp:
         c_path = os.path.join(tmp, "program.c")
         with open(c_path, "w", encoding="utf-8") as fh:

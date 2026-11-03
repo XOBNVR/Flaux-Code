@@ -1,0 +1,6 @@
+# expect: Shaders can't use `say`.
+# expect: millions of times a frame
+shader glow
+    say "hi"
+    return "red"
+end

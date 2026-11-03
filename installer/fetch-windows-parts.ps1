@@ -5,6 +5,8 @@
 #   build\app\python\      Python, the "embeddable" version from python.org
 #   build\app\toolchain\   gcc for Windows, from w64devkit (github.com/skeeto/w64devkit)
 #   build\app\sdl2\        SDL2 for graphics (github.com/libsdl-org/SDL)
+#   build\app\mesa\        Mesa, OpenGL without a graphics card, for 3D on PCs whose graphics
+#                          are too old (github.com/pal1000/mesa-dist-win)
 #   build\app\bin\         flaux.exe, made from installer\launcher.c
 
 $ErrorActionPreference = "Stop"
@@ -63,6 +65,22 @@ $mingw = Get-ChildItem "$tmp\sdl2" -Recurse -Directory -Filter "x86_64-w64-mingw
 New-Item -ItemType Directory -Force "$app\sdl2" | Out-Null
 foreach ($dir in "include", "lib", "bin") { Copy-Item -Recurse "$($mingw.FullName)\$dir" "$app\sdl2\$dir" }
 Write-Host "SDL2: $($sdlAsset.name)"
+
+# 4b. Mesa (software OpenGL): the newest release, built for gcc (mingw), 64-bit
+$mesaRelease = Invoke-RestMethod "https://api.github.com/repos/pal1000/mesa-dist-win/releases/latest" -Headers $headers
+$mesaAsset = $mesaRelease.assets | Where-Object { $_.name -match '^mesa3d-[\d.]+-release-mingw\.7z$' } | Select-Object -First 1
+if (-not $mesaAsset) { throw "Couldn't find a Mesa download in release $($mesaRelease.tag_name)" }
+Download $mesaAsset.browser_download_url "$tmp\mesa.7z"
+& 7z x "$tmp\mesa.7z" "-o$tmp\mesa" -y | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "Couldn't unpack $($mesaAsset.name)" }
+New-Item -ItemType Directory -Force "$app\mesa" | Out-Null
+foreach ($dll in "opengl32.dll", "libgallium_wgl.dll", "libglapi.dll") {
+    $found = Get-ChildItem "$tmp\mesa\x64" -Filter $dll -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($found) { Copy-Item $found.FullName "$app\mesa\" }
+}
+if (-not (Test-Path "$app\mesa\opengl32.dll")) { throw "Mesa's opengl32.dll is missing from $($mesaAsset.name)" }
+Get-ChildItem "$tmp\mesa" -Filter "*.txt" | Select-Object -First 3 | ForEach-Object { Copy-Item $_.FullName "$app\mesa\" }
+Write-Host "Mesa: $($mesaAsset.name)"
 
 # 5. flaux.exe
 & "$app\toolchain\bin\gcc.exe" -municode -O2 -Wall -o "$app\bin\flaux.exe" installer\launcher.c

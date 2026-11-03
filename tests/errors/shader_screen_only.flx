@@ -1,0 +1,7 @@
+# expect: `red_at` only works in a shader used with effect(...).
+shader glow
+    return rgb(red_at(x, y), 0, 0)
+end
+
+window(100, 100)
+ball(0, 0, 0, 1, glow)

@@ -7,7 +7,10 @@ import os
 from .font import c_table as font_table
 from .window_icon import RGBA as ICON_RGBA, SIZE as ICON_SIZE
 
-GRAPHICS_RUNTIME_PATH = os.path.join(os.path.dirname(__file__), "graphics.h")
+HERE = os.path.dirname(os.path.abspath(__file__))
+GRAPHICS_RUNTIME_PATH = os.path.join(HERE, "graphics.h")
+GL_RUNTIME_PATH = os.path.join(HERE, "gl.h")
+GLSL_PATH = os.path.join(HERE, "engine.glsl")
 
 # Colour names (spaces, dashes and underscores are ignored: "dark green",
 # "dark_green" and "darkgreen" all work).
@@ -54,6 +57,15 @@ KEYS = (
        "shift", "ctrl", "control", "alt"}
 )
 
+# Game controller buttons, for button_down(...) and button_pressed(...).
+BUTTONS = {"a", "b", "x", "y", "start", "back", "lb", "rb", "lt", "rt", "l3", "r3", "up", "down", "left",
+           "right", "select", "view", "menu", "options", "leftbumper", "rightbumper", "lefttrigger",
+           "righttrigger", "l1", "r1", "l2", "r2", "grip", "trigger"}
+
+BUTTON_HELP = ('Controller buttons are "a", "b", "x", "y", "start", "back", "lb", "rb" (the bumpers), '
+               '"lt", "rt" (the triggers), "l3", "r3" (pressing a stick) and "up", "down", "left", "right" '
+               '(the D-pad). On a VR controller, "trigger" and "grip" work too.')
+
 COLOR_HELP = ('Use a colour name like "red", "blue", "dark green" or "sky", a code like '
               '"#ff8800", or make one with rgb(255, 136, 0).')
 KEY_HELP = ('Key names are letters ("a" to "z"), numbers ("0" to "9"), arrows ("left", "right", '
@@ -73,14 +85,60 @@ def is_color(name):
     return key.startswith("#") and len(hexpart) in (3, 6) and all(c in "0123456789abcdef" for c in hexpart)
 
 
+def color_rgb(name):
+    """(red, green, blue) for a colour name or code, each 0 to 255."""
+    key = normalize(name)
+    if key in COLORS:
+        v = COLORS[key]
+        return (v >> 16) & 255, (v >> 8) & 255, v & 255
+    h = key[1:]
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def is_button(name):
+    return normalize(name) in BUTTONS
+
+
 def is_key(name):
     return normalize(name) in {normalize(k) for k in KEYS}
 
 
-def runtime_c():
-    """The graphics runtime, with the colour table and font filled in."""
+def glsl_sections():
+    """engine.glsl, split into its named sections."""
+    sections, name = {}, None
+    with open(GLSL_PATH, encoding="utf-8") as fh:
+        for line in fh:
+            if line.startswith("//@@ "):
+                name = line[5:].strip()
+                sections[name] = []
+            elif name:
+                sections[name].append(line)
+    return {k: "".join(v) for k, v in sections.items()}
+
+
+def c_text(text):
+    """A C string for some text, one line of it per line of C."""
+    lines = text.splitlines(keepends=True) or [""]
+    out = []
+    for line in lines:
+        esc = line.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        out.append(f'"{esc}"')
+    return "\n    ".join(out)
+
+
+def runtime_c(three_d=False):
+    """The graphics runtime, with the colour table and font filled in. With
+    three_d, the OpenGL runtime (gl.h) replaces the 2D drawing."""
     with open(GRAPHICS_RUNTIME_PATH, encoding="utf-8") as fh:
         code = fh.read()
+    if three_d:
+        with open(GL_RUNTIME_PATH, encoding="utf-8") as fh:
+            gl = fh.read()
+        glsl = "\n".join(f"static const char fx_glsl_{name}[] =\n    {c_text(text)};"
+                         for name, text in glsl_sections().items())
+        code = "#define FX_USES_3D 1\n" + code + "\n" + gl.replace("/*@GLSL@*/", glsl)
     colors = ",\n".join(f'    {{"{name}", 0x{rgb:06X}}}' for name, rgb in COLORS.items())
     code = code.replace("/*@COLORS@*/", colors)
     code = code.replace("/*@FONT@*/", font_table())

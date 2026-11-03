@@ -2,7 +2,11 @@
  * Flaux graphics: a window, shapes, text, keyboard, mouse and beeps.
  * Built on SDL2. Only added to programs that use graphics.
  *
- * For automated tests, two environment variables help:
+ * Programs that use 3D or shaders get the OpenGL runtime (gl.h) instead of
+ * the 2D drawing part at the end of this file. Everything else here (colours,
+ * keys, the mouse, game controllers, sound and reading pictures) is shared.
+ *
+ * For automated tests, these environment variables help:
  *   FLAUX_FRAMES=N        stop after N frames
  *   FLAUX_FAST=1          don't wait between frames (run as fast as possible)
  *   FLAUX_SCREENSHOT=f    save the last frame to f (a .bmp file) when stopping
@@ -39,6 +43,7 @@ static uint64_t fx_next_frame;
 static int64_t fx_frames, fx_frame_limit = -1;
 static const char *fx_shot_path;
 static bool fx_fast;
+static double fx_start_time;      /* when the window opened, for time in shaders */
 static SDL_AudioDeviceID fx_audio;
 static bool fx_audio_failed;       /* no sound on this computer: don't keep trying */
 
@@ -56,7 +61,7 @@ static const struct { const char *name; uint32_t rgb; } fx_colors[] = {
 /* ------------------------------------------------------------ helpers */
 
 static void fx_need_window(int line) {
-    if (!fx_ren)
+    if (!fx_win)
         fx_fail(line, "Open a window first, at the top of your program, like this:\n\n"
                       "      window(800, 600)",
                 "There's no window to draw in yet.");
@@ -79,11 +84,13 @@ static int fx_hex(char c) {
     return -1;
 }
 
+/* Colours already worked out, by where their text is (so the same colour
+   name in a loop is only looked up once) */
+static struct { const char *p; int64_t n; fx_rgb_t c; } fx_color_cache[256];
+
 static fx_rgb_t fx_color(fx_text t, int line) {
-    static const char *last_p;
-    static int64_t last_n = -1;
-    static fx_rgb_t last;
-    if (t.p == last_p && t.n == last_n) return last; /* same colour as last time: fast */
+    unsigned slot = (unsigned)(((uintptr_t)t.p >> 3) ^ ((uintptr_t)t.p >> 11) ^ (unsigned)t.n) & 255u;
+    if (fx_color_cache[slot].p == t.p && fx_color_cache[slot].n == t.n && t.p) return fx_color_cache[slot].c;
     char key[40];
     fx_squash(t, key, sizeof key);
     fx_rgb_t c = {0, 0, 0};
@@ -109,16 +116,14 @@ static fx_rgb_t fx_color(fx_text t, int line) {
         fx_fail(line, "Use a colour name like \"red\", \"blue\", \"dark green\" or \"sky\", a code like "
                       "\"#ff8800\",\n  or make one with rgb(255, 136, 0).",
                 "I don't know the colour \"%.*s\".", (int)t.n, t.p);
-    last_p = t.p;
-    last_n = t.n;
-    last = c;
+    /* "#rrggbb" codes (and everything rgb(...) makes) are quick to read
+       again, so only names are remembered */
+    if (key[0] != '#') {
+        fx_color_cache[slot].p = t.p;
+        fx_color_cache[slot].n = t.n;
+        fx_color_cache[slot].c = c;
+    }
     return c;
-}
-
-static void fx_use_color(fx_text color, int line) {
-    fx_rgb_t c = fx_color(color, line);
-    SDL_SetRenderDrawColor(fx_ren, c.r, c.g, c.b, 255);
-    fx_dirty = true;
 }
 
 static int fx_px(double v) { /* a position on screen, rounded to the nearest pixel */
@@ -163,6 +168,116 @@ static bool fx_key_pressed(fx_text name, int line) {
     return false;
 }
 
+/* ------------------------------------------------------ game controllers */
+
+/* Xbox, PlayStation, Switch and most other game controllers (SDL knows
+   them all). Button names: "a", "b", "x", "y", "start", "back", "lb", "rb",
+   "lt", "rt", "l3", "r3" and the D-pad "up", "down", "left", "right".
+   VR controllers (when a program runs in a headset) use the same names. */
+#define FX_PAD_BUTTONS 20
+static SDL_GameController *fx_pads[4];
+static uint8_t fx_pad_now[FX_PAD_BUTTONS], fx_pad_prev[FX_PAD_BUTTONS];
+static double fx_stick[2][2];          /* [left/right][x/y], -1 to 1 */
+static double fx_xr_buttons[FX_PAD_BUTTONS]; /* from VR controllers, if any */
+static double fx_xr_stick[2][2];
+
+enum { FX_PAD_A, FX_PAD_B, FX_PAD_X, FX_PAD_Y, FX_PAD_START, FX_PAD_BACK, FX_PAD_LB, FX_PAD_RB,
+       FX_PAD_LT, FX_PAD_RT, FX_PAD_L3, FX_PAD_R3, FX_PAD_UP, FX_PAD_DOWN, FX_PAD_LEFT, FX_PAD_RIGHT };
+
+static int fx_pad_button(fx_text name, int line) {
+    static const char *const names[] = { "a", "b", "x", "y", "start", "back", "lb", "rb", "lt", "rt",
+                                         "l3", "r3", "up", "down", "left", "right" };
+    char key[40];
+    fx_squash(name, key, sizeof key);
+    if (!strcmp(key, "select") || !strcmp(key, "view")) strcpy(key, "back");
+    if (!strcmp(key, "menu") || !strcmp(key, "options")) strcpy(key, "start");
+    if (!strcmp(key, "leftbumper") || !strcmp(key, "l1") || !strcmp(key, "grip")) strcpy(key, "lb");
+    if (!strcmp(key, "rightbumper") || !strcmp(key, "r1")) strcpy(key, "rb");
+    if (!strcmp(key, "lefttrigger") || !strcmp(key, "l2")) strcpy(key, "lt");
+    if (!strcmp(key, "righttrigger") || !strcmp(key, "r2") || !strcmp(key, "trigger")) strcpy(key, "rt");
+    for (int i = 0; i < 16; i++) if (!strcmp(names[i], key)) return i;
+    fx_fail(line, "Controller buttons are \"a\", \"b\", \"x\", \"y\", \"start\", \"back\", \"lb\", \"rb\" "
+                  "(bumpers),\n  \"lt\", \"rt\" (triggers), \"l3\", \"r3\" (pressing a stick) and \"up\", "
+                  "\"down\", \"left\", \"right\" (the D-pad).",
+            "I don't know the controller button \"%.*s\".", (int)name.n, name.p);
+    return 0;
+}
+
+static void fx_pad_connect(int index) {
+    for (int i = 0; i < 4; i++) {
+        if (!fx_pads[i]) {
+            fx_pads[i] = SDL_GameControllerOpen(index);
+            return;
+        }
+    }
+}
+
+static void fx_read_pads(void) {
+    memcpy(fx_pad_prev, fx_pad_now, sizeof fx_pad_now);
+    memset(fx_pad_now, 0, sizeof fx_pad_now);
+    memset(fx_stick, 0, sizeof fx_stick);
+    static const SDL_GameControllerButton map[16] = {
+        SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B, SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_Y,
+        SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_BACK, SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
+        SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, SDL_CONTROLLER_BUTTON_INVALID, SDL_CONTROLLER_BUTTON_INVALID,
+        SDL_CONTROLLER_BUTTON_LEFTSTICK, SDL_CONTROLLER_BUTTON_RIGHTSTICK, SDL_CONTROLLER_BUTTON_DPAD_UP,
+        SDL_CONTROLLER_BUTTON_DPAD_DOWN, SDL_CONTROLLER_BUTTON_DPAD_LEFT, SDL_CONTROLLER_BUTTON_DPAD_RIGHT };
+    for (int p = 0; p < 4; p++) {
+        SDL_GameController *c = fx_pads[p];
+        if (!c) continue;
+        if (!SDL_GameControllerGetAttached(c)) {
+            SDL_GameControllerClose(c);
+            fx_pads[p] = NULL;
+            continue;
+        }
+        for (int i = 0; i < 16; i++)
+            if (map[i] != SDL_CONTROLLER_BUTTON_INVALID && SDL_GameControllerGetButton(c, map[i])) fx_pad_now[i] = 1;
+        if (SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 16000) fx_pad_now[FX_PAD_LT] = 1;
+        if (SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 16000) fx_pad_now[FX_PAD_RT] = 1;
+        const SDL_GameControllerAxis axes[2][2] = { { SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY },
+                                                    { SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY } };
+        for (int s = 0; s < 2; s++)
+            for (int a = 0; a < 2; a++) {
+                double v = SDL_GameControllerGetAxis(c, axes[s][a]) / 32767.0;
+                if (v < -1) v = -1;
+                if (fabs(v) < 0.15) v = 0;          /* sticks never rest exactly in the middle */
+                if (a == 1) v = -v;                  /* up is positive, like y in 3D */
+                if (fabs(v) > fabs(fx_stick[s][a])) fx_stick[s][a] = v;
+            }
+    }
+    for (int i = 0; i < FX_PAD_BUTTONS; i++) if (fx_xr_buttons[i] > 0.5) fx_pad_now[i] = 1;
+    for (int s = 0; s < 2; s++)
+        for (int a = 0; a < 2; a++)
+            if (fabs(fx_xr_stick[s][a]) > fabs(fx_stick[s][a])) fx_stick[s][a] = fx_xr_stick[s][a];
+    const char *held = getenv("FLAUX_HOLD_BUTTONS"); /* for tests */
+    if (held && *held) {
+        char buf[256];
+        snprintf(buf, sizeof buf, "%s", held);
+        for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
+            if (!strncmp(tok, "stick=", 6)) { fx_stick[0][0] = atof(tok + 6); continue; }
+            fx_pad_now[fx_pad_button((fx_text){ tok, (int64_t)strlen(tok) }, 0)] = 1;
+        }
+    }
+}
+
+static bool fx_button_down(fx_text name, int line) { return fx_pad_now[fx_pad_button(name, line)] != 0; }
+static bool fx_button_pressed(fx_text name, int line) {
+    int b = fx_pad_button(name, line);
+    return fx_pad_now[b] && !fx_pad_prev[b];
+}
+
+static int fx_stick_side(fx_text side, int line) {
+    char key[40];
+    fx_squash(side, key, sizeof key);
+    if (!strcmp(key, "left") || !key[0]) return 0;
+    if (!strcmp(key, "right")) return 1;
+    fx_fail(line, "Use stick_x(\"left\") or stick_x(\"right\").", "A controller has a \"left\" and a \"right\" stick, not \"%.*s\".",
+            (int)side.n, side.p);
+    return 0;
+}
+static double fx_stick_x(fx_text side, int line) { return fx_stick[fx_stick_side(side, line)][0]; }
+static double fx_stick_y(fx_text side, int line) { return fx_stick[fx_stick_side(side, line)][1]; }
+
 static void fx_read_input(void) {
     memcpy(fx_keys_prev, fx_keys_now, sizeof fx_keys_now);
     int count = 0;
@@ -182,6 +297,7 @@ static void fx_read_input(void) {
     fx_mouse_prev = fx_mouse_now;
     Uint32 buttons = SDL_GetMouseState(&fx_mouse_xv, &fx_mouse_yv);
     fx_mouse_now = (buttons & SDL_BUTTON_LMASK) != 0;
+    fx_read_pads();
 }
 
 static int64_t fx_mouse_x(void) { return fx_mouse_xv; }
@@ -191,7 +307,8 @@ static bool fx_mouse_clicked(void) { return fx_mouse_now && !fx_mouse_prev; }
 
 /* ----------------------------------------------------------- window */
 
-static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
+/* Everything before the window itself: checks, and starting SDL. */
+static void fx_start_window(int64_t w, int64_t h, int line) {
     if (fx_win)
         fx_fail(line, "Call window(...) just once, at the start of your program.",
                 "There's already a window open.");
@@ -204,6 +321,7 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
         fx_fail(line, "Make sure this computer can show windows. (On WSL you need Windows 11, or an X server.\n"
                       "  On a computer you reach over the internet, windows can't be shown.)",
                 "Flaux couldn't open a window: %s", SDL_GetError());
+    SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER); /* fine if this computer has none */
     /* SDL can fall back to drawing nowhere when there's no screen. Unless a
        test asked for that on purpose, say so instead of running invisibly. */
     const char *driver = SDL_GetCurrentVideoDriver();
@@ -213,19 +331,187 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
         fx_fail(line, "Run your program on a computer with a screen. (On WSL you need Windows 11, or an X server.\n"
                       "  On a computer you reach over the internet, windows can't be shown.)",
                 "Flaux couldn't find a screen to open the window on.");
+}
+
+/* The window itself, with the Flaux logo as its icon. */
+static void fx_make_window(int64_t w, int64_t h, fx_text title, Uint32 flags, int line) {
     char *name = (char *)fx_text_make(title.p, title.n).p;
     fx_win = SDL_CreateWindow(name, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                              (int)w, (int)h, SDL_WINDOW_SHOWN);
+                              (int)w, (int)h, SDL_WINDOW_SHOWN | flags);
     if (!fx_win) fx_fail(line, NULL, "Flaux couldn't open a window: %s", SDL_GetError());
     SDL_Surface *icon = SDL_CreateRGBSurfaceWithFormatFrom((void *)fx_icon, FX_ICON_SIZE, FX_ICON_SIZE, 32,
                                                            FX_ICON_SIZE * 4, SDL_PIXELFORMAT_RGBA32);
     if (icon) { SDL_SetWindowIcon(fx_win, icon); SDL_FreeSurface(icon); }
+    fx_win_w = (int)w;
+    fx_win_h = (int)h;
+    const char *frames = getenv("FLAUX_FRAMES");
+    if (frames && *frames) fx_frame_limit = atoll(frames);
+    fx_shot_path = getenv("FLAUX_SCREENSHOT");
+    fx_fast = getenv("FLAUX_FAST") && *getenv("FLAUX_FAST");
+    fx_start_time = SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+    for (int i = 0; i < SDL_NumJoysticks(); i++)
+        if (SDL_IsGameController(i)) fx_pad_connect(i);
+}
+
+/* Seconds since the window opened. In tests (FLAUX_FAST) it counts frames
+   instead, so pictures come out the same every time. */
+static double fx_seconds(void) {
+    if (fx_fast) return fx_frames / 60.0;
+    return SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency() - fx_start_time;
+}
+
+/* Frames shown in the last second, so you can see how fast a game runs. */
+static double fx_fps_value;
+static int64_t fx_fps_frames;
+static double fx_fps_since;
+static void fx_count_frame(void) {
+    double now = SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+    if (fx_fps_since == 0) fx_fps_since = now;
+    fx_fps_frames++;
+    if (now - fx_fps_since >= 0.5) {
+        fx_fps_value = fx_fps_frames / (now - fx_fps_since);
+        fx_fps_frames = 0;
+        fx_fps_since = now;
+    }
+}
+static int64_t fx_fps(void) { return (int64_t)llround(fx_fps_value); }
+
+static void fx_g_close(void) {
+    if (fx_audio) {
+        /* let the last beeps finish */
+        for (int i = 0; i < 300 && SDL_GetQueuedAudioSize(fx_audio) > 0; i++) SDL_Delay(10);
+    }
+    SDL_Quit();
+}
+
+/* After a frame is shown: wait so games run at 60 frames a second, then
+   read the keys, the mouse and the controllers. */
+static void fx_next_frame_wait(void) {
+    fx_count_frame();
+    if (!fx_fast) {
+        uint64_t freq = SDL_GetPerformanceFrequency();
+        fx_next_frame += freq / 60;
+        uint64_t now = SDL_GetPerformanceCounter();
+        if (now < fx_next_frame) SDL_Delay((Uint32)((fx_next_frame - now) * 1000 / freq));
+        else if (now - fx_next_frame > freq / 4) fx_next_frame = now; /* fell far behind: catch up */
+    }
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_QUIT) { /* the window's close button */
+            fx_g_close();
+            exit(0);
+        }
+        if (ev.type == SDL_CONTROLLERDEVICEADDED) fx_pad_connect(ev.cdevice.which);
+    }
+    fx_read_input();
+}
+
+/* ------------------------------------------------------------ pictures */
+
+static bool fx_is_absolute(const char *p) {
+    return p[0] == '/' || p[0] == '\\' || (p[0] && p[1] == ':');
+}
+
+/* Read a picture file's pixels (as red, green, blue, alpha). Pictures are
+   looked for next to the program first, then in the current folder. */
+static unsigned char *fx_read_picture(const char *file, int *w, int *h, int line) {
+    char path[4096];
+    int comp = 0;
+    unsigned char *px = NULL;
+    if (!fx_is_absolute(file) && FX_PROGRAM_DIR[0]) {
+        snprintf(path, sizeof path, "%s/%s", FX_PROGRAM_DIR, file);
+        px = stbi_load(path, w, h, &comp, 4);
+    }
+    if (!px) {
+        snprintf(path, sizeof path, "%s", file);
+        px = stbi_load(path, w, h, &comp, 4);
+    }
+    if (px) return px;
+    FILE *f = fopen(path, "rb");
+    if (!f && FX_PROGRAM_DIR[0]) {
+        char there[4096];
+        snprintf(there, sizeof there, "%s/%s", FX_PROGRAM_DIR, file);
+        f = fopen(there, "rb");
+    }
+    if (!f) {
+        char fix[4400];
+        snprintf(fix, sizeof fix, "Put the picture in the same folder as your program%s%s,\n"
+                 "  and check the name is exactly right (including .png at the end).",
+                 FX_PROGRAM_DIR[0] ? ":\n\n      " : "", FX_PROGRAM_DIR[0] ? FX_PROGRAM_DIR : "");
+        fx_fail(line, fix, "I can't find the picture \"%s\".", file);
+    }
+    fclose(f);
+    fx_fail(line, "Flaux can read .png, .jpg, .bmp and .gif pictures. Try opening it in a paint\n"
+                  "  program and saving it again as a .png.",
+            "I couldn't read the picture \"%s\" (%s).", file, stbi_failure_reason());
+    return NULL;
+}
+
+/* How wide text is on screen, to help centre it. */
+static int64_t fx_text_width(fx_text t, int64_t size) {
+    if (size < 1) size = 1;
+    int64_t widest = 0, col = 0;
+    for (int64_t i = 0; i < t.n; i++) {
+        unsigned char ch = (unsigned char)t.p[i];
+        if (ch == '\n') { col = 0; continue; }
+        if (ch >= 0x80 && ch < 0xC0) continue;
+        if (++col > widest) widest = col;
+    }
+    return widest ? (widest * 6 - 1) * size : 0;
+}
+
+/* -------------------------------------------------------------- sound */
+
+static void fx_g_beep(double pitch, double seconds, int line) {
+    (void)line;
+    if (fx_audio_failed) return;
+    if (!fx_audio) {
+        fx_audio_failed = true; /* until it works */
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return; /* no sound on this computer: stay quiet */
+        SDL_AudioSpec want;
+        memset(&want, 0, sizeof want);
+        want.freq = 44100;
+        want.format = AUDIO_S16SYS;
+        want.channels = 1;
+        want.samples = 1024;
+        fx_audio = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+        if (!fx_audio) return;
+        fx_audio_failed = false;
+        SDL_PauseAudioDevice(fx_audio, 0);
+    }
+    if (pitch <= 0 || seconds <= 0) return;
+    if (seconds > 10) seconds = 10;
+    int n = (int)(seconds * 44100), fade = 441;
+    int16_t *buf = fx_alloc(sizeof(int16_t) * (size_t)n);
+    for (int i = 0; i < n; i++) {
+        double phase = fmod(i * pitch / 44100.0, 1.0);
+        double amp = 2500;
+        if (i < fade) amp *= (double)i / fade;                 /* soft start */
+        if (n - i < fade) amp *= (double)(n - i) / fade;       /* soft end */
+        buf[i] = (int16_t)(phase < 0.5 ? amp : -amp);
+    }
+    SDL_QueueAudio(fx_audio, buf, (Uint32)(sizeof(int16_t) * (size_t)n));
+    free(buf);
+}
+
+#ifndef FX_USES_3D
+/* ====================================================================
+ * 2D drawing with SDL's renderer (programs without 3D or shaders)
+ * ==================================================================== */
+
+static void fx_use_color(fx_text color, int line) {
+    fx_rgb_t c = fx_color(color, line);
+    SDL_SetRenderDrawColor(fx_ren, c.r, c.g, c.b, 255);
+    fx_dirty = true;
+}
+
+static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
+    fx_start_window(w, h, line);
+    fx_make_window(w, h, title, 0, line);
     fx_ren = SDL_CreateRenderer(fx_win, -1, SDL_RENDERER_ACCELERATED);
     if (!fx_ren) fx_ren = SDL_CreateRenderer(fx_win, -1, SDL_RENDERER_SOFTWARE);
     if (!fx_ren) fx_fail(line, NULL, "Flaux couldn't draw in the window: %s", SDL_GetError());
     SDL_SetRenderDrawBlendMode(fx_ren, SDL_BLENDMODE_BLEND);
-    fx_win_w = (int)w;
-    fx_win_h = (int)h;
 
     /* the font, as white letters on a see-through background */
     SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, 95 * 6, 8, 32, SDL_PIXELFORMAT_RGBA8888);
@@ -240,11 +526,6 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
         SDL_SetTextureBlendMode(fx_font_tex, SDL_BLENDMODE_BLEND);
         SDL_FreeSurface(s);
     }
-
-    const char *frames = getenv("FLAUX_FRAMES");
-    if (frames && *frames) fx_frame_limit = atoll(frames);
-    fx_shot_path = getenv("FLAUX_SCREENSHOT");
-    fx_fast = getenv("FLAUX_FAST") && *getenv("FLAUX_FAST");
 
     SDL_SetRenderDrawColor(fx_ren, 0, 0, 0, 255);
     SDL_RenderClear(fx_ren);
@@ -263,14 +544,6 @@ static void fx_g_screenshot(fx_text path, int line) {
     SDL_FreeSurface(s);
 }
 
-static void fx_g_close(void) {
-    if (fx_audio) {
-        /* let the last beeps finish */
-        for (int i = 0; i < 300 && SDL_GetQueuedAudioSize(fx_audio) > 0; i++) SDL_Delay(10);
-    }
-    SDL_Quit();
-}
-
 /* Show what was drawn, then wait so the game runs at 60 frames a second. */
 static void fx_g_show(int line) {
     fx_need_window(line);
@@ -283,21 +556,7 @@ static void fx_g_show(int line) {
         fx_g_close();
         exit(0);
     }
-    if (!fx_fast) {
-        uint64_t freq = SDL_GetPerformanceFrequency();
-        fx_next_frame += freq / 60;
-        uint64_t now = SDL_GetPerformanceCounter();
-        if (now < fx_next_frame) SDL_Delay((Uint32)((fx_next_frame - now) * 1000 / freq));
-        else if (now - fx_next_frame > freq / 4) fx_next_frame = now; /* fell far behind: catch up */
-    }
-    SDL_Event ev;
-    while (SDL_PollEvent(&ev)) {
-        if (ev.type == SDL_QUIT) { /* the window's close button */
-            fx_g_close();
-            exit(0);
-        }
-    }
-    fx_read_input();
+    fx_next_frame_wait();
 }
 
 /* At the end of the program, keep the window open until it's closed. */
@@ -432,12 +691,7 @@ typedef struct { char *name; SDL_Texture *tex; int w, h; } fx_image_t;
 static fx_image_t *fx_images;
 static int fx_image_count, fx_image_cap;
 
-static bool fx_is_absolute(const char *p) {
-    return p[0] == '/' || p[0] == '\\' || (p[0] && p[1] == ':');
-}
-
-/* Load a picture (once; after that it comes from the cache). Pictures are
-   looked for next to the program first, then in the current folder. */
+/* Load a picture (once; after that it comes from the cache). */
 static fx_image_t *fx_image(fx_text name, int line) {
     static const char *last_p;
     static int64_t last_n = -1;
@@ -450,36 +704,8 @@ static fx_image_t *fx_image(fx_text name, int line) {
             found = i;
     if (found < 0) {
         char *file = (char *)fx_text_make(name.p, name.n).p;
-        char path[4096];
-        int w = 0, h = 0, comp = 0;
-        unsigned char *px = NULL;
-        if (!fx_is_absolute(file) && FX_PROGRAM_DIR[0]) {
-            snprintf(path, sizeof path, "%s/%s", FX_PROGRAM_DIR, file);
-            px = stbi_load(path, &w, &h, &comp, 4);
-        }
-        if (!px) {
-            snprintf(path, sizeof path, "%s", file);
-            px = stbi_load(path, &w, &h, &comp, 4);
-        }
-        if (!px) {
-            FILE *f = fopen(path, "rb");
-            if (!f && FX_PROGRAM_DIR[0]) {
-                char there[4096];
-                snprintf(there, sizeof there, "%s/%s", FX_PROGRAM_DIR, file);
-                f = fopen(there, "rb");
-            }
-            if (!f) {
-                char fix[4400];
-                snprintf(fix, sizeof fix, "Put the picture in the same folder as your program%s%s,\n"
-                         "  and check the name is exactly right (including .png at the end).",
-                         FX_PROGRAM_DIR[0] ? ":\n\n      " : "", FX_PROGRAM_DIR[0] ? FX_PROGRAM_DIR : "");
-                fx_fail(line, fix, "I can't find the picture \"%s\".", file);
-            }
-            fclose(f);
-            fx_fail(line, "Flaux can read .png, .jpg, .bmp and .gif pictures. Try opening it in a paint\n"
-                          "  program and saving it again as a .png.",
-                    "I couldn't read the picture \"%s\" (%s).", file, stbi_failure_reason());
-        }
+        int w = 0, h = 0;
+        unsigned char *px = fx_read_picture(file, &w, &h, line);
         SDL_Surface *s = SDL_CreateRGBSurfaceWithFormatFrom(px, w, h, 32, w * 4, SDL_PIXELFORMAT_RGBA32);
         SDL_Texture *tex = s ? SDL_CreateTextureFromSurface(fx_ren, s) : NULL;
         if (s) SDL_FreeSurface(s);
@@ -515,51 +741,6 @@ static void fx_g_image(fx_text name, double x, double y, double w, double h, dou
 static int64_t fx_image_width(fx_text name, int line) { return fx_image(name, line)->w; }
 static int64_t fx_image_height(fx_text name, int line) { return fx_image(name, line)->h; }
 
-/* How wide text is on screen, to help centre it. */
-static int64_t fx_text_width(fx_text t, int64_t size) {
-    if (size < 1) size = 1;
-    int64_t widest = 0, col = 0;
-    for (int64_t i = 0; i < t.n; i++) {
-        unsigned char ch = (unsigned char)t.p[i];
-        if (ch == '\n') { col = 0; continue; }
-        if (ch >= 0x80 && ch < 0xC0) continue;
-        if (++col > widest) widest = col;
-    }
-    return widest ? (widest * 6 - 1) * size : 0;
-}
-
-/* -------------------------------------------------------------- sound */
-
-static void fx_g_beep(double pitch, double seconds, int line) {
-    (void)line;
-    if (fx_audio_failed) return;
-    if (!fx_audio) {
-        fx_audio_failed = true; /* until it works */
-        if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return; /* no sound on this computer: stay quiet */
-        SDL_AudioSpec want;
-        memset(&want, 0, sizeof want);
-        want.freq = 44100;
-        want.format = AUDIO_S16SYS;
-        want.channels = 1;
-        want.samples = 1024;
-        fx_audio = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
-        if (!fx_audio) return;
-        fx_audio_failed = false;
-        SDL_PauseAudioDevice(fx_audio, 0);
-    }
-    if (pitch <= 0 || seconds <= 0) return;
-    if (seconds > 10) seconds = 10;
-    int n = (int)(seconds * 44100), fade = 441;
-    int16_t *buf = fx_alloc(sizeof(int16_t) * (size_t)n);
-    for (int i = 0; i < n; i++) {
-        double phase = fmod(i * pitch / 44100.0, 1.0);
-        double amp = 2500;
-        if (i < fade) amp *= (double)i / fade;                 /* soft start */
-        if (n - i < fade) amp *= (double)(n - i) / fade;       /* soft end */
-        buf[i] = (int16_t)(phase < 0.5 ? amp : -amp);
-    }
-    SDL_QueueAudio(fx_audio, buf, (Uint32)(sizeof(int16_t) * (size_t)n));
-    free(buf);
-}
+#endif /* not FX_USES_3D */
 
 /* ======================== end of graphics runtime ========================== */

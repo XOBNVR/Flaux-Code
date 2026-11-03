@@ -1,0 +1,14 @@
+# a model with its own colours (.obj and .mtl), and a picture on a cube
+# frames: 1
+# near: 60 100 #f1f1f1
+# near: 70 60 #b63b2f
+# near: 150 65 #ff3c3c
+# near: 180 65 #3232ff
+# near: 150 90 #3cff3c
+# near: 180 90 #000000
+window(240, 160)
+sky("black")
+sun(0, 0, 1)
+camera(0, 0, 10, 0, 0, 0, 40)
+model("house.obj", -2, 0, 0, 3)
+cube(2, 0, 0, 2, "checker.png")
