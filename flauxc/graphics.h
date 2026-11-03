@@ -179,6 +179,7 @@ static SDL_GameController *fx_pads[4];
 static uint8_t fx_pad_now[FX_PAD_BUTTONS], fx_pad_prev[FX_PAD_BUTTONS];
 static double fx_stick[2][2];          /* [left/right][x/y], -1 to 1 */
 static double fx_xr_buttons[FX_PAD_BUTTONS]; /* from VR controllers, if any */
+static bool fx_xr_running;                    /* in a VR headset right now */
 static double fx_xr_stick[2][2];
 
 enum { FX_PAD_A, FX_PAD_B, FX_PAD_X, FX_PAD_Y, FX_PAD_START, FX_PAD_BACK, FX_PAD_LB, FX_PAD_RB,
@@ -388,7 +389,7 @@ static void fx_g_close(void) {
    read the keys, the mouse and the controllers. */
 static void fx_next_frame_wait(void) {
     fx_count_frame();
-    if (!fx_fast) {
+    if (!fx_fast && !fx_xr_running) {   /* (in VR, the headset says when the next frame is) */
         uint64_t freq = SDL_GetPerformanceFrequency();
         fx_next_frame += freq / 60;
         uint64_t now = SDL_GetPerformanceCounter();

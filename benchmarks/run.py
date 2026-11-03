@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Race Flaux against C++, C# and Python on the same programs.
+"""Race Flaux against Rust, C++, C# and Python on the same programs.
 
 Usage:  python3 benchmarks/run.py [--runs 3] [--no-python]
 
 Every program is built with normal release settings:
-    Flaux   flaux build              (C backend, gcc -O2)
+    Flaux   flaux build              (C backend, gcc -O3)
+    Rust    rustc -C opt-level=3     (the same as cargo build --release)
     C++     g++ -O2
     C#      dotnet build -c Release  (.NET 8)
     Python  python3
@@ -70,6 +71,15 @@ def main():
         sh([sys.executable, os.path.join(ROOT, "flaux"), "build",
             os.path.join(HERE, "flaux", f"{b}.flx"), "-o", exe])
         langs["Flaux"][b] = [exe]
+
+    if shutil.which("rustc"):
+        langs["Rust"] = {}
+        for b in BENCHMARKS:
+            exe = os.path.join(build, f"rust_{b}")
+            sh(["rustc", "-C", "opt-level=3", "-o", exe, os.path.join(HERE, "rust", f"{b}.rs")])
+            langs["Rust"][b] = [exe]
+    else:
+        print("  (rustc not found, skipping Rust)")
 
     langs["C++"] = {}
     for b in BENCHMARKS:

@@ -369,6 +369,7 @@ class Compiler:
         self.list_set = set()
         self.uses_graphics = False
         self.uses_3d = False
+        self.uses_xr = False     # in_vr() or the hands: look for a VR headset
 
     # ================================================================ driver
 
@@ -425,7 +426,7 @@ class Compiler:
             runtime += f"\n#define FX_PROGRAM_DIR {c_string(self.program_dir or '')}\n"
             if self.uses_3d:
                 runtime += self.shader_tables()
-            runtime += graphics.runtime_c(three_d=self.uses_3d)
+            runtime += graphics.runtime_c(three_d=self.uses_3d, xr=self.uses_xr)
             main_code = main_code.replace("/*@FINISH@*/", "fx_g_finish();")
         else:
             main_code = main_code.replace("    /*@FINISH@*/\n", "")
@@ -971,7 +972,55 @@ class Compiler:
         raise self.err(node, f"`{what}` needs a true-or-false check, but this is {describe(t)}.",
                        hint=hint, fix=fix)
 
+    def cheap_pure(self, e, depth=0):
+        """True for small whole-number sums that can't go wrong (no dividing
+        by a variable, no lists, no functions), so working them out when
+        they're not needed is harmless."""
+        if depth > 4:
+            return False
+        if isinstance(e, N.Num):
+            return not e.is_float
+        if isinstance(e, N.Name):
+            return self.scope.vars.get(e.name) in (INT, BOOL)
+        if isinstance(e, N.Unary):
+            return self.cheap_pure(e.operand, depth + 1)
+        if isinstance(e, N.Binary):
+            if e.op in ("+", "-", "*", "<", ">", "<=", ">=", "=", "!=", "and", "or"):
+                return self.cheap_pure(e.left, depth + 1) and self.cheap_pure(e.right, depth + 1)
+            if e.op in ("//", "mod"):
+                right = e.right
+                return (isinstance(right, N.Num) and not right.is_float and power_of_two(right.value)
+                        and self.cheap_pure(e.left, depth + 1))
+        return False
+
+    def branch_free_if(self, s):
+        """`if c / set v to a / else / set v to b / end`, for whole numbers,
+        without a jump: both are worked out and the right one is kept. The
+        processor never has to guess which way the `if` goes, which can make
+        loops like the Collatz one much faster."""
+        if len(s.branches) != 1 or not s.else_body or len(s.else_body) != 1 or len(s.branches[0][1]) != 1:
+            return False
+        cond, (then,) = s.branches[0]
+        (other,) = s.else_body
+        if not (isinstance(then, N.Set) and isinstance(other, N.Set) and isinstance(then.target, N.Name)
+                and isinstance(other.target, N.Name) and then.target.name == other.target.name):
+            return False
+        name = then.target.name
+        if self.scope.vars.get(name) != INT or not all(self.cheap_pure(x) for x in (cond, then.value, other.value)):
+            return False
+        cc, ct = self.expr(cond)
+        ac, at = self.expr(then.value)
+        bc, bt = self.expr(other.value)
+        if ct != BOOL or at != INT or bt != INT:
+            return False
+        a, b, m = self.tmp(), self.tmp(), self.tmp()
+        self.emit(f"{{ int64_t {a} = {ac}, {b} = {bc}, {m} = -(int64_t)({cc}); "
+                  f"v_{name} = ({a} & {m}) | ({b} & ~{m}); }}")
+        return True
+
     def s_If(self, s):
+        if self.emitting and self.branch_free_if(s):
+            return
         for i, (cond, body) in enumerate(s.branches):
             cc, ct = self.expr(cond)
             self.check_bool(cond, ct, "if" if i == 0 else "else if")
@@ -2198,6 +2247,8 @@ class Compiler:
 
     def b_in_vr(self, e, args):
         self.arity(e, args, 0)
+        if self.emitting:
+            self.uses_xr = True
         return self.call_3d("fx_in_vr()", BOOL)
 
     def hand(self, e, args, axis):
@@ -2211,6 +2262,8 @@ class Compiler:
                     raise self.err(node, "You have a \"left\" and a \"right\" hand.", fix='"right"',
                                    hint="Change it to:")
             side = c
+        if self.emitting:
+            self.uses_xr = True
         return self.call_3d(f"fx_hand({side}, {axis}, {e.line})", FLOAT)
 
     def b_hand_x(self, e, args):

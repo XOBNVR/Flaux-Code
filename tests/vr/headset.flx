@@ -1,0 +1,20 @@
+# In a VR headset (a pretend one: Monado's "qwerty" headset), the cube in
+# front of you is red, and your right hand is near you.
+window(320, 240, "VR test")
+set frames to 0
+repeat forever
+    sky("black")
+    camera(0, 1.6, 3, 0, 1.6, 0)
+    if in_vr()
+        cube(0, 1.6, 0, 1, "red")
+    else
+        cube(0, 1.6, 0, 1, "blue")
+    end
+    add 1 to frames
+    if frames = 20
+        say "in VR: {in_vr()}"
+        set hand_near to distance(hand_x("right"), hand_z("right"), 0, 3) < 1
+        say "hand is near: {hand_near}"
+    end
+    show()
+end

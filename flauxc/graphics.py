@@ -11,6 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GRAPHICS_RUNTIME_PATH = os.path.join(HERE, "graphics.h")
 GL_RUNTIME_PATH = os.path.join(HERE, "gl.h")
 GLSL_PATH = os.path.join(HERE, "engine.glsl")
+XR_RUNTIME_PATH = os.path.join(HERE, "xr.h")
 
 # Colour names (spaces, dashes and underscores are ignored: "dark green",
 # "dark_green" and "darkgreen" all work).
@@ -128,9 +129,10 @@ def c_text(text):
     return "\n    ".join(out)
 
 
-def runtime_c(three_d=False):
+def runtime_c(three_d=False, xr=False):
     """The graphics runtime, with the colour table and font filled in. With
-    three_d, the OpenGL runtime (gl.h) replaces the 2D drawing."""
+    three_d, the OpenGL runtime (gl.h) replaces the 2D drawing; with xr, VR
+    headsets (xr.h) are added too."""
     with open(GRAPHICS_RUNTIME_PATH, encoding="utf-8") as fh:
         code = fh.read()
     if three_d:
@@ -139,6 +141,9 @@ def runtime_c(three_d=False):
         glsl = "\n".join(f"static const char fx_glsl_{name}[] =\n    {c_text(text)};"
                          for name, text in glsl_sections().items())
         code = "#define FX_USES_3D 1\n" + code + "\n" + gl.replace("/*@GLSL@*/", glsl)
+        if xr:
+            with open(XR_RUNTIME_PATH, encoding="utf-8") as fh:
+                code = "#define FX_USES_XR 1\n" + code + "\n" + fh.read()
     colors = ",\n".join(f'    {{"{name}", 0x{rgb:06X}}}' for name, rgb in COLORS.items())
     code = code.replace("/*@COLORS@*/", colors)
     code = code.replace("/*@FONT@*/", font_table())

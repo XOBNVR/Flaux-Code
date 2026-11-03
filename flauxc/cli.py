@@ -19,7 +19,7 @@ from . import __version__
 from .compiler import compile_source
 from .errors import FlauxError
 
-CFLAGS = ["-O2", "-std=gnu11", "-fwrapv", "-w"]
+CFLAGS = ["-O3", "-std=gnu11", "-fwrapv", "-w"]
 WINDOWS = os.name == "nt"
 EXE = ".exe" if WINDOWS else ""
 
@@ -31,6 +31,7 @@ TOOLS = os.environ.get("FLAUX_TOOLS") or ROOT
 BUNDLED_CC = os.path.join(TOOLS, "toolchain", "bin", "gcc" + EXE)
 BUNDLED_SDL = os.path.join(TOOLS, "sdl2")
 BUNDLED_MESA = os.path.join(TOOLS, "mesa")   # software OpenGL, for PCs without a good graphics card
+BUNDLED_OPENXR = os.path.join(TOOLS, "openxr", "openxr_loader.dll")   # for VR headsets
 
 
 class CliError(Exception):
@@ -118,6 +119,9 @@ def compile_c(c_code, out_path):
         if "#define FX_USES_3D" in c_code and WINDOWS and os.path.isfile(os.path.join(BUNDLED_MESA, "opengl32.dll")):
             mesa = os.path.abspath(BUNDLED_MESA).replace("\\", "/")
             cflags.append(f'-DFX_SOFTWARE_GL="{mesa}"')
+        if "#define FX_USES_XR" in c_code and WINDOWS and os.path.isfile(BUNDLED_OPENXR):
+            loader = os.path.abspath(BUNDLED_OPENXR).replace("\\", "/")
+            cflags.append(f'-DFX_XR_LOADER="{loader}"')
     with tempfile.TemporaryDirectory() as tmp:
         c_path = os.path.join(tmp, "program.c")
         with open(c_path, "w", encoding="utf-8") as fh:

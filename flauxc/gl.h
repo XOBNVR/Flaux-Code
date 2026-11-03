@@ -967,7 +967,6 @@ static void fx_g_effect(int shader, const float *vals, int n) {
 
 /* Where your hands are (in a VR headset), and if you're in one. Without a
    headset, your hands are where the camera is. */
-static bool fx_xr_running;
 static fx_v3 fx_xr_hands[2];
 static bool fx_xr_hand_seen[2];
 
@@ -1309,7 +1308,10 @@ static void fx_draw_flat(void) {
 }
 
 #ifdef FX_USES_XR
-static void fx_xr_frame(void);
+static void fx_xr_frame(void);   /* in xr.h */
+static void fx_xr_start(void);
+static GLuint fx_framebuffer(GLuint color_tex, GLuint color_rb, GLuint depth_rb, GLuint depth_tex);
+static void fx_save_picture(GLuint fbo, int w, int h, const char *path, int line);
 #endif
 
 /* The whole frame, into fx_scene_tex. */
@@ -1589,23 +1591,28 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
     fx_next_frame = SDL_GetPerformanceCounter();
 }
 
-static void fx_g_screenshot(fx_text path, int line) {
-    fx_need_window(line);
-    unsigned char *px = fx_alloc((size_t)fx_win_w * (size_t)fx_win_h * 4);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+/* Save what's in a framebuffer as a .bmp picture. */
+static void fx_save_picture(GLuint fbo, int w, int h, const char *path, int line) {
+    unsigned char *px = fx_alloc((size_t)w * (size_t)h * 4);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, fx_win_w, fx_win_h, GL_RGBA, GL_UNSIGNED_BYTE, px);
-    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, fx_win_w, fx_win_h, 32, SDL_PIXELFORMAT_RGBA32);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_RGBA32);
     if (s) {
-        for (int y = 0; y < fx_win_h; y++)   /* OpenGL counts rows from the bottom */
-            memcpy((uint8_t *)s->pixels + (size_t)y * (size_t)s->pitch, px + (size_t)(fx_win_h - 1 - y) * (size_t)fx_win_w * 4,
-                   (size_t)fx_win_w * 4);
+        for (int y = 0; y < h; y++)   /* OpenGL counts rows from the bottom */
+            memcpy((uint8_t *)s->pixels + (size_t)y * (size_t)s->pitch, px + (size_t)(h - 1 - y) * (size_t)w * 4, (size_t)w * 4);
     }
     free(px);
-    if (!s || SDL_SaveBMP(s, fx_text_make(path.p, path.n).p) != 0)
+    if (!s || SDL_SaveBMP(s, path) != 0)
         fx_fail(line, "Check the file name, and that you're allowed to save files in that folder.",
                 "Flaux couldn't save the screenshot: %s", SDL_GetError());
     SDL_FreeSurface(s);
+}
+
+static void fx_g_screenshot(fx_text path, int line) {
+    fx_need_window(line);
+    fx_save_picture(0, fx_win_w, fx_win_h, fx_text_make(path.p, path.n).p, line);
 }
 
 /* Show what was drawn, then wait so the game runs at 60 frames a second. */

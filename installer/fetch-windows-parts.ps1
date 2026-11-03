@@ -7,6 +7,7 @@
 #   build\app\sdl2\        SDL2 for graphics (github.com/libsdl-org/SDL)
 #   build\app\mesa\        Mesa, OpenGL without a graphics card, for 3D on PCs whose graphics
 #                          are too old (github.com/pal1000/mesa-dist-win)
+#   build\app\openxr\      the OpenXR loader, for VR headsets (github.com/KhronosGroup/OpenXR-SDK-Source)
 #   build\app\bin\         flaux.exe, made from installer\launcher.c
 
 $ErrorActionPreference = "Stop"
@@ -81,6 +82,19 @@ foreach ($dll in "opengl32.dll", "libgallium_wgl.dll", "libglapi.dll") {
 if (-not (Test-Path "$app\mesa\opengl32.dll")) { throw "Mesa's opengl32.dll is missing from $($mesaAsset.name)" }
 Get-ChildItem "$tmp\mesa" -Filter "*.txt" | Select-Object -First 3 | ForEach-Object { Copy-Item $_.FullName "$app\mesa\" }
 Write-Host "Mesa: $($mesaAsset.name)"
+
+# 4c. The OpenXR loader (finds SteamVR, Meta Quest Link, Windows Mixed Reality, ...)
+$xrRelease = Invoke-RestMethod "https://api.github.com/repos/KhronosGroup/OpenXR-SDK-Source/releases/latest" -Headers $headers
+$xrAsset = $xrRelease.assets | Where-Object { $_.name -match '^openxr_loader_windows-[\d.]+\.zip$' } | Select-Object -First 1
+if (-not $xrAsset) { throw "Couldn't find the OpenXR loader in release $($xrRelease.tag_name)" }
+Download $xrAsset.browser_download_url "$tmp\openxr.zip"
+Expand-Archive "$tmp\openxr.zip" "$tmp\openxr"
+$xrDll = Get-ChildItem "$tmp\openxr" -Recurse -Filter "openxr_loader.dll" | Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'uwp' } | Select-Object -First 1
+if (-not $xrDll) { throw "openxr_loader.dll (64-bit) is missing from $($xrAsset.name)" }
+New-Item -ItemType Directory -Force "$app\openxr" | Out-Null
+Copy-Item $xrDll.FullName "$app\openxr\"
+Get-ChildItem "$tmp\openxr" -Recurse -Filter "LICENSE*" | Select-Object -First 1 | ForEach-Object { Copy-Item $_.FullName "$app\openxr\" }
+Write-Host "OpenXR loader: $($xrAsset.name) ($($xrDll.FullName))"
 
 # 5. flaux.exe
 & "$app\toolchain\bin\gcc.exe" -municode -O2 -Wall -o "$app\bin\flaux.exe" installer\launcher.c
