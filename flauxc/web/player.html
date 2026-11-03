@@ -62,7 +62,7 @@ body.text-only #out { max-height: none; flex: 1; }
   const $ = (id) => document.getElementById(id);
   const program = JSON.parse($("program").textContent);   // { name, js, source, pictures }
   const canvas = $("canvas"), screen = $("screen"), out = $("out");
-  const mouse = { x: 0, y: 0, down: false, pressed: false }, keys = new Set();
+  const mouse = { x: 0, y: 0, down: false, pressed: false, mx: 0, my: 0 }, keys = new Set();
 
   // ------------------------------------------------------------- output
   function write(stream, text) {
@@ -99,13 +99,18 @@ body.text-only #out { max-height: none; flex: 1; }
   canvas.addEventListener("blur", () => keys.clear());
   const where = (e) => {          // canvas pixels, however big the canvas is shown, kept on the canvas
     const r = canvas.getBoundingClientRect();
+    mouse.mx += e.movementX || 0;   // how far it moved, locked or not, in screen (CSS) pixels:
+    mouse.my += e.movementY || 0;   // not scaled to the canvas, so turning feels the same at any size
+    if (locked()) return;          // locked: the pointer stays where it was
     mouse.x = Math.max(0, Math.min(canvas.width - 1, Math.floor((e.clientX - r.left) * canvas.width / r.width)));
     mouse.y = Math.max(0, Math.min(canvas.height - 1, Math.floor((e.clientY - r.top) * canvas.height / r.height)));
   };
   canvas.addEventListener("mousemove", where);
   canvas.addEventListener("mousedown", (e) => {
-    where(e); mouse.down = mouse.pressed = true; canvas.focus();
+    if (!locked()) where(e);
+    mouse.down = mouse.pressed = true; canvas.focus();
     if (wanted) enter();
+    if (lookWanted && !locked()) askLock();   // lock_mouse(): after a click (and again after Esc let go)
   });
   window.addEventListener("mouseup", () => { mouse.down = false; });
 
@@ -145,6 +150,24 @@ body.text-only #out { max-height: none; flex: 1; }
   $("exit").addEventListener("click", leave);
   screen.addEventListener("mousedown", (e) => { if (e.target === screen) { e.preventDefault(); canvas.focus(); } });
 
+  // --------------------------------------------------------- mouse look
+  // lock_mouse(): the canvas takes the pointer (Pointer Lock API). Browsers only
+  // allow it after a click and Esc lets go, so while the program wants it, a click locks it again.
+  let lookWanted = false;
+  const locked = () => document.pointerLockElement === canvas;
+  function askLock() {
+    try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* no Pointer Lock */ }
+  }
+  function lockMouse(on) {
+    lookWanted = on;
+    if (on && !locked()) askLock();
+    if (!on && locked()) try { document.exitPointerLock(); } catch (e) { /* gone */ }
+    lookHint();
+  }
+  function lookHint() {
+    $("title").textContent = ($("title").dataset.name || "") + (lookWanted && !locked() ? "  (click the game to look around)" : "");
+  }
+  document.addEventListener("pointerlockchange", lookHint);
   // -------------------------------------------------------------- sound
   let audio = null, audioTime = 0;
   const wake = () => { if (audio && audio.state === "suspended") audio.resume(); };
@@ -176,7 +199,7 @@ body.text-only #out { max-height: none; flex: 1; }
       canvas.width = w; canvas.height = h;
       document.body.classList.remove("text-only");
       screen.hidden = $("bar").hidden = false;
-      $("title").textContent = title === "Flaux" ? program.name : title;
+      $("title").dataset.name = $("title").textContent = title === "Flaux" ? program.name : title;
       if (title !== "Flaux") document.title = title;
       fit();
       canvas.focus();
@@ -203,10 +226,12 @@ body.text-only #out { max-height: none; flex: 1; }
     // fullscreen(): browsers only allow it after a click or key, so the button lights up
     // and the next click on the game does it
     fullscreen: () => { if (!isFull()) enter().then((ok) => { if (!ok) want(true); }); },
+    lockMouse, mouseLocked: locked,
   };
   const lines = program.source.split("\n").map((l) => l.replace(/\s+$/, ""));
   FlauxRuntime.runProgram(program.js, io, { file: program.name + ".flx", lines }).then((code) => {
     want(false);
+    lockMouse(false);                        // the pointer back when the program ends
     if (code !== 0) leave();                 // a problem: show the message
     if (!out.hidden || code !== 0) write("note", code === 0 ? "\n— Finished —\n" : "\n— Stopped —\n");
   });

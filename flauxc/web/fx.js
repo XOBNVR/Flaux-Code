@@ -10,7 +10,12 @@
  *   io.openWindow(w, h, title)    -> { screen: canvas, back: canvas }
  *   io.keys (Set of key names)    io.mouse = { x, y, down, pressed }  (pressed: set on
  *                                 mouse down, so a click quicker than a frame still counts)
+ *                                 io.mouse.mx, my: how far it moved since the last frame, in screen
+ *                                 (CSS) pixels as the browser gives them, not scaled to the canvas
+ *                                 (added up by the page, set back to 0 at each frame)
  *   io.fullscreen()               (optional) asked for by fullscreen()
+ *   io.lockMouse(on)              (optional) lock_mouse() / unlock_mouse()
+ *   io.mouseLocked() -> bool      (optional) for mouse_locked()
  *   io.nextFrame() -> Promise     waits for the next frame (60 a second)
  *   io.cancelled() -> bool        true after Stop was pressed
  *   io.loadPicture(name) -> Promise<image or null>
@@ -221,6 +226,7 @@
     // ------------------------------------------------------------ graphics
     let colors = {}, font = [], win = null, back = null, ctx = null, W = 0, H = 0, dirty = false;
     let keysNow = new Set(), keysPrev = new Set(), mouseNow = false, mousePrev = false;
+    let moveX = 0, moveY = 0, movedX = 0, movedY = 0;       // mouse movement (see readInput)
     const pictures = new Map();
     fx.setupGraphics = (c, f) => { colors = c; font = f; };
 
@@ -268,6 +274,11 @@
       keysPrev = keysNow; keysNow = new Set(io.keys);
       mousePrev = mouseNow; mouseNow = !!(io.mouse.down || io.mouse.pressed);
       io.mouse.pressed = false;     // a click quicker than a frame still counts
+      // mouse movement: whole pixels this frame, the rest is kept for the next one (like graphics.h)
+      moveX += io.mouse.mx || 0; moveY += io.mouse.my || 0;
+      io.mouse.mx = io.mouse.my = 0;
+      movedX = Math.trunc(moveX); movedY = Math.trunc(moveY);
+      moveX -= movedX; moveY -= movedY;
     }
     function present() { win.screen.getContext("2d").drawImage(back, 0, 0); dirty = false; }
     function keyName(name, line) {
@@ -381,6 +392,10 @@
       mouse_down: () => mouseNow, mouse_clicked: () => mouseNow && !mousePrev,
       beep: ([pitch, seconds]) => io.beep(pitch, seconds === undefined ? 0.1 : seconds),
       fullscreen: (_, line) => { needWindow(line); if (io.fullscreen) io.fullscreen(); },
+      mouse_moved_x: () => movedX, mouse_moved_y: () => movedY,
+      lock_mouse: (_, line) => { needWindow(line); if (io.lockMouse) io.lockMouse(true); },
+      unlock_mouse: () => { if (win && io.lockMouse) io.lockMouse(false); },
+      mouse_locked: () => !!(win && io.mouseLocked && io.mouseLocked()),
       screenshot: ([name], line) => { needWindow(line); if (io.screenshot) io.screenshot(str(name), back); },
     });
 

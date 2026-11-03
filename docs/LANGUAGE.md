@@ -473,6 +473,9 @@ showing it until you close it.
 | `mouse_x()`, `mouse_y()` | where the mouse is in the window |
 | `mouse_down()` | true while the left mouse button is held |
 | `mouse_clicked()` | true only on the frame of a click |
+| `mouse_moved_x()`, `mouse_moved_y()` | how far the mouse moved since the last frame, in screen pixels (see [Mouse look](#mouse-look)) |
+| `lock_mouse()`, `unlock_mouse()` | hide the pointer and keep it in the window, and give it back |
+| `mouse_locked()` | true while the mouse is locked |
 
 Key names: `"a"` to `"z"`, `"0"` to `"9"`, `"left"`, `"right"`, `"up"`,
 `"down"`, `"space"`, `"enter"`, `"escape"`, `"tab"`, `"backspace"`,
@@ -481,6 +484,46 @@ Key names: `"a"` to `"z"`, `"0"` to `"9"`, `"left"`, `"right"`, `"up"`,
 
 Use `key_down` for smooth movement, and `key_pressed` for things that
 should happen once per press, like jumping or firing.
+
+### Mouse look
+
+In a 3D game you can turn by moving the mouse, like in first-person games.
+`lock_mouse()` (after `window(...)`) hides the pointer and keeps it in the
+window, so the mouse can move as far as you like without stopping at the edge
+of the screen. Then `mouse_moved_x()` and `mouse_moved_y()` say how far the
+mouse moved since the last frame, in screen pixels: right and down are more
+than 0, left and up are less than 0. They work when the mouse isn't locked too.
+
+Screen pixels are the same however big the game is shown (in a window,
+fullscreen, or in Flaux Studio), so the same hand movement always turns your
+view the same amount. (`mouse_x()` and `mouse_y()` are different: they give
+places in your window's own pixels, for pointing at things.) A turn speed of
+about `0.004` per pixel is a good start: with it, moving the mouse about 1600
+pixels turns all the way round, because `sin` and `cos` use radians.
+
+```
+window(800, 600, "Look around")
+lock_mouse()
+set turn to 0
+set tilt to 0
+repeat forever
+    set turn to turn + mouse_moved_x() * 0.004
+    set tilt to tilt + mouse_moved_y() * 0.004
+    clear("sky")
+    if not mouse_locked()
+        write("Click to look around", 10, 10)
+    end
+    show()
+end
+```
+
+- **Esc** gives the pointer back, so players can always get it out. While
+  your program wants the mouse locked (until `unlock_mouse()`), a click on the
+  game locks it again. The click still counts for `mouse_clicked()`.
+- On the web, browsers only lock the mouse after a click, so the game's name
+  says "click the game to look around" until then.
+- While the mouse is locked, `mouse_x()` and `mouse_y()` stay where they were.
+- The pointer comes back by itself when the program ends or is stopped.
 
 ### Pictures
 

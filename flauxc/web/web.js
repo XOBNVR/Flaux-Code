@@ -6,7 +6,8 @@
  * - programs become JavaScript (jsgen.py) and run on fx.js
  * - your programs and pictures are kept in this browser (localStorage)
  * - games draw in the game panel, with keyboard, mouse and sound, and can go
- *   fullscreen (the Fullscreen button, or fullscreen() in the program)
+ *   fullscreen (the Fullscreen button, or fullscreen() in the program), and
+ *   lock the mouse for looking around (lock_mouse(): Pointer Lock API)
  * - Export makes a .zip with the program as one web page (player.html filled
  *   in with fx.js, the compiled program and its pictures) and files that open it
  *
@@ -152,7 +153,7 @@ window.FlauxWeb = (() => {
   }
 
   // ------------------------------------------------------------- running
-  const game = { canvas: null, keys: new Set(), mouse: { x: 0, y: 0, down: false } };
+  const game = { canvas: null, keys: new Set(), mouse: { x: 0, y: 0, down: false, mx: 0, my: 0 } };
 
   const KEY_NAMES = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", " ": "space",
     Enter: "enter", Escape: "escape", Shift: "shift", Control: "ctrl", Alt: "alt", Tab: "tab",
@@ -170,6 +171,11 @@ window.FlauxWeb = (() => {
     // panel or fullscreen), kept on the canvas.
     const where = (e) => {
       const r = canvas.getBoundingClientRect();
+      // how far it moved (locked or not), in screen (CSS) pixels as the browser gives them:
+      // not scaled to the canvas, so mouse look turns as fast in the panel as in fullscreen
+      game.mouse.mx += e.movementX || 0;
+      game.mouse.my += e.movementY || 0;
+      if (mouseLocked()) return;        // locked: the pointer stays where it was
       const x = Math.floor((e.clientX - r.left) * canvas.width / r.width);
       const y = Math.floor((e.clientY - r.top) * canvas.height / r.height);
       game.mouse.x = Math.max(0, Math.min(canvas.width - 1, x));
@@ -177,8 +183,10 @@ window.FlauxWeb = (() => {
     };
     canvas.addEventListener("mousemove", where);
     canvas.addEventListener("mousedown", (e) => {
-      where(e); game.mouse.down = game.mouse.pressed = true; canvas.focus();
+      if (!mouseLocked()) where(e);
+      game.mouse.down = game.mouse.pressed = true; canvas.focus();
       if (full.wanted) enterFullscreen();          // the program asked: a click is allowed to do it
+      if (look.wanted && !mouseLocked()) askLock(); // the same for lock_mouse() (and after Esc let go)
     });
     window.addEventListener("mouseup", () => { game.mouse.down = false; });
     setUpFullscreen();
@@ -208,9 +216,13 @@ window.FlauxWeb = (() => {
   function wantFullscreen(on) {
     full.wanted = on;
     document.getElementById("btn-fullscreen").classList.toggle("wants", on);
+    showTitle();
+  }
+  function showTitle() {
     const title = document.getElementById("game-title");
     title.textContent = title.dataset.name ? title.dataset.name +
-      (on ? "  (click the game to go fullscreen)" : "  (click here to use the keys)") : "";
+      (full.wanted ? "  (click the game to go fullscreen)"
+       : look.wanted && !mouseLocked() ? "  (click the game to look around)" : "  (click here to use the keys)") : "";
   }
   function enterFullscreen() {
     const box = document.getElementById("game-screen");
@@ -246,6 +258,26 @@ window.FlauxWeb = (() => {
     });
   }
 
+  // ----------------------------------------------------------- mouse look
+  // lock_mouse(): the canvas takes the pointer (Pointer Lock API), so the
+  // mouse can move forever. Browsers only allow it after a click, and Esc lets
+  // go, so while the program wants it locked, a click on the game locks it again.
+  const look = { wanted: false };
+  function mouseLocked() { return !!game.canvas && document.pointerLockElement === game.canvas; }
+  function askLock() {
+    try {
+      const p = game.canvas.requestPointerLock();
+      if (p && p.catch) p.catch(() => {});        // refused: the next click tries again
+    } catch (e) { /* no Pointer Lock here */ }
+  }
+  function lockMouse(on) {
+    look.wanted = on;
+    if (on && !mouseLocked()) askLock();
+    if (!on && mouseLocked()) try { document.exitPointerLock(); } catch (e) { /* already gone */ }
+    showTitle();
+  }
+  document.addEventListener("pointerlockchange", () => { if (game.canvas) showTitle(); });
+
   let audio = null, audioTime = 0;
   function beep(pitch, seconds) {
     try {
@@ -275,6 +307,7 @@ window.FlauxWeb = (() => {
     runs.set(id, r);
     const panel = document.getElementById("game");
     leaveFullscreen();
+    lockMouse(false);
     panel.hidden = true;
     game.keys.clear();
     const io = {
@@ -307,6 +340,7 @@ window.FlauxWeb = (() => {
         wantFullscreen(false);
         fitCanvas();
         game.canvas.focus();
+        game.mouse.mx = game.mouse.my = 0;
         const back = document.createElement("canvas");
         back.width = w; back.height = h;
         return { screen: game.canvas, back };
@@ -318,6 +352,8 @@ window.FlauxWeb = (() => {
         if (isFullscreen()) return;
         enterFullscreen().then((ok) => { if (!ok && !r.done && !r.cancelled) wantFullscreen(true); });
       },
+      lockMouse: (on) => { if (!r.done && !r.cancelled) lockMouse(on); },
+      mouseLocked,
       nextFrame: () => new Promise((resolve) => {
         const tick = (now) => {              // 60 frames a second, whatever the screen
           if (r.cancelled || now - r.lastFrame >= 1000 / 60 - 2) { r.lastFrame = now; resolve(); }
@@ -337,6 +373,7 @@ window.FlauxWeb = (() => {
       // Stop or a problem: back to the Studio, so the message can be read. A game
       // that finished normally stays as it is (its last picture is still shown).
       if (String(nextRun - 1) !== id) return;           // a newer run has the game panel now
+      lockMouse(false);                                 // the pointer back, however it ended
       if (code !== 0) leaveFullscreen();
       else wantFullscreen(false);
     });
@@ -533,5 +570,6 @@ window.FlauxWeb = (() => {
   document.addEventListener("DOMContentLoaded", () => { setUpGame(); python(); });
 
   return { api, download, openFromComputer, addPictures, picturesSaved: () => Object.keys(load(PICTURES)),
-           mouse: () => ({ x: game.mouse.x, y: game.mouse.y }) };
+           mouse: () => ({ x: game.mouse.x, y: game.mouse.y }),
+           mouseLook: () => ({ wanted: look.wanted, locked: mouseLocked() }) };
 })();
