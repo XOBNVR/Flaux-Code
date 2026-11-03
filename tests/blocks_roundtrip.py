@@ -83,8 +83,9 @@ def main():
             script = os.path.join(home, "roundtrip.js")
             with open(script, "w") as fh:
                 fh.write(BROWSER_SCRIPT)
+            # (the browser keeps the normal home folder: Playwright finds its browsers there)
             run = subprocess.run([node, script, url, json.dumps(files)], capture_output=True, text=True,
-                                 cwd=home, env=dict(env, NODE_PATH=os.environ.get("NODE_PATH", "")))
+                                 cwd=home)
         finally:
             server.kill()
     if run.returncode != 0:

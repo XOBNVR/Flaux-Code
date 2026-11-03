@@ -75,14 +75,26 @@ jobs:
           name: FlauxSetup
           path: dist/FlauxSetup.exe
 
-      # Every change to main that passes all of the above becomes the
-      # README's download: release v<version>, with FlauxSetup.exe.
+  # Every change to main that passes everything above, on Linux AND Windows,
+  # becomes the README's download: release v<version>, with FlauxSetup.exe.
+  release:
+    name: Publish the installer
+    needs: [linux, windows]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: echo "version=$(python3 -c 'import flauxc; print(flauxc.__version__)')" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: FlauxSetup
+          path: dist
       - name: Publish FlauxSetup.exe as a release
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.build.outputs.version }}
-          name: Flaux ${{ steps.build.outputs.version }}
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Flaux ${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           make_latest: true
           files: dist/FlauxSetup.exe
@@ -97,4 +109,4 @@ jobs:
 
             See the [README](https://github.com/XOBNVR/Flaux-Code#readme) for the lessons.
 
-            _Built and tested automatically: every test passed on Windows and Linux, and this exact installer was installed and tried out before being published._
+            _Built and tested automatically: every test passed on Windows and Linux (including the block editor), and this exact installer was installed and tried out before being published._
