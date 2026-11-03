@@ -1,0 +1,3 @@
+# expect: `5s` is an amount of time, which only goes after `wait`
+# expect: set speed to 5
+set speed to 5s

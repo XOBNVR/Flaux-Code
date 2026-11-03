@@ -191,6 +191,8 @@ static bool fx_mouse_clicked(void) { return fx_mouse_now && !fx_mouse_prev; }
 
 /* ----------------------------------------------------------- window */
 
+static void fx_g_wait_events(void);
+
 static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
     if (fx_win)
         fx_fail(line, "Call window(...) just once, at the start of your program.",
@@ -251,6 +253,7 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
     SDL_PumpEvents();
     fx_read_input();
     fx_next_frame = SDL_GetPerformanceCounter();
+    fx_wait_events = fx_g_wait_events;
 }
 
 static void fx_g_screenshot(fx_text path, int line) {
@@ -298,6 +301,19 @@ static void fx_g_show(int line) {
         }
     }
     fx_read_input();
+}
+
+/* While the program waits (`wait 2s`): handle the window's events, so it
+ * doesn't go "Not responding" and its close button still ends the program. */
+static void fx_g_wait_events(void) {
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_QUIT) {
+            fx_g_close();
+            exit(0);
+        }
+        if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_EXPOSED) SDL_RenderPresent(fx_ren);
+    }
 }
 
 /* At the end of the program, keep the window open until it's closed. */

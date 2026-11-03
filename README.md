@@ -429,6 +429,17 @@ More kinds of repeat:
 
 Inside a repeat, `stop` jumps out of it, and `skip` jumps to the next turn.
 
+To watch a loop go slowly, `wait` pauses the program. Put `s` (seconds),
+`m` (minutes), `h` (hours) or `d` (days) after the number:
+
+```
+repeat with i from 3 to 1 by -1
+    say i
+    wait 1s
+end
+say "Lift off!"
+```
+
 ### Lesson 8: Lists
 
 A **list** holds lots of things in order.
@@ -717,6 +728,7 @@ change the colours, add a second basket. That's the best way to learn.
 | make a function | `function name(input)` ... `end` |
 | give back an answer | `return answer` |
 | roll a dice | `random(1, 6)` |
+| pause for a while | `wait 1s`, `wait 0.5s`, `wait 2m`, `wait delay seconds` |
 | leave a note | `# anything after a hash is ignored` |
 | open a window | `window(800, 600, "My Game")` |
 | draw shapes | `rect(...)`, `circle(...)`, `triangle(...)`, `line(...)` |

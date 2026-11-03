@@ -1004,6 +1004,26 @@ class Compiler:
         self.depth -= 1
         self.emit("}")
 
+    WAIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    WAIT_WORDS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
+
+    def s_Wait(self, s):
+        c, t = self.expr(s.amount)
+        if t == UNK:
+            return
+        if not is_num(t):
+            text = self.src(s.amount)
+            raise self.err(s.amount, f"`wait` needs a number of {self.WAIT_WORDS[s.unit]}, but this is {describe(t)}.",
+                           hint="If the text holds a number, turn it into a number first:" if t == TEXT else
+                                "Put a number here, like this:",
+                           fix=f"number({text})" if t == TEXT else None,
+                           example=None if t == TEXT else "wait 2s\nwait delay seconds")
+        if isinstance(s.amount, N.Num) and s.amount.value < 0:
+            raise self.err(s.amount, "You can't wait for a negative amount of time.",
+                           hint="Waiting goes forwards only. Use a number that's 0 or more:",
+                           fix=self.src(s.amount).lstrip("-").lstrip() or "1")
+        self.emit(f"fx_wait({self.conv(c, t, FLOAT)}, {self.WAIT_SECONDS[s.unit]}, {s.line});")
+
     def s_Stop(self, s):
         if self.loops == 0:
             hint = "`stop` ends the `repeat` it's inside."

@@ -1,0 +1,29 @@
+# wait pauses the program for a while: s, m, h or d after a number,
+# or seconds, minutes, hours or days after anything else.
+say "ready"
+wait 0.01s
+set start to clock()
+wait 0.02 seconds
+set delay to 0.01
+wait delay seconds
+wait 0s
+wait 0.0005m          # 0.03 seconds
+wait 0 hours
+wait 0 days
+wait 0d
+wait 0h
+wait 1 / 1000 second
+say clock() - start >= 0.055
+
+function nap(t)
+    wait t seconds
+    return t * 2
+end
+
+say nap(0.01)
+repeat 3 times
+    wait 0.005s
+    say "tick"
+end
+wait for 1 / 1000 seconds
+say "go!"

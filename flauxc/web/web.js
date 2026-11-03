@@ -13,7 +13,11 @@
 
 window.FlauxWeb = (() => {
   const PROGRAMS = "flaux-web-programs", PICTURES = "flaux-web-pictures";
-  const MAX_CHUNKS = 20000;
+  // Output waiting for the page to show it. A program that says things very
+  // fast (in a forever loop) can make more than anyone can read, so only the
+  // newest MAX_KEEP characters are kept; the page is told when older ones were
+  // skipped. Small pieces are joined, so there are few chunks to hand over.
+  const MAX_KEEP = 1000000, JOIN_UP_TO = 16384;
   let examples = null, py = null, pyLoading = null;
   const runs = new Map();
   let nextRun = 1;
@@ -192,13 +196,31 @@ window.FlauxWeb = (() => {
     const built = await ask("build", d.content, name);
     if (!built.ok) return built;
     const id = String(nextRun++);
-    const r = { chunks: [], done: false, exit: null, cancelled: false, asking: null, answers: [], lastFrame: 0 };
+    // chunks[k] is chunk number base + k; `given` is how many the page has had
+    const r = { chunks: [], base: 0, given: 0, kept: 0, done: false, exit: null, cancelled: false,
+                asking: null, answers: [], lastFrame: 0, sleepers: new Set() };
     runs.set(id, r);
     const panel = document.getElementById("game");
     panel.hidden = true;
     game.keys.clear();
     const io = {
-      write: (stream, text) => { if (r.chunks.length < MAX_CHUNKS) r.chunks.push([stream, text]); },
+      write: (stream, text) => {
+        const last = r.chunks[r.chunks.length - 1];
+        // join onto the last chunk if the page hasn't had it yet
+        if (last && last[0] === stream && r.base + r.chunks.length - 1 >= r.given && last[1].length < JOIN_UP_TO)
+          last[1] += text;
+        else r.chunks.push([stream, text]);
+        r.kept += text.length;
+        while (r.kept > MAX_KEEP && r.chunks.length > 1) {    // too much waiting: drop the oldest
+          const [, old] = r.chunks.shift();
+          r.kept -= old.length; r.base++;
+        }
+      },
+      sleep: (ms) => new Promise((resolve) => {
+        const wake = () => { clearTimeout(timer); r.sleepers.delete(wake); resolve(); };
+        const timer = setTimeout(wake, ms);
+        r.sleepers.add(wake);
+      }),
       ask: (prompt) => {
         if (prompt) io.write("out", prompt.endsWith(" ") ? prompt : prompt + " ");
         if (r.answers.length) return Promise.resolve(r.answers.shift());
@@ -237,7 +259,12 @@ window.FlauxWeb = (() => {
   function output(d) {
     const r = runs.get(String(d.run));
     if (!r) return { chunks: [], done: true, exit: null };
-    return { chunks: r.chunks.slice(d.from || 0), done: r.done, exit: r.exit };
+    // `from` counts every chunk ever made, so it keeps working after old ones are dropped
+    const from = Math.max(d.from || 0, r.base);
+    const chunks = r.chunks.slice(from - r.base);
+    const skipped = (d.from || 0) < r.base;
+    r.given = Math.max(r.given, from + chunks.length);
+    return { chunks, start: from, skipped, done: r.done, exit: r.exit };
   }
 
   function input(d) {
@@ -253,6 +280,7 @@ window.FlauxWeb = (() => {
     if (r) {
       r.cancelled = true;
       if (r.asking) { const resolve = r.asking; r.asking = null; resolve(""); }
+      for (const wake of [...r.sleepers]) wake();     // stop a `wait` straight away
     }
     return { ok: true };
   }

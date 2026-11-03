@@ -72,10 +72,18 @@ class Run:
     """One running program: its process and everything it has printed."""
 
     MARKER = "Problem while running"   # how a problem message starts
+    MAX_KEEP = 1_000_000
+    JOIN_UP_TO = 16384
 
     def __init__(self, proc):
         self.proc = proc
-        self.chunks = []  # [stream, text]
+        # [stream, text]; chunks[k] is chunk number base + k. A program that
+        # says things very fast keeps only the newest MAX_KEEP characters
+        # waiting, and the page is told older ones were skipped.
+        self.chunks = []
+        self.base = 0
+        self.given = 0           # how many chunks the page has had
+        self.kept = 0            # characters in self.chunks
         self.lock = threading.Lock()
         self.exit_code = None
         self.in_problem = False
@@ -107,13 +115,13 @@ class Run:
         if self.in_problem:
             text = text.replace("\r", "")
             if text:
-                self.chunks.append(["err", text])
+                self.push("err", text)
             return
         i = text.find(self.MARKER)
         if i >= 0:
             if i:
-                self.chunks.append(["out", text[:i]])
-            self.chunks.append(["err", text[i:]])
+                self.push("out", text[:i])
+            self.push("err", text[i:])
             self.in_problem = True
             return
         keep = 0
@@ -129,17 +137,38 @@ class Run:
             self.pending, text = text[-keep:], text[:-keep]
             self.pending_since = time.time()
         if text:
-            self.chunks.append(["out", text])
+            self.push("out", text)
+
+    def push(self, stream, text):
+        """Add output (call with the lock held). Small pieces the page hasn't
+        had yet are joined, and the oldest go if too much is waiting."""
+        last = self.chunks[-1] if self.chunks else None
+        if (last and last[0] == stream and self.base + len(self.chunks) - 1 >= self.given
+                and len(last[1]) < self.JOIN_UP_TO):
+            last[1] += text
+        else:
+            self.chunks.append([stream, text])
+        self.kept += len(text)
+        while self.kept > self.MAX_KEEP and len(self.chunks) > 1:
+            self.kept -= len(self.chunks.pop(0)[1])
+            self.base += 1
+
+    def chunks_from(self, start):
+        """The chunks from number `start` on (call with the lock held): (first number, chunks, skipped)."""
+        first = max(start, self.base)
+        chunks = [list(c) for c in self.chunks[first - self.base:]]
+        self.given = max(self.given, first + len(chunks))
+        return first, chunks, start < self.base
 
     def flush_pending(self, force=False):
         """Don't hold text back for long (call with the lock held)."""
         if self.pending and (force or time.time() - self.pending_since > 0.25):
             text, self.pending = self.pending.replace("\r", ""), ""
-            self.chunks.append(["err" if self.in_problem else "out", text])
+            self.push("err" if self.in_problem else "out", text)
 
     def add(self, stream, text):
         with self.lock:
-            self.chunks.append([stream, text])
+            self.push(stream, text)
 
     def done(self):
         if self.exit_code is None and self.proc.poll() is not None:
@@ -257,8 +286,8 @@ class Studio:
         done = run.done()
         with run.lock:
             run.flush_pending()
-            chunks = run.chunks[start:]
-        return {"chunks": chunks, "done": done, "exit": run.exit_code}
+            first, chunks, skipped = run.chunks_from(start)
+        return {"chunks": chunks, "start": first, "skipped": skipped, "done": done, "exit": run.exit_code}
 
     def send_input(self, run_id, text):
         run = self.runs.get(run_id)

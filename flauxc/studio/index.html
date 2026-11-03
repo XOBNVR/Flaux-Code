@@ -310,7 +310,8 @@ const code = $("code"), hi = $("highlight-inner"), gutter = $("gutter-inner");
 
 const KEYWORDS = new Set(("set to add subtract from say if then else end repeat times while until with in by " +
   "forever function return and or not is true false mod stop skip copies of more less than at least most " +
-  "equal greater fewer bigger smaller").split(" "));
+  "equal greater fewer bigger smaller wait").split(" "));
+const TIME_UNITS = new Set("second seconds minute minutes hour hours day days".split(" "));   // after `wait`
 const BUILTINS = new Set(("sqrt sin cos tan log abs floor ceil round min max random text number whole ask " +
   "is_number clock length contains uppercase lowercase distance rgb window show clear rect circle line " +
   "triangle dot write key_down key_pressed mouse_x mouse_y mouse_down mouse_clicked beep screenshot " +
@@ -326,6 +327,7 @@ const SNIPPETS = [
   ["Count", "repeat with i from 1 to 10\n    say i\nend"],
   ["A list", 'set pets to ["cat", "dog"]\nadd "fish" to pets\nrepeat with pet in pets\n    say pet\nend'],
   ["A function", 'function greet(name)\n    say "Hello, {name}!"\nend\n\ngreet("Sam")'],
+  ["Wait", 'say "Ready..."\nwait 1s\nsay "Go!"'],
   ["Random number", "set dice to random(1, 6)\nsay dice"],
   ["Game window", 'window(800, 600, "My Game")\nset x to 400\n\nrepeat forever\n    if key_down("left")\n' +
    '        subtract 5 from x\n    end\n    if key_down("right")\n        add 5 to x\n    end\n' +
@@ -355,6 +357,7 @@ function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(
 
 function tokens(line) {
   const out = []; let i = 0;
+  const waiting = /^\s*wait\b/.test(line);
   const push = (cls, text) => { if (text) out.push([cls, text]); };
   while (i < line.length) {
     const ch = line[i];
@@ -375,11 +378,11 @@ function tokens(line) {
       push("str", buf); i = j; continue;
     }
     let m;
-    if ((m = /^\d[\d_]*(\.\d+)?(e[+-]?\d+)?/i.exec(line.slice(i)))) { push("num", m[0]); i += m[0].length; continue; }
+    if ((m = /^\d[\d_]*(\.\d+)?(e[+-]?\d+)?([smhd](?!\w))?/i.exec(line.slice(i)))) { push("num", m[0]); i += m[0].length; continue; }
     if ((m = /^[A-Za-z_]\w*/.exec(line.slice(i)))) {
       const w = m[0], next = line.slice(i + w.length);
       let cls = "";
-      if (KEYWORDS.has(w)) cls = "kw";
+      if (KEYWORDS.has(w) || (waiting && TIME_UNITS.has(w))) cls = "kw";
       else if (/^\s*\(/.test(next)) cls = "fn";
       push(cls, w); i += w.length; continue;
     }
@@ -564,13 +567,91 @@ $("p-goto").addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------- running
+// The Output panel keeps only the newest output, so a program that says
+// things for ever can't fill the page up. Output arrives in batches: each
+// batch is added in one go, with one scroll.
 const cons = $("console");
-function print(text, cls = "") {
-  const span = document.createElement("span");
-  if (cls) span.className = cls;
-  span.textContent = text;
-  cons.appendChild(span);
-  cons.scrollTop = cons.scrollHeight;
+const CONSOLE_CHARS = 200000, CONSOLE_LINES = 2000;
+const shown = { chars: 0, lines: 0, trimmed: false };
+
+function countLines(text) {
+  let n = 0;
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) n++;
+  return n;
+}
+
+function clearConsole() {
+  cons.textContent = "";
+  shown.chars = 0; shown.lines = 0; shown.trimmed = false;
+}
+
+// pieces: [[text, class], ...]
+function printMany(pieces) {
+  let total = pieces.reduce((n, [text]) => n + text.length, 0);
+  if (total > CONSOLE_CHARS) {        // more than the panel keeps: only add the newest part
+    pieces = pieces.slice();
+    while (total > CONSOLE_CHARS && pieces.length > 1) total -= pieces.shift()[0].length;
+    if (total > CONSOLE_CHARS) pieces[0] = [pieces[0][0].slice(total - CONSOLE_CHARS), pieces[0][1]];
+    clearConsole();                    // everything older goes too
+    shown.trimmed = true;
+  }
+  const atBottom = cons.scrollHeight - cons.scrollTop - cons.clientHeight < 40;
+  const frag = document.createDocumentFragment();
+  let last = null;
+  for (const [text, cls = ""] of pieces) {
+    if (!text) continue;
+    if (last && last.className === cls) last.textContent += text;    // same colour: one span
+    else {
+      last = document.createElement("span");
+      if (cls) last.className = cls;
+      last.textContent = text;
+      frag.appendChild(last);
+    }
+    shown.chars += text.length; shown.lines += countLines(text);
+  }
+  cons.appendChild(frag);
+  trimConsole();
+  if (atBottom) cons.scrollTop = cons.scrollHeight;
+}
+
+function print(text, cls = "") { printMany([[text, cls]]); }
+
+// Too much output: take the oldest away (down to 3/4 of the limits).
+function trimConsole() {
+  let note = cons.firstChild && cons.firstChild.dataset && cons.firstChild.dataset.trim ? cons.firstChild : null;
+  if (shown.chars <= CONSOLE_CHARS && shown.lines <= CONSOLE_LINES && (note || !shown.trimmed)) return;
+  const chars = CONSOLE_CHARS * 3 / 4, lines = CONSOLE_LINES * 3 / 4;
+  let node = note ? note.nextSibling : cons.firstChild;
+  while (node && (shown.chars > chars || shown.lines > lines)) {
+    const text = node.textContent, next = node.nextSibling;
+    if (next) {
+      cons.removeChild(node);
+      shown.chars -= text.length; shown.lines -= countLines(text);
+      node = next;
+      continue;
+    }
+    // the newest piece is too big by itself: keep its end, from the start of a line
+    const keepChars = Math.max(0, chars - (shown.chars - text.length));
+    const keepLines = Math.max(0, lines - (shown.lines - countLines(text)));
+    let keep = text.slice(Math.max(0, text.length - keepChars)), start = 0;
+    for (let i = keep.length - 1, n = 0; i >= 0; i--)
+      if (keep[i] === "\n" && ++n > keepLines) { start = i + 1; break; }
+    if (start === 0 && keep.length < text.length && text[text.length - keep.length - 1] !== "\n") {
+      const nl = keep.indexOf("\n");            // don't start halfway through a line
+      if (nl !== -1) start = nl + 1;
+    }
+    keep = keep.slice(start);
+    node.textContent = keep;
+    shown.chars -= text.length - keep.length; shown.lines -= countLines(text) - countLines(keep);
+    break;
+  }
+  if (!note) {
+    note = document.createElement("span");
+    note.className = "note"; note.dataset.trim = "1";
+    note.textContent = "… older output hidden (only the newest is kept) …\n";
+    cons.insertBefore(note, cons.firstChild);
+  }
+  shown.trimmed = true;
 }
 
 async function run() {
@@ -578,7 +659,7 @@ async function run() {
   showTab("output");
   if (state.mode === "blocks" && refreshFromBlocks().problems.length) return;
   if (state.path && !state.example && state.dirty) await save(true);
-  cons.textContent = "";
+  clearConsole();
   status("Getting ready...");
   const r = await api("/api/run", { content: code.value, path: state.path });
   if (!r.ok) {
@@ -588,7 +669,7 @@ async function run() {
     return;
   }
   showProblem(null);
-  state.run = r.run; state.from = 0; state.runtimeLine = null; render();
+  state.run = r.run; state.from = 0; state.errText = ""; state.runtimeLine = null; render();
   $("btn-run").hidden = true; $("btn-stop").hidden = false;
   $("input-row").hidden = false; $("input").value = "";
   status("Running... (programs that ask questions wait for you to type below)");
@@ -601,18 +682,26 @@ async function poll() {
   let r;
   try { r = await api("/api/output", { run: id, from: state.from }); }
   catch (err) { status(err.message, "bad"); return finish(null); }
+  if (state.run !== id) return;          // stopped and started again meanwhile
+  const pieces = [];
+  if (r.skipped) pieces.push(["\n… some output was skipped to keep up …\n", "note"]);
+  let errs = "";
   for (const [stream, text] of r.chunks) {
-    print(text.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, ""), stream === "err" ? "err" : "");
-    if (stream === "err") {
-      const m = /Problem while running [^,]*, line (\d+)/.exec(cons.textContent);
-      if (m) {
-        state.runtimeLine = Number(m[1]); render();
-        if (state.mode === "blocks")
-          FlauxBlocks.showProblem(state.genIds[state.runtimeLine - 1], "The program stopped at this block. The Output panel says why.");
-      }
+    const clean = text.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "");
+    pieces.push([clean, stream === "err" ? "err" : ""]);
+    if (stream === "err") errs += clean;
+  }
+  printMany(pieces);
+  if (errs && !state.runtimeLine) {
+    state.errText = (state.errText + errs).slice(-2000);
+    const m = /Problem while running [^,]*, line (\d+)/.exec(state.errText);
+    if (m) {
+      state.runtimeLine = Number(m[1]); render();
+      if (state.mode === "blocks")
+        FlauxBlocks.showProblem(state.genIds[state.runtimeLine - 1], "The program stopped at this block. The Output panel says why.");
     }
   }
-  state.from += r.chunks.length;
+  state.from = (r.start !== undefined ? r.start : state.from) + r.chunks.length;
   if (r.done) return finish(r.exit);
   setTimeout(poll, 80);
 }
