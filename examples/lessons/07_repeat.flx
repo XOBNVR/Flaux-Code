@@ -1,0 +1,15 @@
+# Lesson 7: repeat does things again and again
+repeat 3 times
+    say "Hip hip hooray!"
+end
+
+repeat with i from 1 to 5
+    say i
+end
+
+set lives to 3
+repeat while lives > 0
+    say "Lives left: {lives}"
+    subtract 1 from lives
+end
+say "Game over!"

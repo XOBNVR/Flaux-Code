@@ -15,6 +15,7 @@ covers everything in Flaux 0.1.
 - [Lists](#lists)
 - [Functions](#functions)
 - [Built-in functions](#built-in-functions)
+- [Graphics and games](#graphics-and-games)
 - [Comments](#comments)
 - [When things go wrong](#when-things-go-wrong)
 - [Why Flaux is fast](#why-flaux-is-fast)
@@ -345,6 +346,132 @@ say basket     # ["apple"]
 | `sin(x)`, `cos(x)`, `tan(x)`, `log(x)` | maths functions (radians) | `sin(0.5)` |
 | `uppercase(t)`, `lowercase(t)` | text in capitals or small letters | `uppercase("hi")` |
 | `clock()` | seconds since the program started | `say clock()` |
+| `distance(x1, y1, x2, y2)` | how far apart two points are | `distance(0, 0, 3, 4)` is 5 |
+| `rgb(r, g, b)` | a colour made of red, green and blue (0 to 255) | `rgb(255, 136, 0)` |
+
+## Graphics and games
+
+Graphics need the free SDL2 library, installed once
+(`sudo apt install libsdl2-dev` on Linux and WSL, `brew install sdl2` on a
+Mac). Programs that don't draw anything don't need it.
+
+### The window
+
+```
+window(800, 600)              # 800 pixels wide, 600 tall
+window(800, 600, "My Game")   # with a title
+```
+
+Open the window before drawing anything. Places are measured in pixels
+from the **top-left corner**: `x` goes right, `y` goes **down**. So the
+top-left corner is `0, 0` and the bottom-right of an 800 by 600 window is
+`800, 600`.
+
+### Drawing
+
+| Function | Draws |
+|---|---|
+| `clear(colour)` | fills the window (black if you leave out the colour) |
+| `rect(x, y, width, height, colour)` | a filled rectangle; `x, y` is the top-left corner |
+| `circle(x, y, radius, colour)` | a filled circle; `x, y` is the centre |
+| `triangle(x1, y1, x2, y2, x3, y3, colour)` | a filled triangle |
+| `line(x1, y1, x2, y2, colour, thickness)` | a line; thickness can be left out |
+| `dot(x, y, colour)` | a single pixel |
+| `write(value, x, y, colour, size)` | text (or any value); size 2 if left out |
+| `text_width(value, size)` | how many pixels wide `write` would make it |
+| `screenshot("file.bmp")` | saves what's drawn so far as a picture |
+
+The colour can always be left out (shapes and text are white by default).
+
+Numbers can be whole or decimal: `circle(100.5, 80.25, 10)` is fine.
+
+### The game loop
+
+Games draw a new picture many times a second. Put the drawing in a
+`repeat forever` loop and finish each picture with `show()`:
+
+```
+repeat forever
+    # 1. change things (move, check keys, check if things touch)
+    # 2. draw everything, starting with clear(...)
+    show()
+end
+```
+
+`show()` puts the picture on screen, then waits so the loop runs **60 times
+a second** on every computer. Closing the window ends the program.
+
+If a program draws a picture **without** a loop, the window stays open
+showing it until you close it.
+
+### Keyboard and mouse
+
+| Function | Gives back |
+|---|---|
+| `key_down(name)` | true while the key is held down |
+| `key_pressed(name)` | true only on the frame the key goes down |
+| `mouse_x()`, `mouse_y()` | where the mouse is in the window |
+| `mouse_down()` | true while the left mouse button is held |
+| `mouse_clicked()` | true only on the frame of a click |
+
+Key names: `"a"` to `"z"`, `"0"` to `"9"`, `"left"`, `"right"`, `"up"`,
+`"down"`, `"space"`, `"enter"`, `"escape"`, `"tab"`, `"backspace"`,
+`"delete"`, `"shift"`, `"ctrl"`, `"alt"`, `"home"`, `"end"`, `"pageup"`,
+`"pagedown"`, `"insert"` and `"f1"` to `"f12"`.
+
+Use `key_down` for smooth movement, and `key_pressed` for things that
+should happen once per press, like jumping or firing.
+
+### Sound
+
+```
+beep(440, 0.2)    # pitch 440 (the note A) for 0.2 seconds
+beep(880)         # a short beep, 0.1 seconds
+```
+
+Beeps play one after another, so several in a row make a tune.
+
+### Colours
+
+Colour names: `black`, `white`, `gray`, `dark gray`, `light gray`, `red`,
+`dark red`, `orange`, `yellow`, `gold`, `green`, `dark green`, `lime`,
+`blue`, `dark blue`, `navy`, `sky`, `light blue`, `cyan`, `teal`,
+`purple`, `violet`, `pink`, `magenta`, `brown`, `beige`.
+(`grey` works too, and spaces don't matter: `"darkgreen"` is fine.)
+
+Any other colour: `rgb(255, 136, 0)` or a code like `"#ff8800"`.
+
+### Did they touch?
+
+`distance(x1, y1, x2, y2)` says how far apart two points are. Two circles
+touch when the distance between their centres is less than their two
+radiuses added together:
+
+```
+if distance(player_x, player_y, coin_x, coin_y) < 20 + 10
+    add 1 to score
+end
+```
+
+For rectangles, compare their edges:
+
+```
+if ball_x > paddle_x and ball_x < paddle_x + 100 and ball_y > 550
+    say "hit the paddle"
+end
+```
+
+### Testing graphics without a screen
+
+These settings help when running graphics programs in automated tests:
+
+| Setting | Does |
+|---|---|
+| `FLAUX_FRAMES=60` | stop after 60 frames |
+| `FLAUX_FAST=1` | don't wait between frames |
+| `FLAUX_SCREENSHOT=last.bmp` | save the last frame when stopping |
+| `FLAUX_HOLD_KEYS=left,space` | pretend these keys are held down |
+| `SDL_VIDEODRIVER=offscreen` | draw without a real screen |
 
 ## Comments
 
@@ -403,3 +530,6 @@ These words have special meanings, so they can't be used as names:
 
 `add` `and` `else` `end` `false` `function` `if` `is` `mod` `not` `or`
 `repeat` `return` `say` `set` `skip` `stop` `subtract` `true`
+
+Built-in function names (like `window`, `circle` or `random`) can be used
+for variables, but not for your own functions.

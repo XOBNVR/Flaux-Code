@@ -1,0 +1,6 @@
+# A drawing with no show() and no loop still appears.
+# frames: 1
+# pixel: 50 50 #ffe135
+window(100, 100)
+clear("navy")
+circle(50, 50, 30, "yellow")

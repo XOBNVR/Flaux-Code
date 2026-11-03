@@ -1,0 +1,6 @@
+# Lesson 5: ask the person using your program a question
+set name to ask("What's your name?")
+say "Nice to meet you, {name}!"
+
+set age to whole(ask("How old are you?"))
+say "Next year you'll be {age + 1}."

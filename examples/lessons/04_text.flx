@@ -1,0 +1,6 @@
+# Lesson 4: text
+set name to "Mia"
+say "Hello, " + name + "!"
+say "Hello, {name}!"
+say "{name} has {length of name} letters"
+say uppercase(name)

@@ -1,7 +1,4 @@
 __pycache__/
 *.pyc
-# programs made by `flaux build`
-examples/*
-!examples/*.flx
 benchmarks/csharp/bin/
 benchmarks/csharp/obj/

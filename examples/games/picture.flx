@@ -1,0 +1,11 @@
+# A picture: no loop needed. The window stays open until you close it.
+window(400, 300, "My Picture")
+clear("sky")
+rect(0, 220, 400, 80, "green")          # grass
+circle(330, 60, 35, "yellow")           # sun
+rect(120, 140, 120, 90, "beige")        # house
+line(110, 140, 180, 90, "darkred")      # roof
+line(180, 90, 250, 140, "darkred")
+line(110, 140, 250, 140, "darkred")
+rect(165, 180, 30, 50, "brown")         # door
+write("Home sweet home", 20, 20, "navy", 2)

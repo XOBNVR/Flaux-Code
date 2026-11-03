@@ -1,0 +1,455 @@
+/* ===================================================================
+ * Flaux graphics: a window, shapes, text, keyboard, mouse and beeps.
+ * Built on SDL2. Only added to programs that use graphics.
+ *
+ * For automated tests, two environment variables help:
+ *   FLAUX_FRAMES=N        stop after N frames
+ *   FLAUX_FAST=1          don't wait between frames (run as fast as possible)
+ *   FLAUX_SCREENSHOT=f    save the last frame to f (a .bmp file) when stopping
+ *   FLAUX_HOLD_KEYS=a,b   pretend these keys are held down the whole time
+ * =================================================================== */
+#define FX_USES_GRAPHICS 1
+#define SDL_MAIN_HANDLED
+#include <SDL.h>
+
+static SDL_Window *fx_win;
+static SDL_Renderer *fx_ren;
+static SDL_Texture *fx_font_tex;
+static int fx_win_w, fx_win_h;
+static bool fx_dirty;              /* something drawn since the last show() */
+static uint8_t fx_keys_now[SDL_NUM_SCANCODES], fx_keys_prev[SDL_NUM_SCANCODES];
+static bool fx_mouse_now, fx_mouse_prev;
+static int fx_mouse_xv, fx_mouse_yv;
+static uint64_t fx_next_frame;
+static int64_t fx_frames, fx_frame_limit = -1;
+static const char *fx_shot_path;
+static bool fx_fast;
+static SDL_AudioDeviceID fx_audio;
+static bool fx_audio_failed;       /* no sound on this computer: don't keep trying */
+
+typedef struct { uint8_t r, g, b; } fx_rgb_t;
+
+static const struct { const char *name; uint32_t rgb; } fx_colors[] = {
+/*@COLORS@*/
+};
+
+/*@FONT@*/
+
+/* ------------------------------------------------------------ helpers */
+
+static void fx_need_window(int line) {
+    if (!fx_ren)
+        fx_fail(line, "Open a window first, at the top of your program, like this:\n\n"
+                      "      window(800, 600)",
+                "There's no window to draw in yet.");
+}
+
+/* lower-case, without spaces, dashes or underscores: "Dark Green" -> "darkgreen" */
+static void fx_squash(fx_text t, char *out, size_t size) {
+    size_t n = 0;
+    for (int64_t i = 0; i < t.n && n + 1 < size; i++) {
+        char c = t.p[i];
+        if (c == ' ' || c == '_' || c == '-') continue;
+        out[n++] = (char)tolower((unsigned char)c);
+    }
+    out[n] = 0;
+}
+
+static int fx_hex(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+static fx_rgb_t fx_color(fx_text t, int line) {
+    static const char *last_p;
+    static int64_t last_n = -1;
+    static fx_rgb_t last;
+    if (t.p == last_p && t.n == last_n) return last; /* same colour as last time: fast */
+    char key[40];
+    fx_squash(t, key, sizeof key);
+    fx_rgb_t c = {0, 0, 0};
+    bool found = false;
+    size_t n = strlen(key);
+    if (key[0] == '#' && (n == 4 || n == 7)) {
+        int v[6], digits = (int)n - 1;
+        found = true;
+        for (int i = 0; i < digits; i++) if ((v[i] = fx_hex(key[i + 1])) < 0) found = false;
+        if (found && digits == 3) c = (fx_rgb_t){ (uint8_t)(v[0] * 17), (uint8_t)(v[1] * 17), (uint8_t)(v[2] * 17) };
+        if (found && digits == 6) c = (fx_rgb_t){ (uint8_t)(v[0] * 16 + v[1]), (uint8_t)(v[2] * 16 + v[3]), (uint8_t)(v[4] * 16 + v[5]) };
+    } else {
+        for (size_t i = 0; i < sizeof fx_colors / sizeof fx_colors[0]; i++) {
+            if (strcmp(fx_colors[i].name, key) == 0) {
+                uint32_t rgb = fx_colors[i].rgb;
+                c = (fx_rgb_t){ (uint8_t)(rgb >> 16), (uint8_t)(rgb >> 8), (uint8_t)rgb };
+                found = true;
+                break;
+            }
+        }
+    }
+    if (!found)
+        fx_fail(line, "Use a colour name like \"red\", \"blue\", \"dark green\" or \"sky\", a code like "
+                      "\"#ff8800\",\n  or make one with rgb(255, 136, 0).",
+                "I don't know the colour \"%.*s\".", (int)t.n, t.p);
+    last_p = t.p;
+    last_n = t.n;
+    last = c;
+    return c;
+}
+
+static void fx_use_color(fx_text color, int line) {
+    fx_rgb_t c = fx_color(color, line);
+    SDL_SetRenderDrawColor(fx_ren, c.r, c.g, c.b, 255);
+    fx_dirty = true;
+}
+
+static int fx_px(double v) { /* a position on screen, rounded to the nearest pixel */
+    if (v > 1e6) return 1000000;
+    if (v < -1e6) return -1000000;
+    return (int)lround(v);
+}
+
+/* ------------------------------------------------------------- keys */
+
+static int fx_scancodes(fx_text name, int line, SDL_Scancode out[2]) {
+    char key[40];
+    fx_squash(name, key, sizeof key);
+    out[1] = SDL_SCANCODE_UNKNOWN;
+    if (!strcmp(key, "shift")) { out[0] = SDL_SCANCODE_LSHIFT; out[1] = SDL_SCANCODE_RSHIFT; return 2; }
+    if (!strcmp(key, "ctrl") || !strcmp(key, "control")) { out[0] = SDL_SCANCODE_LCTRL; out[1] = SDL_SCANCODE_RCTRL; return 2; }
+    if (!strcmp(key, "alt")) { out[0] = SDL_SCANCODE_LALT; out[1] = SDL_SCANCODE_RALT; return 2; }
+    const char *sdl = key;
+    if (!strcmp(key, "enter")) sdl = "return";
+    else if (!strcmp(key, "esc")) sdl = "escape";
+    else if (!strcmp(key, "pageup")) sdl = "pageup";
+    out[0] = SDL_GetScancodeFromName(sdl);
+    if (out[0] == SDL_SCANCODE_UNKNOWN)
+        fx_fail(line, "Key names are letters (\"a\" to \"z\"), numbers (\"0\" to \"9\"), arrows (\"left\", "
+                      "\"right\", \"up\", \"down\"),\n  and \"space\", \"enter\", \"escape\", \"shift\", \"ctrl\", "
+                      "\"alt\", \"tab\", \"backspace\" and \"f1\" to \"f12\".",
+                "I don't know the key \"%.*s\".", (int)name.n, name.p);
+    return 1;
+}
+
+static bool fx_key_down(fx_text name, int line) {
+    SDL_Scancode sc[2];
+    int n = fx_scancodes(name, line, sc);
+    for (int i = 0; i < n; i++) if (fx_keys_now[sc[i]]) return true;
+    return false;
+}
+
+static bool fx_key_pressed(fx_text name, int line) {
+    SDL_Scancode sc[2];
+    int n = fx_scancodes(name, line, sc);
+    for (int i = 0; i < n; i++) if (fx_keys_now[sc[i]] && !fx_keys_prev[sc[i]]) return true;
+    return false;
+}
+
+static void fx_read_input(void) {
+    memcpy(fx_keys_prev, fx_keys_now, sizeof fx_keys_now);
+    int count = 0;
+    const Uint8 *state = SDL_GetKeyboardState(&count);
+    if (count > SDL_NUM_SCANCODES) count = SDL_NUM_SCANCODES;
+    memcpy(fx_keys_now, state, (size_t)count);
+    const char *held = getenv("FLAUX_HOLD_KEYS"); /* for tests */
+    if (held && *held) {
+        char buf[256];
+        snprintf(buf, sizeof buf, "%s", held);
+        for (char *tok = strtok(buf, ","); tok; tok = strtok(NULL, ",")) {
+            SDL_Scancode sc[2];
+            int n = fx_scancodes((fx_text){ tok, (int64_t)strlen(tok) }, 0, sc);
+            for (int i = 0; i < n; i++) fx_keys_now[sc[i]] = 1;
+        }
+    }
+    fx_mouse_prev = fx_mouse_now;
+    Uint32 buttons = SDL_GetMouseState(&fx_mouse_xv, &fx_mouse_yv);
+    fx_mouse_now = (buttons & SDL_BUTTON_LMASK) != 0;
+}
+
+static int64_t fx_mouse_x(void) { return fx_mouse_xv; }
+static int64_t fx_mouse_y(void) { return fx_mouse_yv; }
+static bool fx_mouse_down(void) { return fx_mouse_now; }
+static bool fx_mouse_clicked(void) { return fx_mouse_now && !fx_mouse_prev; }
+
+/* ----------------------------------------------------------- window */
+
+static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
+    if (fx_win)
+        fx_fail(line, "Call window(...) just once, at the start of your program.",
+                "There's already a window open.");
+    if (w < 50 || h < 50 || w > 8000 || h > 8000)
+        fx_fail(line, "Pick a size between 50 and 8000, like window(800, 600).",
+                "A window can't be %" PRId64 " by %" PRId64 " pixels.", w, h);
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    SDL_SetMainReady();
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0)
+        fx_fail(line, "Make sure this computer can show windows. (On WSL you need Windows 11, or an X server.\n"
+                      "  On a computer you reach over the internet, windows can't be shown.)",
+                "Flaux couldn't open a window: %s", SDL_GetError());
+    /* SDL can fall back to drawing nowhere when there's no screen. Unless a
+       test asked for that on purpose, say so instead of running invisibly. */
+    const char *driver = SDL_GetCurrentVideoDriver();
+    const char *wanted = getenv("SDL_VIDEODRIVER");
+    if (driver && (!strcmp(driver, "offscreen") || !strcmp(driver, "dummy") || !strcmp(driver, "evdev")) &&
+        !(wanted && *wanted))
+        fx_fail(line, "Run your program on a computer with a screen. (On WSL you need Windows 11, or an X server.\n"
+                      "  On a computer you reach over the internet, windows can't be shown.)",
+                "Flaux couldn't find a screen to open the window on.");
+    char *name = (char *)fx_text_make(title.p, title.n).p;
+    fx_win = SDL_CreateWindow(name, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                              (int)w, (int)h, SDL_WINDOW_SHOWN);
+    if (!fx_win) fx_fail(line, NULL, "Flaux couldn't open a window: %s", SDL_GetError());
+    fx_ren = SDL_CreateRenderer(fx_win, -1, SDL_RENDERER_ACCELERATED);
+    if (!fx_ren) fx_ren = SDL_CreateRenderer(fx_win, -1, SDL_RENDERER_SOFTWARE);
+    if (!fx_ren) fx_fail(line, NULL, "Flaux couldn't draw in the window: %s", SDL_GetError());
+    SDL_SetRenderDrawBlendMode(fx_ren, SDL_BLENDMODE_BLEND);
+    fx_win_w = (int)w;
+    fx_win_h = (int)h;
+
+    /* the font, as white letters on a see-through background */
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, 95 * 6, 8, 32, SDL_PIXELFORMAT_RGBA8888);
+    if (s) {
+        Uint32 *px = (Uint32 *)s->pixels;
+        int pitch = s->pitch / 4;
+        for (int c = 0; c < 95; c++)
+            for (int x = 0; x < 5; x++)
+                for (int y = 0; y < 7; y++)
+                    px[y * pitch + c * 6 + x] = (fx_font[c][x] >> y & 1) ? 0xFFFFFFFFu : 0x00000000u;
+        fx_font_tex = SDL_CreateTextureFromSurface(fx_ren, s);
+        SDL_SetTextureBlendMode(fx_font_tex, SDL_BLENDMODE_BLEND);
+        SDL_FreeSurface(s);
+    }
+
+    const char *frames = getenv("FLAUX_FRAMES");
+    if (frames && *frames) fx_frame_limit = atoll(frames);
+    fx_shot_path = getenv("FLAUX_SCREENSHOT");
+    fx_fast = getenv("FLAUX_FAST") && *getenv("FLAUX_FAST");
+
+    SDL_SetRenderDrawColor(fx_ren, 0, 0, 0, 255);
+    SDL_RenderClear(fx_ren);
+    SDL_PumpEvents();
+    fx_read_input();
+    fx_next_frame = SDL_GetPerformanceCounter();
+}
+
+static void fx_g_screenshot(fx_text path, int line) {
+    fx_need_window(line);
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, fx_win_w, fx_win_h, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!s || SDL_RenderReadPixels(fx_ren, NULL, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) != 0 ||
+        SDL_SaveBMP(s, fx_text_make(path.p, path.n).p) != 0)
+        fx_fail(line, "Check the file name, and that you're allowed to save files in that folder.",
+                "Flaux couldn't save the screenshot: %s", SDL_GetError());
+    SDL_FreeSurface(s);
+}
+
+static void fx_g_close(void) {
+    if (fx_audio) {
+        /* let the last beeps finish */
+        for (int i = 0; i < 300 && SDL_GetQueuedAudioSize(fx_audio) > 0; i++) SDL_Delay(10);
+    }
+    SDL_Quit();
+}
+
+/* Show what was drawn, then wait so the game runs at 60 frames a second. */
+static void fx_g_show(int line) {
+    fx_need_window(line);
+    fx_frames++;
+    bool last = fx_frame_limit >= 0 && fx_frames >= fx_frame_limit;
+    if (last && fx_shot_path) fx_g_screenshot((fx_text){ fx_shot_path, (int64_t)strlen(fx_shot_path) }, line);
+    SDL_RenderPresent(fx_ren);
+    fx_dirty = false;
+    if (last) {
+        fx_g_close();
+        exit(0);
+    }
+    if (!fx_fast) {
+        uint64_t freq = SDL_GetPerformanceFrequency();
+        fx_next_frame += freq / 60;
+        uint64_t now = SDL_GetPerformanceCounter();
+        if (now < fx_next_frame) SDL_Delay((Uint32)((fx_next_frame - now) * 1000 / freq));
+        else if (now - fx_next_frame > freq / 4) fx_next_frame = now; /* fell far behind: catch up */
+    }
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+        if (ev.type == SDL_QUIT) { /* the window's close button */
+            fx_g_close();
+            exit(0);
+        }
+    }
+    fx_read_input();
+}
+
+/* At the end of the program, keep the window open until it's closed. */
+static void fx_g_finish(void) {
+    if (!fx_win) {
+        if (fx_audio) fx_g_close();
+        return;
+    }
+    if (fx_frame_limit >= 0) { /* test mode */
+        if (fx_shot_path) fx_g_screenshot((fx_text){ fx_shot_path, (int64_t)strlen(fx_shot_path) }, 0);
+        fx_g_close();
+        return;
+    }
+    if (fx_dirty) SDL_RenderPresent(fx_ren);
+    SDL_Event ev;
+    while (SDL_WaitEvent(&ev)) {
+        if (ev.type == SDL_QUIT) break;
+        if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_EXPOSED) SDL_RenderPresent(fx_ren);
+    }
+    fx_g_close();
+}
+
+/* ------------------------------------------------------------ drawing */
+
+static void fx_g_clear(fx_text color, int line) {
+    fx_need_window(line);
+    fx_use_color(color, line);
+    SDL_RenderClear(fx_ren);
+}
+
+static void fx_g_rect(double x, double y, double w, double h, fx_text color, int line) {
+    fx_need_window(line);
+    fx_use_color(color, line);
+    if (w < 0) { x += w; w = -w; }
+    if (h < 0) { y += h; h = -h; }
+    SDL_Rect r = { fx_px(x), fx_px(y), fx_px(x + w) - fx_px(x), fx_px(y + h) - fx_px(y) };
+    SDL_RenderFillRect(fx_ren, &r);
+}
+
+static void fx_g_circle(double cx, double cy, double radius, fx_text color, int line) {
+    fx_need_window(line);
+    fx_use_color(color, line);
+    if (radius <= 0) return;
+    if (radius > 20000) radius = 20000;
+    int top = (int)ceil(cy - radius), bottom = (int)floor(cy + radius);
+    if (top < -1) top = -1;
+    if (bottom > fx_win_h) bottom = fx_win_h;
+    for (int y = top; y <= bottom; y++) {
+        double dy = y - cy;
+        double dx = sqrt(radius * radius - dy * dy);
+        SDL_RenderDrawLine(fx_ren, fx_px(cx - dx), y, fx_px(cx + dx), y);
+    }
+}
+
+/* Fill a triangle one row of pixels at a time. */
+static void fx_fill_triangle(double x1, double y1, double x2, double y2, double x3, double y3) {
+    double t;
+#define FX_SWAP(a, b) (t = a, a = b, b = t)
+    if (y1 > y2) { FX_SWAP(x1, x2); FX_SWAP(y1, y2); }
+    if (y1 > y3) { FX_SWAP(x1, x3); FX_SWAP(y1, y3); }
+    if (y2 > y3) { FX_SWAP(x2, x3); FX_SWAP(y2, y3); }
+#undef FX_SWAP
+    int top = (int)ceil(y1 - 0.5), bottom = (int)floor(y3 - 0.5);
+    if (top < 0) top = 0;
+    if (bottom > fx_win_h - 1) bottom = fx_win_h - 1;
+    for (int y = top; y <= bottom; y++) {
+        double yc = y + 0.5;
+        double xa = y3 == y1 ? x1 : x1 + (x3 - x1) * (yc - y1) / (y3 - y1);
+        double xb = yc < y2 ? (y2 == y1 ? x1 : x1 + (x2 - x1) * (yc - y1) / (y2 - y1))
+                            : (y3 == y2 ? x2 : x2 + (x3 - x2) * (yc - y2) / (y3 - y2));
+        if (xa > xb) { double s = xa; xa = xb; xb = s; }
+        int xs = (int)ceil(xa - 0.5), xe = (int)floor(xb - 0.5);
+        if (xe >= xs) SDL_RenderDrawLine(fx_ren, xs, y, xe, y);
+    }
+}
+
+static void fx_g_triangle(double x1, double y1, double x2, double y2, double x3, double y3,
+                          fx_text color, int line) {
+    fx_need_window(line);
+    fx_use_color(color, line);
+    fx_fill_triangle(x1, y1, x2, y2, x3, y3);
+}
+
+static void fx_g_line(double x1, double y1, double x2, double y2, fx_text color, double thickness, int line) {
+    fx_need_window(line);
+    fx_use_color(color, line);
+    if (thickness <= 1.5) {
+        SDL_RenderDrawLine(fx_ren, fx_px(x1), fx_px(y1), fx_px(x2), fx_px(y2));
+        return;
+    }
+    /* a thick line is a long rectangle (two triangles) with round ends */
+    double dx = x2 - x1, dy = y2 - y1, len = sqrt(dx * dx + dy * dy), r = thickness / 2;
+    if (len > 0) {
+        double nx = -dy / len * r, ny = dx / len * r;
+        fx_fill_triangle(x1 + nx, y1 + ny, x1 - nx, y1 - ny, x2 + nx, y2 + ny);
+        fx_fill_triangle(x1 - nx, y1 - ny, x2 + nx, y2 + ny, x2 - nx, y2 - ny);
+    }
+    fx_g_circle(x1, y1, r, color, line);
+    fx_g_circle(x2, y2, r, color, line);
+}
+
+static void fx_g_dot(double x, double y, fx_text color, int line) {
+    fx_need_window(line);
+    fx_use_color(color, line);
+    SDL_RenderDrawPoint(fx_ren, fx_px(x), fx_px(y));
+}
+
+static void fx_g_write(fx_text t, double x, double y, fx_text color, int64_t size, int line) {
+    fx_need_window(line);
+    fx_rgb_t c = fx_color(color, line);
+    fx_dirty = true;
+    if (!fx_font_tex) return;
+    if (size < 1) size = 1;
+    if (size > 50) size = 50;
+    SDL_SetTextureColorMod(fx_font_tex, c.r, c.g, c.b);
+    int px = fx_px(x), py = fx_px(y), col = 0, row = 0, s = (int)size;
+    for (int64_t i = 0; i < t.n; i++) {
+        unsigned char ch = (unsigned char)t.p[i];
+        if (ch == '\n') { row++; col = 0; continue; }
+        if (ch >= 0x80 && ch < 0xC0) continue;     /* rest of a non-English letter */
+        if (ch < 32 || ch > 126) ch = '?';
+        SDL_Rect src = { (ch - 32) * 6, 0, 5, 7 };
+        SDL_Rect dst = { px + col * 6 * s, py + row * 9 * s, 5 * s, 7 * s };
+        SDL_RenderCopy(fx_ren, fx_font_tex, &src, &dst);
+        col++;
+    }
+}
+
+/* How wide text is on screen, to help centre it. */
+static int64_t fx_text_width(fx_text t, int64_t size) {
+    if (size < 1) size = 1;
+    int64_t widest = 0, col = 0;
+    for (int64_t i = 0; i < t.n; i++) {
+        unsigned char ch = (unsigned char)t.p[i];
+        if (ch == '\n') { col = 0; continue; }
+        if (ch >= 0x80 && ch < 0xC0) continue;
+        if (++col > widest) widest = col;
+    }
+    return widest ? (widest * 6 - 1) * size : 0;
+}
+
+/* -------------------------------------------------------------- sound */
+
+static void fx_g_beep(double pitch, double seconds, int line) {
+    (void)line;
+    if (fx_audio_failed) return;
+    if (!fx_audio) {
+        fx_audio_failed = true; /* until it works */
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return; /* no sound on this computer: stay quiet */
+        SDL_AudioSpec want;
+        memset(&want, 0, sizeof want);
+        want.freq = 44100;
+        want.format = AUDIO_S16SYS;
+        want.channels = 1;
+        want.samples = 1024;
+        fx_audio = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+        if (!fx_audio) return;
+        fx_audio_failed = false;
+        SDL_PauseAudioDevice(fx_audio, 0);
+    }
+    if (pitch <= 0 || seconds <= 0) return;
+    if (seconds > 10) seconds = 10;
+    int n = (int)(seconds * 44100), fade = 441;
+    int16_t *buf = fx_alloc(sizeof(int16_t) * (size_t)n);
+    for (int i = 0; i < n; i++) {
+        double phase = fmod(i * pitch / 44100.0, 1.0);
+        double amp = 2500;
+        if (i < fade) amp *= (double)i / fade;                 /* soft start */
+        if (n - i < fade) amp *= (double)(n - i) / fade;       /* soft end */
+        buf[i] = (int16_t)(phase < 0.5 ? amp : -amp);
+    }
+    SDL_QueueAudio(fx_audio, buf, (Uint32)(sizeof(int16_t) * (size_t)n));
+    free(buf);
+}
+
+/* ======================== end of graphics runtime ========================== */

@@ -1,0 +1,25 @@
+# Lesson 11: a window, a ball, and the arrow keys
+window(600, 400, "Move the ball")
+
+set x to 300
+set y to 200
+
+repeat forever
+    if key_down("left")
+        subtract 5 from x
+    end
+    if key_down("right")
+        add 5 to x
+    end
+    if key_down("up")
+        subtract 5 from y
+    end
+    if key_down("down")
+        add 5 to y
+    end
+
+    clear("black")
+    circle(x, y, 20, "orange")
+    write("Use the arrow keys", 10, 10)
+    show()
+end

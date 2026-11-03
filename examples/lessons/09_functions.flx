@@ -1,0 +1,12 @@
+# Lesson 9: functions are your own instructions
+function greet(name)
+    say "Hello, {name}!"
+end
+
+function double(number)
+    return number * 2
+end
+
+greet("Mia")
+greet("Leo")
+say double(21)

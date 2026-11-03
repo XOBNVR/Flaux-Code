@@ -1,0 +1,14 @@
+# Lesson 6: if makes choices
+set temperature to 30
+
+if temperature > 25
+    say "It's hot!"
+else if temperature < 10
+    say "It's cold!"
+else
+    say "It's nice."
+end
+
+if temperature is more than 20 and temperature is less than 40
+    say "Good day for the beach."
+end

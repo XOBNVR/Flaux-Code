@@ -1,0 +1,4 @@
+# Lesson 1: say shows things on the screen
+say "Hello!"
+say("Hi there!")
+say "I am", 10, "years old"

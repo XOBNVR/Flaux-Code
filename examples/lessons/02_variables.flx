@@ -1,0 +1,8 @@
+# Lesson 2: variables are boxes with names that hold things
+set name to "Mia"
+set age to 10
+say name
+say age
+
+set age to 11
+say age

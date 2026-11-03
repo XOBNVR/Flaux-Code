@@ -1,0 +1,28 @@
+# Bounce: a ball that falls, bounces and slows down.
+window(600, 400, "Bounce")
+
+set x to 300.0
+set y to 80.0
+set speed_x to 4.0
+set speed_y to 0.0
+
+repeat forever
+    add 0.5 to speed_y              # gravity pulls the ball down
+    add speed_x to x
+    add speed_y to y
+
+    if y > 370                      # hit the floor: bounce back up
+        set y to 370.0
+        if speed_y > 2
+            beep(300, 0.05)
+        end
+        set speed_y to -speed_y * 0.85
+    end
+    if x < 30 or x > 570            # hit a wall: turn around
+        set speed_x to -speed_x
+    end
+
+    clear("black")
+    circle(x, y, 30, "orange")
+    show()
+end

@@ -1,0 +1,23 @@
+# Doodle: hold the mouse button to draw. Press C to start again.
+window(800, 600, "Doodle")
+
+set xs to []
+set ys to []
+
+repeat forever
+    if mouse_down()
+        add mouse_x() to xs
+        add mouse_y() to ys
+    end
+    if key_pressed("c")
+        set xs to []
+        set ys to []
+    end
+
+    clear("white")
+    repeat with i from 1 to length of xs
+        circle(xs[i], ys[i], 6, "purple")
+    end
+    write("Hold the mouse button to draw. Press C to clear.", 10, 10, "gray", 2)
+    show()
+end

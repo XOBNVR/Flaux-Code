@@ -1,0 +1,3 @@
+# expect: A colour is written as text in quotes, but this is a whole number.
+window(400, 400)
+rect(10, 10, 50, 50, 5)

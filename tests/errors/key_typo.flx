@@ -1,0 +1,6 @@
+# expect: Flaux doesn't know the key "lft".
+# expect: if key_down("left")
+window(400, 400)
+if key_down("lft")
+    say "left"
+end

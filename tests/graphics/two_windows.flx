@@ -1,0 +1,3 @@
+# expect: There's already a window open.
+window(200, 200)
+window(300, 300)

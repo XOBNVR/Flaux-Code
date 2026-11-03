@@ -1,0 +1,76 @@
+# Star Catcher: move the basket with the arrow keys and catch the stars.
+window(800, 600, "Star Catcher")
+
+set basket_x to 400
+set star_x to random(40, 760)
+set star_y to 0.0
+set speed to 3.0
+set score to 0
+set lives to 3
+set playing to true
+
+repeat forever
+    if playing
+        # move the basket
+        if key_down("left") and basket_x > 60
+            subtract 8 from basket_x
+        end
+        if key_down("right") and basket_x < 740
+            add 8 to basket_x
+        end
+
+        # the star falls, a little faster each time you catch one
+        add speed to star_y
+
+        # caught it?
+        if star_y > 520 and star_y < 560 and abs(star_x - basket_x) < 70
+            add 1 to score
+            add 0.4 to speed
+            beep(880, 0.08)
+            set star_x to random(40, 760)
+            set star_y to 0.0
+        end
+
+        # missed it?
+        if star_y > 620
+            subtract 1 from lives
+            beep(150, 0.3)
+            set star_x to random(40, 760)
+            set star_y to 0.0
+            if lives = 0
+                set playing to false
+            end
+        end
+    else if key_pressed("space")
+        set score to 0
+        set lives to 3
+        set speed to 3.0
+        set playing to true
+    end
+
+    # draw everything
+    clear("navy")
+    if playing
+        draw_star(star_x, star_y)
+    end
+    rect(basket_x - 60, 540, 120, 25, "brown")
+    write("Score: {score}", 20, 20, "white", 3)
+    write("Lives: {lives}", 620, 20, "pink", 3)
+    if not playing
+        centered("GAME OVER", 250, "red", 7)
+        centered("Press space to play again", 330, "white", 2)
+    end
+    show()
+end
+
+function draw_star(x, y)
+    # a sparkle made of four pointy triangles
+    triangle(x, y - 24, x - 8, y, x + 8, y, "yellow")
+    triangle(x, y + 24, x - 8, y, x + 8, y, "yellow")
+    triangle(x - 24, y, x, y - 8, x, y + 8, "yellow")
+    triangle(x + 24, y, x, y - 8, x, y + 8, "yellow")
+end
+
+function centered(message, y, color, size)
+    write(message, (800 - text_width(message, size)) / 2, y, color, size)
+end

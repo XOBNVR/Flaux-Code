@@ -1,0 +1,10 @@
+# Lesson 8: lists hold lots of things in order
+set pets to ["cat", "dog"]
+add "fish" to pets
+say pets
+say pets[1]
+say length of pets
+
+repeat with pet in pets
+    say "I love my {pet}"
+end

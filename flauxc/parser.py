@@ -36,7 +36,7 @@ NEGATE = {"=": "!=", "!=": "=", "<": ">=", ">": "<=", "<=": ">", ">=": "<"}
 # Words from other languages, and the Flaux word to use instead.
 OTHER_LANGUAGE_WORDS = {
     "print": "say", "println": "say", "echo": "say", "puts": "say", "console": "say",
-    "printf": "say", "cout": "say", "write": "say", "writeln": "say", "display": "say",
+    "printf": "say", "cout": "say", "writeln": "say", "display": "say",
     "let": "set", "var": "set", "const": "set", "int": "set", "string": "set", "float": "set",
     "double": "set", "bool": "set", "auto": "set", "local": "set", "dim": "set",
     "def": "function", "func": "function", "fn": "function", "fun": "function",

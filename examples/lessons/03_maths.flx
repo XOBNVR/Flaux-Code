@@ -1,0 +1,13 @@
+# Lesson 3: maths
+say 2 + 3
+say 10 - 4
+say 3 * 4
+say 7 / 2
+say 7 // 2
+say 7 mod 2
+say 2 ^ 3
+
+set score to 0
+add 10 to score
+subtract 3 from score
+say score

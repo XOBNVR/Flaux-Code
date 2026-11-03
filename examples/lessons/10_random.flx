@@ -1,0 +1,6 @@
+# Lesson 10: random picks something by chance
+set roll to random(1, 6)
+say "You rolled a {roll}"
+
+set pick to random(["rock", "paper", "scissors"])
+say "I choose {pick}!"

@@ -1,0 +1,21 @@
+# frames: 20
+# hold: right
+# pixel: 160 100 #ffffff
+# pixel: 60 100 #000000
+# pixel: 5 5 #e8303a
+# pixel: 15 5 #000000
+window(300, 200)
+set x to 50
+set presses to 0
+repeat forever
+    if key_down("right")
+        add 5 to x
+    end
+    if key_pressed("right")
+        add 1 to presses
+    end
+    clear("black")
+    rect(x, 90, 20, 20, "white")
+    rect(0, 0, presses * 10, 10, "red")
+    show()
+end

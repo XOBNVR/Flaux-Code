@@ -1,6 +1,7 @@
 # Flaux
 
-**Flaux is a coding language that reads like English and runs super fast.**
+**Flaux is a coding language that reads like English and runs super fast.
+You can even make games with it.**
 
 ```
 say "Hello, world!"
@@ -15,13 +16,15 @@ C++, one of the fastest languages there is.
 ## Contents
 
 1. [Get Flaux running](#get-flaux-running)
-2. [Learn Flaux in 10 lessons](#learn-flaux-in-10-lessons)
-3. [Your first game](#your-first-game)
-4. [Cheat sheet](#cheat-sheet)
-5. [When something goes wrong](#when-something-goes-wrong)
-6. [Already know another language?](#already-know-another-language)
-7. [How fast is it?](#how-fast-is-it)
-8. [For people who want to help build Flaux](#for-people-who-want-to-help-build-flaux)
+2. [Run your program with a double-click](#run-your-program-with-a-double-click)
+3. [Learn Flaux in 11 lessons](#learn-flaux-in-11-lessons)
+4. [Your first game](#your-first-game)
+5. [Example games](#example-games)
+6. [Cheat sheet](#cheat-sheet)
+7. [When something goes wrong](#when-something-goes-wrong)
+8. [Already know another language?](#already-know-another-language)
+9. [How fast is it?](#how-fast-is-it)
+10. [For people who want to help build Flaux](#for-people-who-want-to-help-build-flaux)
 
 ---
 
@@ -59,9 +62,122 @@ Then run it:
 
 That's it. You're coding.
 
+**For graphics and games** (Lesson 11), also install the free SDL2 library,
+just once:
+
+```bash
+sudo apt install libsdl2-dev      # Linux and WSL
+brew install sdl2                 # Mac (with Homebrew)
+```
+
 ---
 
-## Learn Flaux in 10 lessons
+## Run your program with a double-click
+
+Typing `./flaux mygame.flx` every time gets boring. Instead, you can make a
+tiny **launcher file** that types the command for you. Then you start your
+game by double-clicking it, just like any other program.
+
+On Windows this is called a **batch file** (it ends in `.bat`). On a Mac
+it's a `.command` file, and on Linux a `.sh` file. Ready-made copies of all
+three are in [`examples/launchers/`](examples/launchers/).
+
+### Windows: make a batch file
+
+These steps assume you followed [Get Flaux running](#get-flaux-running) in
+WSL, so the `Flaux-Code` folder is in your Linux home folder.
+
+**1.** Open **Notepad**.
+
+**2.** Type these three lines:
+
+```bat
+@echo off
+wsl bash -lc "cd ~/Flaux-Code && ./flaux examples/games/star_catcher.flx"
+pause
+```
+
+**3.** Click **File**, then **Save As**. Set **Save as type** to
+**All Files (\*.\*)**, type the name `play.bat`, and save it on your
+**Desktop**.
+
+**4.** Double-click `play.bat` on your Desktop. Your game starts!
+
+Here's what each part means:
+
+| Part | What it does |
+|---|---|
+| `@echo off` | hides the commands, so you only see what your program shows |
+| `wsl` | runs the rest in Linux (WSL), where Flaux lives |
+| `bash -lc "..."` | runs the commands inside the quotes |
+| `cd ~/Flaux-Code` | goes into the Flaux-Code folder |
+| `&&` | "and then, if that worked..." |
+| `./flaux examples/games/star_catcher.flx` | runs the program |
+| `pause` | waits for you to press a key before the black window closes, so you can read any messages |
+
+**To run your own program,** change `examples/games/star_catcher.flx` to
+your file's name. For example, if you saved `me.flx` in the Flaux-Code
+folder:
+
+```bat
+@echo off
+wsl bash -lc "cd ~/Flaux-Code && ./flaux me.flx"
+pause
+```
+
+> **It opened in Notepad instead of running?** Windows saved it as
+> `play.bat.txt`. In File Explorer, click **View**, turn on **File name
+> extensions**, and rename the file to remove `.txt`.
+>
+> **Graphics need Windows 11** (it can show windows from WSL by itself).
+> Text programs work on Windows 10 too.
+
+### Mac: make a `.command` file
+
+**1.** Open **TextEdit**. Click **Format**, then **Make Plain Text**.
+
+**2.** Type:
+
+```bash
+#!/bin/bash
+cd ~/Flaux-Code
+./flaux examples/games/star_catcher.flx
+```
+
+**3.** Save it on your Desktop as `play.command`.
+
+**4.** Just once, open **Terminal** and type this, so your Mac knows the
+file is allowed to run:
+
+```bash
+chmod +x ~/Desktop/play.command
+```
+
+**5.** Double-click `play.command`. (The first time, your Mac may say it's
+from an unknown developer. Right-click it, choose **Open**, then **Open**
+again.)
+
+| Line | What it does |
+|---|---|
+| `#!/bin/bash` | says "these are Terminal commands" |
+| `cd ~/Flaux-Code` | goes into the Flaux-Code folder |
+| `./flaux examples/games/star_catcher.flx` | runs the program |
+
+### Linux: make a `.sh` file
+
+Make a file called `play.sh` with the same three lines as the Mac one,
+then make it runnable, just once:
+
+```bash
+chmod +x play.sh
+```
+
+Now run it with `./play.sh`, or double-click it in your file manager (if it
+asks, choose **Run**).
+
+---
+
+## Learn Flaux in 11 lessons
 
 Every lesson is also a file in [`examples/lessons/`](examples/lessons/), so
 you can run it yourself and change it. For example:
@@ -369,6 +485,101 @@ You rolled a 3
 I choose scissors!
 ```
 
+### Lesson 11: Graphics and games
+
+Flaux can open a window and draw in it. (You need SDL2 installed for this,
+see [Get Flaux running](#get-flaux-running).)
+
+**Draw a picture.** Places in the window are measured in pixels from the
+top-left corner. `x` goes to the right and `y` goes **down** (not up like
+in maths class).
+
+```
+window(400, 300, "My Picture")
+clear("sky")
+rect(0, 220, 400, 80, "green")          # grass
+circle(330, 60, 35, "yellow")           # sun
+rect(120, 140, 120, 90, "beige")        # house
+line(110, 140, 180, 90, "darkred")      # roof
+line(180, 90, 250, 140, "darkred")
+line(110, 140, 250, 140, "darkred")
+rect(165, 180, 30, 50, "brown")         # door
+write("Home sweet home", 20, 20, "navy", 2)
+```
+
+![A picture drawn with Flaux: a house, grass and the sun](docs/images/picture.png)
+
+**Make it move.** A game is a loop that runs again and again:
+change things, draw everything, then `show()` it. `show()` puts your
+drawing on the screen and waits a moment, so the loop runs 60 times a
+second.
+
+```
+window(600, 400, "Move the ball")
+
+set x to 300
+set y to 200
+
+repeat forever
+    if key_down("left")
+        subtract 5 from x
+    end
+    if key_down("right")
+        add 5 to x
+    end
+    if key_down("up")
+        subtract 5 from y
+    end
+    if key_down("down")
+        add 5 to y
+    end
+
+    clear("black")
+    circle(x, y, 20, "orange")
+    write("Use the arrow keys", 10, 10)
+    show()
+end
+```
+
+Run it, and the arrow keys move the ball. Close the window to stop.
+
+**Drawing:**
+
+| Write | Draws |
+|---|---|
+| `window(800, 600, "My Game")` | opens a window 800 wide and 600 tall (do this first) |
+| `clear("black")` | fills the whole window with a colour |
+| `rect(x, y, width, height, "blue")` | a rectangle (x, y is its top-left corner) |
+| `circle(x, y, radius, "red")` | a circle (x, y is its middle) |
+| `triangle(x1, y1, x2, y2, x3, y3, "orange")` | a triangle with three corners |
+| `line(x1, y1, x2, y2, "white", 3)` | a line, 3 pixels thick (leave out the 3 for a thin line) |
+| `dot(x, y, "white")` | one pixel |
+| `write("Score: {score}", x, y, "white", 3)` | text, size 3 (leave out the size for size 2) |
+| `show()` | shows the drawing and waits for the next frame |
+
+**Keyboard, mouse and sound:**
+
+| Write | Means |
+|---|---|
+| `key_down("left")` | true while the key is held down |
+| `key_pressed("space")` | true only at the moment the key goes down (good for jumping) |
+| `mouse_x()`, `mouse_y()` | where the mouse is |
+| `mouse_down()` | true while the mouse button is held |
+| `mouse_clicked()` | true only at the moment of a click |
+| `beep(440, 0.2)` | plays a beep: pitch 440 for 0.2 seconds |
+
+**Colours:** `"black"`, `"white"`, `"gray"`, `"red"`, `"orange"`,
+`"yellow"`, `"gold"`, `"green"`, `"lime"`, `"blue"`, `"navy"`, `"sky"`,
+`"cyan"`, `"teal"`, `"purple"`, `"violet"`, `"pink"`, `"magenta"`,
+`"brown"`, `"beige"`, plus `"dark ..."` and `"light ..."` versions of some of
+them (like `"dark green"`). Mix your own with `rgb(255, 136, 0)`, or use a
+code like `"#ff8800"`.
+
+**Handy helpers:** `distance(x1, y1, x2, y2)` tells you how far apart two
+points are, which is great for checking if two things touch.
+`text_width("GAME OVER", 5)` tells you how wide some text is, to help
+centre it.
+
 ---
 
 ## Your first game
@@ -404,6 +615,22 @@ More programs to try are in [`examples/`](examples/).
 
 ---
 
+## Example games
+
+![Star Catcher, a game made with Flaux](docs/images/star_catcher.png)
+
+| Game | Run it with |
+|---|---|
+| **Star Catcher**: move the basket with the arrow keys and catch the falling stars | `./flaux examples/games/star_catcher.flx` |
+| **Bounce**: a bouncing ball with gravity and sound | `./flaux examples/games/bounce.flx` |
+| **Doodle**: draw with the mouse | `./flaux examples/games/doodle.flx` |
+| **Picture**: a drawing with no loop at all | `./flaux examples/games/picture.flx` |
+
+Open them up, read them, and change things. Make the stars fall faster,
+change the colours, add a second basket. That's the best way to learn.
+
+---
+
 ## Cheat sheet
 
 | I want to... | Write |
@@ -426,10 +653,18 @@ More programs to try are in [`examples/`](examples/).
 | give back an answer | `return answer` |
 | roll a dice | `random(1, 6)` |
 | leave a note | `# anything after a hash is ignored` |
+| open a window | `window(800, 600, "My Game")` |
+| draw shapes | `rect(...)`, `circle(...)`, `triangle(...)`, `line(...)` |
+| draw text | `write("Hi", 10, 10, "white", 3)` |
+| make a game loop | `repeat forever` ... `show()` ... `end` |
+| check a key | `if key_down("left")` |
 
 Built-in helpers: `ask`, `random`, `length`, `contains`, `text`, `number`,
 `whole`, `is_number`, `round`, `floor`, `ceil`, `abs`, `min`, `max`, `sqrt`,
-`uppercase`, `lowercase`, `sin`, `cos`, `tan`, `log`, `clock`.
+`uppercase`, `lowercase`, `sin`, `cos`, `tan`, `log`, `clock`, `distance`, `rgb`.
+Graphics: `window`, `clear`, `rect`, `circle`, `triangle`, `line`, `dot`,
+`write`, `show`, `key_down`, `key_pressed`, `mouse_x`, `mouse_y`,
+`mouse_down`, `mouse_clicked`, `beep`, `text_width`, `screenshot`.
 Every one is explained in the [full guide](docs/LANGUAGE.md).
 
 ---
@@ -532,6 +767,8 @@ your .flx file → lexer → parser → type checker → C code → gcc/clang �
 | [`flauxc/parser.py`](flauxc/parser.py) | understands the grammar, catches typing mistakes |
 | [`flauxc/compiler.py`](flauxc/compiler.py) | works out every type and writes C code |
 | [`flauxc/runtime.h`](flauxc/runtime.h) | the small C toolkit every program uses |
+| [`flauxc/graphics.h`](flauxc/graphics.h) | windows, drawing, keyboard, mouse and sound (uses SDL2) |
+| [`flauxc/font.py`](flauxc/font.py) | the 5x7 pixel font used to write text in windows |
 | [`flauxc/errors.py`](flauxc/errors.py) | turns problems into friendly, teaching messages |
 | [`flauxc/cli.py`](flauxc/cli.py) | the `flaux` command |
 
@@ -551,5 +788,6 @@ python3 benchmarks/run.py       # race Flaux against C++, C# and Python
 - [ ] Functions that can see variables made outside them
 - [ ] Removing items from lists, splitting and joining text
 - [ ] Grouping values together (like a player with a name and a score)
-- [ ] Graphics and sound for making games
+- [x] Graphics and sound for making games
+- [ ] Pictures from files (sprites) for games
 - [ ] A drag-and-drop block editor that writes Flaux for you

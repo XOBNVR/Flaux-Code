@@ -1,0 +1,17 @@
+# frames: 1
+# pixel: 5 5 #2f6fed
+# pixel: 20 20 #e8303a
+# pixel: 100 50 #00ff00
+# pixel: 170 160 #ff00ff
+# pixel: 50 190 #ffffff
+# pixel: 50 192 #ffffff
+# pixel: 11 110 #ffe135
+# pixel: 17 110 #2f6fed
+window(200, 200)
+clear("blue")
+rect(10, 10, 30, 30, "red")
+circle(100, 50, 20, "#00ff00")
+triangle(150, 150, 190, 150, 170, 190, rgb(255, 0, 255))
+line(10, 190, 100, 190, "white", 6)
+write("H", 10, 100, "yellow", 4)
+show()

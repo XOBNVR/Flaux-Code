@@ -1,0 +1,3 @@
+# expect: There's no window to draw in yet.
+# expect: window(800, 600)
+circle(10, 10, 5, "red")

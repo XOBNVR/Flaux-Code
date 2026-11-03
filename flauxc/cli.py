@@ -59,13 +59,39 @@ def to_c(path):
         fail(f"{name} is nested too deeply for Flaux to read.")
 
 
+SDL_HELP = """This program uses graphics, so Flaux needs the free SDL2 library, and it isn't installed.
+Install it with one command, then try again:
+
+    Ubuntu, Debian, WSL:  sudo apt install libsdl2-dev
+    Fedora:               sudo dnf install SDL2-devel
+    Arch:                 sudo pacman -S sdl2
+    macOS (Homebrew):     brew install sdl2"""
+
+
+def sdl_flags():
+    """Compiler and linker flags for SDL2, from sdl2-config or pkg-config."""
+    for tool in (["sdl2-config"], ["pkg-config", "sdl2"]):
+        if not shutil.which(tool[0]):
+            continue
+        try:
+            cflags = subprocess.run(tool + ["--cflags"], capture_output=True, text=True, check=True).stdout.split()
+            libs = subprocess.run(tool + ["--libs"], capture_output=True, text=True, check=True).stdout.split()
+            return cflags, libs
+        except subprocess.CalledProcessError:
+            continue
+    fail(SDL_HELP)
+
+
 def compile_c(c_code, out_path):
     cc = find_c_compiler()
+    cflags, libs = [], []
+    if "#define FX_USES_GRAPHICS" in c_code:
+        cflags, libs = sdl_flags()
     with tempfile.TemporaryDirectory() as tmp:
         c_path = os.path.join(tmp, "program.c")
         with open(c_path, "w", encoding="utf-8") as fh:
             fh.write(c_code)
-        result = subprocess.run([cc, *CFLAGS, c_path, "-o", out_path, "-lm"],
+        result = subprocess.run([cc, *CFLAGS, *cflags, c_path, "-o", out_path, *libs, "-lm"],
                                 capture_output=True, text=True)
     if result.returncode != 0:
         fd, keep = tempfile.mkstemp(prefix="flaux-bug-", suffix=".c")

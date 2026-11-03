@@ -312,6 +312,15 @@ static double fx_random_float(double a, double b, int line) {
     return a + (b - a) * ((double)(fx_rng() >> 11) * 0x1.0p-53);
 }
 
+static fx_text fx_rgb_text(double r, double g, double b) {
+    double v[3] = { r, g, b };
+    int c[3];
+    for (int i = 0; i < 3; i++) c[i] = v[i] < 0 ? 0 : v[i] > 255 ? 255 : (int)lround(v[i]);
+    char buf[8];
+    snprintf(buf, sizeof buf, "#%02x%02x%02x", c[0], c[1], c[2]);
+    return fx_text_make(buf, 7);
+}
+
 /* --------------------------------------------------- input and time */
 
 static fx_text fx_ask(fx_text prompt) {
