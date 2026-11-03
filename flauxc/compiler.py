@@ -76,6 +76,7 @@ BUILTINS = {
     "mouse_clicked": "if mouse_clicked()\n    add 1 to clicks\nend",
     "beep": "beep(440, 0.2)    # pitch, seconds",
     "screenshot": "screenshot(\"picture.bmp\")",
+    "fullscreen": "window(800, 600)\nfullscreen()    # fill the screen (F11 switches back)",
     "image": "image(\"ship.png\", 100, 200)              # a picture at x, y\n"
              "image(\"ship.png\", 100, 200, 64, 64)      # ...64 by 64 pixels\n"
              "image(\"ship.png\", 100, 200, 64, 64, 90)  # ...turned 90 degrees",
@@ -86,7 +87,7 @@ BUILTINS = {
 
 GRAPHICS_BUILTINS = {"window", "show", "clear", "rect", "circle", "line", "triangle", "dot", "write", "key_down",
                      "key_pressed", "mouse_x", "mouse_y", "mouse_down", "mouse_clicked", "beep",
-                     "screenshot", "text_width", "image", "image_width", "image_height"}
+                     "screenshot", "text_width", "image", "image_width", "image_height", "fullscreen"}
 
 PICTURE_TYPES = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 
@@ -1895,6 +1896,10 @@ class Compiler:
         if tt == UNK:
             return "", INT
         return self.graphics_call(f"fx_text_width({self.to_text(tc, tt)}, {size})", INT)
+
+    def b_fullscreen(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call(f"fx_g_fullscreen({e.line})")
 
     def b_screenshot(self, e, args):
         self.arity(e, args, 1)

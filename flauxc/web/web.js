@@ -5,7 +5,10 @@
  *   Apply fix and the block editor work exactly like the desktop app
  * - programs become JavaScript (jsgen.py) and run on fx.js
  * - your programs and pictures are kept in this browser (localStorage)
- * - games draw in the game panel, with keyboard, mouse and sound
+ * - games draw in the game panel, with keyboard, mouse and sound, and can go
+ *   fullscreen (the Fullscreen button, or fullscreen() in the program)
+ * - Export makes a .zip with the program as one web page (player.html filled
+ *   in with fx.js, the compiled program and its pictures) and files that open it
  *
  * index.html calls FlauxWeb.api(path, data) instead of asking a server.
  */
@@ -163,14 +166,84 @@ window.FlauxWeb = (() => {
     canvas.addEventListener("keydown", (e) => { game.keys.add(keyName(e)); e.preventDefault(); });
     canvas.addEventListener("keyup", (e) => { game.keys.delete(keyName(e)); e.preventDefault(); });
     canvas.addEventListener("blur", () => game.keys.clear());
+    // Mouse position in canvas pixels, however big the canvas is shown (in the
+    // panel or fullscreen), kept on the canvas.
     const where = (e) => {
       const r = canvas.getBoundingClientRect();
-      game.mouse.x = (e.clientX - r.left) * canvas.width / r.width;
-      game.mouse.y = (e.clientY - r.top) * canvas.height / r.height;
+      const x = Math.floor((e.clientX - r.left) * canvas.width / r.width);
+      const y = Math.floor((e.clientY - r.top) * canvas.height / r.height);
+      game.mouse.x = Math.max(0, Math.min(canvas.width - 1, x));
+      game.mouse.y = Math.max(0, Math.min(canvas.height - 1, y));
     };
     canvas.addEventListener("mousemove", where);
-    canvas.addEventListener("mousedown", (e) => { where(e); game.mouse.down = true; canvas.focus(); });
+    canvas.addEventListener("mousedown", (e) => {
+      where(e); game.mouse.down = game.mouse.pressed = true; canvas.focus();
+      if (full.wanted) enterFullscreen();          // the program asked: a click is allowed to do it
+    });
     window.addEventListener("mouseup", () => { game.mouse.down = false; });
+    setUpFullscreen();
+  }
+
+  // ------------------------------------------------------------ fullscreen
+  // The wrapper #game-screen goes fullscreen (black background) and the canvas
+  // is sized to fit it, same shape. Browsers without the Fullscreen API (like
+  // iPhones) get the wrapper stretched over the page instead, with a ✕ button.
+  const full = { fake: false, wanted: false };
+  function fullscreenElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+  function isFullscreen() { return full.fake || fullscreenElement() === document.getElementById("game-screen"); }
+  function fitCanvas() {
+    const canvas = game.canvas, box = document.getElementById("game-screen");
+    if (!isFullscreen()) {
+      canvas.style.width = canvas.style.height = canvas.style.imageRendering = "";
+      box.classList.remove("fake-full");
+      return;
+    }
+    const s = Math.min(box.clientWidth / canvas.width, box.clientHeight / canvas.height);
+    canvas.style.width = canvas.width * s + "px";
+    canvas.style.height = canvas.height * s + "px";
+    // a whole number of screen pixels per game pixel: sharp; otherwise smooth, so pixels don't look uneven
+    const device = s * (window.devicePixelRatio || 1);
+    canvas.style.imageRendering = Math.abs(device - Math.round(device)) < 0.01 ? "pixelated" : "auto";
+  }
+  function wantFullscreen(on) {
+    full.wanted = on;
+    document.getElementById("btn-fullscreen").classList.toggle("wants", on);
+    const title = document.getElementById("game-title");
+    title.textContent = title.dataset.name ? title.dataset.name +
+      (on ? "  (click the game to go fullscreen)" : "  (click here to use the keys)") : "";
+  }
+  function enterFullscreen() {
+    const box = document.getElementById("game-screen");
+    wantFullscreen(false);
+    if (isFullscreen()) return Promise.resolve(true);
+    const ask = box.requestFullscreen ? () => box.requestFullscreen({ navigationUI: "hide" })
+      : box.webkitRequestFullscreen ? () => box.webkitRequestFullscreen() : null;
+    const fake = () => { full.fake = true; box.classList.add("fake-full"); fitCanvas(); game.canvas.focus(); };
+    if (!ask) { fake(); return Promise.resolve(true); }
+    let p;
+    try { p = ask(); } catch (e) { p = Promise.reject(e); }
+    return Promise.resolve(p).then(() => { game.canvas.focus(); return true; }, () => false);
+  }
+  function leaveFullscreen() {
+    wantFullscreen(false);
+    if (full.fake) { full.fake = false; fitCanvas(); return; }
+    if (fullscreenElement()) {
+      try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) { /* already gone */ }
+    }
+  }
+  function toggleFullscreen() { if (isFullscreen()) leaveFullscreen(); else enterFullscreen(); }
+  function setUpFullscreen() {
+    const changed = () => { game.keys.clear(); fitCanvas(); if (isFullscreen()) game.canvas.focus(); };
+    document.addEventListener("fullscreenchange", changed);
+    document.addEventListener("webkitfullscreenchange", changed);
+    window.addEventListener("resize", () => { if (isFullscreen()) fitCanvas(); });
+    document.getElementById("btn-fullscreen").addEventListener("click", toggleFullscreen);
+    document.getElementById("game-title").addEventListener("dblclick", toggleFullscreen);
+    document.getElementById("game-exit").addEventListener("click", leaveFullscreen);
+    // clicking a black bar keeps the keys going to the game
+    document.getElementById("game-screen").addEventListener("mousedown", (e) => {
+      if (e.target.id === "game-screen") { e.preventDefault(); game.canvas.focus(); }
+    });
   }
 
   let audio = null, audioTime = 0;
@@ -201,6 +274,7 @@ window.FlauxWeb = (() => {
                 asking: null, answers: [], lastFrame: 0, sleepers: new Set() };
     runs.set(id, r);
     const panel = document.getElementById("game");
+    leaveFullscreen();
     panel.hidden = true;
     game.keys.clear();
     const io = {
@@ -229,13 +303,21 @@ window.FlauxWeb = (() => {
       openWindow: (w, h, title) => {
         game.canvas.width = w; game.canvas.height = h;
         panel.hidden = false;
-        document.getElementById("game-title").textContent = title + "  (click here to use the keys)";
+        document.getElementById("game-title").dataset.name = title;
+        wantFullscreen(false);
+        fitCanvas();
         game.canvas.focus();
         const back = document.createElement("canvas");
         back.width = w; back.height = h;
         return { screen: game.canvas, back };
       },
       keys: game.keys, mouse: game.mouse,
+      // fullscreen(): browsers only allow it straight after a click or key, so
+      // if it's refused, the button lights up and the next click on the game does it
+      fullscreen: () => {
+        if (isFullscreen()) return;
+        enterFullscreen().then((ok) => { if (!ok && !r.done && !r.cancelled) wantFullscreen(true); });
+      },
       nextFrame: () => new Promise((resolve) => {
         const tick = (now) => {              // 60 frames a second, whatever the screen
           if (r.cancelled || now - r.lastFrame >= 1000 / 60 - 2) { r.lastFrame = now; resolve(); }
@@ -252,6 +334,11 @@ window.FlauxWeb = (() => {
     FlauxRuntime.runProgram(built.js, io, { file: name, lines }).then((code) => {
       r.exit = code === null ? 130 : code;
       r.done = true;
+      // Stop or a problem: back to the Studio, so the message can be read. A game
+      // that finished normally stays as it is (its last picture is still shown).
+      if (String(nextRun - 1) !== id) return;           // a newer run has the game panel now
+      if (code !== 0) leaveFullscreen();
+      else wantFullscreen(false);
     });
     return { ok: true, run: id };
   }
@@ -285,6 +372,127 @@ window.FlauxWeb = (() => {
     return { ok: true };
   }
 
+  // -------------------------------------------------------------- export
+  // A .zip that runs the program without Flaux Studio:
+  //   <name>/game.html          the program, fx.js and its pictures in one page (works from file://)
+  //   <name>/Play <name>.bat    Windows: opens game.html in the web browser
+  //   <name>/play.command       Mac        <name>/play.sh   Linux
+  //   <name>/README.txt
+  function exportName(path) {
+    const name = nameOf(path).replace(/\.flx$/i, "").replace(/[^A-Za-z0-9 _-]+/g, "").trim();
+    return !name || name === "untitled" ? "game" : name;
+  }
+  function dataUrl(blob) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  }
+  // the pictures the program names ("ship.png" and so on), as data: URLs
+  async function picturesFor(source, path) {
+    const found = {};
+    for (const m of source.matchAll(/"([^"\n]+\.(?:png|jpe?g|bmp|gif))"/gi)) {
+      const name = m[1];
+      if (name in found) continue;
+      let url = await pictureUrl(name, path);
+      if (url && !url.startsWith("data:")) {
+        try { url = await dataUrl(await (await fetch(url)).blob()); } catch (e) { url = null; }
+      }
+      if (url) found[name] = url;
+    }
+    return found;
+  }
+  async function exportGame(d) {
+    const source = d.content || "", name = exportName(d.path);
+    const built = await ask("build", source, nameOf(d.path));
+    if (!built.ok) return built;
+    const [player, fx] = await Promise.all(["player.html", "fx.js"].map(async (f) => {
+      const res = await fetch(f);
+      if (!res.ok) throw new Error("Couldn't load " + f);
+      return res.text();
+    }));
+    const program = { name, js: built.js, source, pictures: await picturesFor(source, d.path) };
+    const html = player
+      .replace("@@TITLE@@", () => name.replace(/&/g, "&amp;").replace(/</g, "&lt;"))
+      .replace("/*@FX@*/", () => fx.replace(/<\/script/gi, "<\\/script").replace(/<!--/g, "<\\!--"))
+      .replace("/*@PROGRAM@*/", () => JSON.stringify(program).replace(/</g, "\\u003c"));
+    const crlf = (t) => t.replace(/\n/g, "\r\n");
+    const files = [
+      [`${name}/game.html`, html],
+      [`${name}/Play ${name}.bat`, crlf(`@echo off\nrem Opens ${name} in your web browser.\nstart "" "%~dp0game.html"\n`)],
+      [`${name}/play.command`, `#!/bin/sh\n# Mac: opens ${name} in your web browser.\nopen "$(dirname "$0")/game.html"\n`, true],
+      [`${name}/play.sh`, `#!/bin/sh\n# Linux: opens ${name} in your web browser.\nxdg-open "$(dirname "$0")/game.html"\n`, true],
+      [`${name}/README.txt`, crlf(`${name}\n${"=".repeat(name.length)}\n\n` +
+        `Made with Flaux (https://github.com/XOBNVR/Flaux-Code).\n\n` +
+        `To play:\n  Windows: double-click "Play ${name}.bat" (or game.html).\n` +
+        `  Mac: double-click play.command (or game.html).\n  Linux: run play.sh (or open game.html).\n\n` +
+        `It opens in your web browser. Everything is inside game.html, so you can also\n` +
+        `put that one file on a website. Click the game so it gets the keys, and use the\n` +
+        `Fullscreen button to play on the whole screen (Esc leaves).\n`)],
+    ];
+    download(name + ".zip", makeZip(files), "application/zip");
+    return { ok: true, name: name + ".zip" };
+  }
+
+  // A .zip file (stored, not compressed). files: [path, text, executable?]
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function makeZip(files) {
+    const enc = new TextEncoder(), parts = [], central = [];
+    const now = new Date();
+    const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+    let offset = 0;
+    for (const [path, text, executable] of files) {
+      const name = enc.encode(path), data = typeof text === "string" ? enc.encode(text) : text;
+      const crc = crc32(data);
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true);
+      local.setUint16(4, 20, true);              // version needed
+      local.setUint16(6, 0x0800, true);          // names are UTF-8
+      local.setUint16(8, 0, true);               // stored
+      local.setUint16(10, time, true); local.setUint16(12, date, true);
+      local.setUint32(14, crc, true);
+      local.setUint32(18, data.length, true); local.setUint32(22, data.length, true);
+      local.setUint16(26, name.length, true); local.setUint16(28, 0, true);
+      const head = new DataView(new ArrayBuffer(46));
+      head.setUint32(0, 0x02014b50, true);
+      head.setUint16(4, (3 << 8) | 20, true);    // made on Unix (so the file mode below counts)
+      head.setUint16(6, 20, true);
+      head.setUint16(8, 0x0800, true);
+      head.setUint16(10, 0, true);
+      head.setUint16(12, time, true); head.setUint16(14, date, true);
+      head.setUint32(16, crc, true);
+      head.setUint32(20, data.length, true); head.setUint32(24, data.length, true);
+      head.setUint16(28, name.length, true);
+      head.setUint32(38, ((executable ? 0o100755 : 0o100644) << 16) >>> 0, true);
+      head.setUint32(42, offset, true);
+      parts.push(local, name, data);
+      central.push(head, name);
+      offset += 30 + name.length + data.length;
+    }
+    const size = central.reduce((n, p) => n + p.byteLength, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, size, true); end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, end], { type: "application/zip" });
+  }
+
   // ----------------------------------------------------------------- api
   async function api(path, d) {
     switch (path) {
@@ -299,13 +507,14 @@ window.FlauxWeb = (() => {
       case "/api/output": return output(d);
       case "/api/input": return input(d);
       case "/api/stop": return stop(d);
+      case "/api/export": return exportGame(d);
     }
     throw new Error("Flaux Studio on the web doesn't know " + path);
   }
 
-  function download(name, text) {
+  function download(name, data, type) {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: type || "text/plain" }));
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -323,5 +532,6 @@ window.FlauxWeb = (() => {
 
   document.addEventListener("DOMContentLoaded", () => { setUpGame(); python(); });
 
-  return { api, download, openFromComputer, addPictures, picturesSaved: () => Object.keys(load(PICTURES)) };
+  return { api, download, openFromComputer, addPictures, picturesSaved: () => Object.keys(load(PICTURES)),
+           mouse: () => ({ x: game.mouse.x, y: game.mouse.y }) };
 })();

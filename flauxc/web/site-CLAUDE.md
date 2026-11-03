@@ -16,6 +16,7 @@ are **built from that repository**, so make lasting changes there and rebuild
 | `index.html` | the page: Flaux Studio (editor, Blocks mode, output, lessons) |
 | `web.js` | the page's helper: loads Python, runs programs, keeps files in the browser |
 | `fx.js` | the runtime that compiled Flaux programs use (maths, text, graphics, keys, sound) |
+| `player.html` | the page an exported program becomes (**Export** button: `web.js` fills in `fx.js`, the compiled program and its pictures, and zips it with a `Play <name>.bat`) |
 | `blocks.js`, `blockly/` | the block editor (built on Google's Blockly) |
 | `pyodide/` | Python for web pages (Pyodide 314.0.7). It runs Flaux's real compiler in the browser |
 | `flaux-files.json` | the Flaux compiler's Python source files, loaded into Pyodide |
@@ -33,6 +34,8 @@ are **built from that repository**, so make lasting changes there and rebuild
    compiler, so the error messages are exactly the same as the desktop app's.
 3. To run a program, the compiler turns it into JavaScript, and it runs in
    the page on `fx.js`. Games draw on a `<canvas>` above the output.
+   Its Fullscreen button puts that canvas on the whole screen (Fullscreen API),
+   scaled to fit with black bars; mouse positions are turned back into canvas pixels.
 4. People's programs and pictures are kept in their own browser
    (`localStorage` keys `flaux-web-programs` and `flaux-web-pictures`).
    Nothing is sent anywhere.

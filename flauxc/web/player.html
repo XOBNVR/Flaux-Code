@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>@@TITLE@@</title>
+<!-- A Flaux program, exported from Flaux Studio. Everything it needs is in
+     this one file: open it in a web browser to play. -->
+<style>
+:where(html, body) { touch-action: manipulation; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: #14161f; color: #e8e9f0;
+       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+       display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px; }
+[hidden] { display: none !important; }
+#screen { display: flex; justify-content: center; max-width: 100%; }
+#canvas { display: block; max-width: 100%; max-height: calc(100vh - 140px); image-rendering: pixelated;
+          background: #000; outline: none; border-radius: 6px; box-shadow: 0 4px 24px rgba(0, 0, 0, .5); }
+#canvas:focus { box-shadow: 0 0 0 3px #8a7dff; }
+/* fullscreen: the canvas as big as fits, same shape, black bars (fit() sets its size) */
+#screen:fullscreen, #screen.fake-full { background: #000; align-items: center; width: 100vw; height: 100vh; }
+#screen.fake-full { position: fixed; inset: 0; z-index: 10; }
+#screen:fullscreen #canvas, #screen.fake-full #canvas { max-width: none; max-height: none; border-radius: 0; box-shadow: none; }
+#exit { display: none; position: absolute; top: 10px; right: 10px; z-index: 1; opacity: .75; }
+#screen.fake-full #exit { display: inline-block; }
+#bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; color: #9a9db0; font-size: 13px; }
+button { font: inherit; cursor: pointer; color: #e8e9f0; background: #232637; border: 1px solid #3a3e55;
+         border-radius: 8px; padding: 5px 12px; }
+button:hover { border-color: #8a7dff; }
+button.wants { border-color: #5b4bff; box-shadow: 0 0 0 3px #8a7dff; }
+#out { width: min(800px, 100%); margin: 0; padding: 12px 14px; background: #0d0f16; border-radius: 8px;
+       font: 15px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+       max-height: 40vh; overflow: auto; }
+body.text-only #out { max-height: none; flex: 1; }
+#out .err { color: #ff8a8a; }
+#out .note { color: #9a9db0; }
+#out .in { color: #9d93ff; }
+#ask { display: flex; gap: 8px; width: min(800px, 100%); }
+#ask input { flex: 1; font: inherit; font-size: 16px; padding: 8px 12px; border-radius: 8px;
+             border: 2px solid #8a7dff; background: #0d0f16; color: inherit; }
+</style>
+</head>
+<body class="text-only">
+<div id="screen" hidden>
+  <canvas id="canvas" tabindex="0" width="800" height="600"></canvas>
+  <button id="exit" title="Leave fullscreen">&#10005;</button>
+</div>
+<div id="bar" hidden>
+  <span id="title"></span>
+  <button id="full" title="Play on the whole screen (Esc leaves)">&#9974; Fullscreen</button>
+</div>
+<pre id="out" hidden></pre>
+<form id="ask" hidden><input id="answer" autocomplete="off" placeholder="Type your answer here and press Enter"><button>Send</button></form>
+
+<script>
+/*@FX@*/
+</script>
+<script id="program" type="application/json">/*@PROGRAM@*/</script>
+<script>
+"use strict";
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const program = JSON.parse($("program").textContent);   // { name, js, source, pictures }
+  const canvas = $("canvas"), screen = $("screen"), out = $("out");
+  const mouse = { x: 0, y: 0, down: false, pressed: false }, keys = new Set();
+
+  // ------------------------------------------------------------- output
+  function write(stream, text) {
+    out.hidden = false;
+    const span = document.createElement("span");
+    if (stream === "err") span.className = "err";
+    else if (stream !== "out") span.className = stream;
+    span.textContent = text;
+    out.appendChild(span);
+    out.scrollTop = out.scrollHeight;
+  }
+  let answering = null;
+  $("ask").addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!answering) return;
+    const text = $("answer").value, done = answering;
+    $("answer").value = ""; $("ask").hidden = true; answering = null;
+    write("in", text + "\n");
+    done(text);
+  });
+  function ask(prompt) {
+    if (prompt) write("out", prompt.endsWith(" ") ? prompt : prompt + " ");
+    return new Promise((resolve) => { answering = resolve; $("ask").hidden = false; $("answer").focus(); });
+  }
+
+  // --------------------------------------------------------- keys, mouse
+  const KEY_NAMES = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down", " ": "space",
+    Enter: "enter", Escape: "escape", Shift: "shift", Control: "ctrl", Alt: "alt", Tab: "tab",
+    Backspace: "backspace", Delete: "delete", Insert: "insert", Home: "home", End: "end",
+    PageUp: "pageup", PageDown: "pagedown" };
+  const keyName = (e) => KEY_NAMES[e.key] || e.key.toLowerCase();
+  canvas.addEventListener("keydown", (e) => { keys.add(keyName(e)); e.preventDefault(); });
+  canvas.addEventListener("keyup", (e) => { keys.delete(keyName(e)); e.preventDefault(); });
+  canvas.addEventListener("blur", () => keys.clear());
+  const where = (e) => {          // canvas pixels, however big the canvas is shown, kept on the canvas
+    const r = canvas.getBoundingClientRect();
+    mouse.x = Math.max(0, Math.min(canvas.width - 1, Math.floor((e.clientX - r.left) * canvas.width / r.width)));
+    mouse.y = Math.max(0, Math.min(canvas.height - 1, Math.floor((e.clientY - r.top) * canvas.height / r.height)));
+  };
+  canvas.addEventListener("mousemove", where);
+  canvas.addEventListener("mousedown", (e) => {
+    where(e); mouse.down = mouse.pressed = true; canvas.focus();
+    if (wanted) enter();
+  });
+  window.addEventListener("mouseup", () => { mouse.down = false; });
+
+  // --------------------------------------------------------- fullscreen
+  let fake = false, wanted = false;
+  const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+  const isFull = () => fake || fsElement() === screen;
+  function fit() {
+    if (!isFull()) { canvas.style.width = canvas.style.height = canvas.style.imageRendering = ""; screen.classList.remove("fake-full"); return; }
+    const s = Math.min(screen.clientWidth / canvas.width, screen.clientHeight / canvas.height);
+    canvas.style.width = canvas.width * s + "px";
+    canvas.style.height = canvas.height * s + "px";
+    const device = s * (window.devicePixelRatio || 1);   // whole screen pixels per game pixel: sharp, else smooth
+    canvas.style.imageRendering = Math.abs(device - Math.round(device)) < 0.01 ? "pixelated" : "auto";
+  }
+  function want(on) { wanted = on; $("full").classList.toggle("wants", on); }
+  function enter() {
+    want(false);
+    if (isFull()) return Promise.resolve(true);
+    const req = screen.requestFullscreen ? () => screen.requestFullscreen({ navigationUI: "hide" })
+      : screen.webkitRequestFullscreen ? () => screen.webkitRequestFullscreen() : null;
+    if (!req) { fake = true; screen.classList.add("fake-full"); fit(); canvas.focus(); return Promise.resolve(true); }
+    let p;
+    try { p = req(); } catch (e) { p = Promise.reject(e); }
+    return Promise.resolve(p).then(() => { canvas.focus(); return true; }, () => false);
+  }
+  function leave() {
+    want(false);
+    if (fake) { fake = false; fit(); return; }
+    if (fsElement()) try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) { /* gone */ }
+  }
+  const changed = () => { keys.clear(); fit(); if (isFull()) canvas.focus(); };
+  document.addEventListener("fullscreenchange", changed);
+  document.addEventListener("webkitfullscreenchange", changed);
+  window.addEventListener("resize", () => { if (isFull()) fit(); });
+  $("full").addEventListener("click", () => (isFull() ? leave() : enter()));
+  $("exit").addEventListener("click", leave);
+  screen.addEventListener("mousedown", (e) => { if (e.target === screen) { e.preventDefault(); canvas.focus(); } });
+
+  // -------------------------------------------------------------- sound
+  let audio = null, audioTime = 0;
+  const wake = () => { if (audio && audio.state === "suspended") audio.resume(); };
+  window.addEventListener("pointerdown", wake);
+  window.addEventListener("keydown", wake);
+  function beep(pitch, seconds) {
+    try {
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (pitch <= 0 || seconds <= 0) return;
+      const start = Math.max(audio.currentTime, audioTime), stop = start + Math.min(seconds, 10);
+      const osc = audio.createOscillator(), gain = audio.createGain();
+      osc.type = "square"; osc.frequency.value = pitch;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.08, start + 0.01);
+      gain.gain.setValueAtTime(0.08, Math.max(start + 0.01, stop - 0.01));
+      gain.gain.linearRampToValueAtTime(0, stop);
+      osc.connect(gain).connect(audio.destination);
+      osc.start(start); osc.stop(stop);
+      audioTime = stop;
+    } catch (e) { /* no sound here */ }
+  }
+
+  // ------------------------------------------------------------ running
+  let lastFrame = 0;
+  const io = {
+    write, ask, keys, mouse, beep,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    openWindow: (w, h, title) => {
+      canvas.width = w; canvas.height = h;
+      document.body.classList.remove("text-only");
+      screen.hidden = $("bar").hidden = false;
+      $("title").textContent = title === "Flaux" ? program.name : title;
+      if (title !== "Flaux") document.title = title;
+      fit();
+      canvas.focus();
+      const back = document.createElement("canvas");
+      back.width = w; back.height = h;
+      return { screen: canvas, back };
+    },
+    nextFrame: () => new Promise((resolve) => {
+      const tick = (now) => {                 // 60 frames a second, whatever the screen
+        if (now - lastFrame >= 1000 / 60 - 2) { lastFrame = now; resolve(); } else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }),
+    cancelled: () => false,
+    loadPicture: (name) => new Promise((resolve) => {
+      const url = program.pictures[name];
+      if (!url) return resolve(null);
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    }),
+    now: () => performance.now(),
+    // fullscreen(): browsers only allow it after a click or key, so the button lights up
+    // and the next click on the game does it
+    fullscreen: () => { if (!isFull()) enter().then((ok) => { if (!ok) want(true); }); },
+  };
+  const lines = program.source.split("\n").map((l) => l.replace(/\s+$/, ""));
+  FlauxRuntime.runProgram(program.js, io, { file: program.name + ".flx", lines }).then((code) => {
+    want(false);
+    if (code !== 0) leave();                 // a problem: show the message
+    if (!out.hidden || code !== 0) write("note", code === 0 ? "\n— Finished —\n" : "\n— Stopped —\n");
+  });
+})();
+</script>
+</body>
+</html>

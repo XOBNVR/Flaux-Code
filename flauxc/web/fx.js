@@ -8,7 +8,9 @@
  *   io.write(stream, text)        stream is "out" or "err"
  *   io.ask(prompt) -> Promise     resolves with the typed answer
  *   io.openWindow(w, h, title)    -> { screen: canvas, back: canvas }
- *   io.keys (Set of key names)    io.mouse = { x, y, down }
+ *   io.keys (Set of key names)    io.mouse = { x, y, down, pressed }  (pressed: set on
+ *                                 mouse down, so a click quicker than a frame still counts)
+ *   io.fullscreen()               (optional) asked for by fullscreen()
  *   io.nextFrame() -> Promise     waits for the next frame (60 a second)
  *   io.cancelled() -> bool        true after Stop was pressed
  *   io.loadPicture(name) -> Promise<image or null>
@@ -264,7 +266,8 @@
     }
     function readInput() {
       keysPrev = keysNow; keysNow = new Set(io.keys);
-      mousePrev = mouseNow; mouseNow = !!io.mouse.down;
+      mousePrev = mouseNow; mouseNow = !!(io.mouse.down || io.mouse.pressed);
+      io.mouse.pressed = false;     // a click quicker than a frame still counts
     }
     function present() { win.screen.getContext("2d").drawImage(back, 0, 0); dirty = false; }
     function keyName(name, line) {
@@ -377,6 +380,7 @@
       mouse_x: () => Math.round(io.mouse.x), mouse_y: () => Math.round(io.mouse.y),
       mouse_down: () => mouseNow, mouse_clicked: () => mouseNow && !mousePrev,
       beep: ([pitch, seconds]) => io.beep(pitch, seconds === undefined ? 0.1 : seconds),
+      fullscreen: (_, line) => { needWindow(line); if (io.fullscreen) io.fullscreen(); },
       screenshot: ([name], line) => { needWindow(line); if (io.screenshot) io.screenshot(str(name), back); },
     });
 

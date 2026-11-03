@@ -7,7 +7,7 @@
 // Checks: Flaux starts in the page, a program runs and asks a question, a
 // problem while running is explained, Apply fix, Blocks mode, saving in the
 // browser, the graphics pixel tests from tests/graphics, pictures, keys,
-// and the Stop button.
+// fullscreen (size, keys and mouse positions), Export, and the Stop button.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -114,9 +114,36 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
     return -1;
   });
   check(x > 80, `holding the right arrow moves the square (from x=50 to x=${x})`);
+
+  // fullscreen: the canvas fills the screen, same shape, and clicks give canvas pixels
+  await page.click("#btn-fullscreen");
+  await page.waitForFunction(() => document.fullscreenElement && document.fullscreenElement.id === "game-screen", null, { timeout: 5000 });
+  await page.waitForTimeout(200);
+  const vp = page.viewportSize();
+  const box = await page.evaluate(() => { const r = document.getElementById("game-canvas").getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height, focus: document.activeElement.id }; });
+  const s = Math.min(vp.width / 300, vp.height / 200);
+  check(Math.abs(box.w - 300 * s) < 1 && Math.abs(box.h - 200 * s) < 1 && box.focus === "game-canvas",
+        `fullscreen fits the canvas to the screen (${box.w}x${box.h} at ${box.x},${box.y})`);
+  await page.mouse.move(box.x + box.w * 0.25, box.y + box.h * 0.75);
+  await page.waitForTimeout(100);
+  const mouse = await page.evaluate(() => FlauxWeb.mouse());
+  check(mouse && Math.abs(mouse.x - 75) <= 1 && Math.abs(mouse.y - 150) <= 1, `fullscreen mouse is in canvas pixels (${JSON.stringify(mouse)})`);
+  await page.evaluate(() => document.exitFullscreen());
+  await page.waitForFunction(() => !document.fullscreenElement && document.getElementById("game-canvas").style.width === "");
+  check(true, "leaving fullscreen puts the game back in the panel");
   await page.click("#btn-stop");
   await page.waitForFunction(() => document.getElementById("console").textContent.includes("Stopped"), null, { timeout: 15000 });
   check(true, "the Stop button stops a game");
+
+  // Export: a zip with the program as a web page and a .bat that opens it
+  const [download] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
+  const zip = fs.readFileSync(await download.path());
+  const base = download.suggestedFilename().replace(/\.zip$/, "");    // the program's name (web_test, saved above)
+  const names = [`${base}/game.html`, `${base}/Play ${base}.bat`, `${base}/README.txt`];
+  check(base === "web_test" && zip.readUInt32LE(0) === 0x04034b50 &&
+        names.every((n) => zip.includes(Buffer.from(n))) && zip.includes(Buffer.from('start "" "%~dp0game.html"')),
+        `Export downloads ${download.suggestedFilename()} (${zip.length} bytes)`);
 
   check(!errors.length, "no errors in the page" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();
