@@ -36,6 +36,10 @@ are **built from that repository**, so make lasting changes there and rebuild
    the page on `fx.js`. Games draw on a `<canvas>` above the output.
    Its Fullscreen button puts that canvas on the whole screen (Fullscreen API),
    scaled to fit with black bars; mouse positions are turned back into canvas pixels.
+   `lock_mouse()` locks the pointer to the canvas (Pointer Lock API, after a click;
+   Esc lets go) and `mouse_moved_x/y()` add up `movementX/Y` between frames, in CSS
+   pixels as given (not scaled to the canvas, so turning feels the same in the panel
+   and fullscreen).
 4. People's programs and pictures are kept in their own browser
    (`localStorage` keys `flaux-web-programs` and `flaux-web-pictures`).
    Nothing is sent anywhere.

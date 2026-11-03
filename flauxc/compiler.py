@@ -74,6 +74,11 @@ BUILTINS = {
     "mouse_y": "circle(mouse_x(), mouse_y(), 10, \"white\")",
     "mouse_down": "if mouse_down()\n    circle(mouse_x(), mouse_y(), 5, \"red\")\nend",
     "mouse_clicked": "if mouse_clicked()\n    add 1 to clicks\nend",
+    "mouse_moved_x": "set turn to turn + mouse_moved_x() * 0.004    # look left and right",
+    "mouse_moved_y": "set tilt to tilt + mouse_moved_y() * 0.004    # look up and down",
+    "lock_mouse": "window(800, 600)\nlock_mouse()    # hide the pointer: the mouse turns the view (Esc lets go)",
+    "unlock_mouse": "unlock_mouse()    # give the pointer back",
+    "mouse_locked": "if not mouse_locked()\n    write(\"Click to look around\", 10, 10)\nend",
     "beep": "beep(440, 0.2)    # pitch, seconds",
     "screenshot": "screenshot(\"picture.bmp\")",
     "fullscreen": "window(800, 600)\nfullscreen()    # fill the screen (F11 switches back)",
@@ -87,7 +92,8 @@ BUILTINS = {
 
 GRAPHICS_BUILTINS = {"window", "show", "clear", "rect", "circle", "line", "triangle", "dot", "write", "key_down",
                      "key_pressed", "mouse_x", "mouse_y", "mouse_down", "mouse_clicked", "beep",
-                     "screenshot", "text_width", "image", "image_width", "image_height", "fullscreen"}
+                     "screenshot", "text_width", "image", "image_width", "image_height", "fullscreen",
+                     "mouse_moved_x", "mouse_moved_y", "lock_mouse", "unlock_mouse", "mouse_locked"}
 
 PICTURE_TYPES = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 
@@ -1831,6 +1837,26 @@ class Compiler:
     def b_mouse_clicked(self, e, args):
         self.arity(e, args, 0)
         return self.graphics_call("fx_mouse_clicked()", BOOL)
+
+    def b_mouse_moved_x(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call("fx_mouse_moved_x()", INT)
+
+    def b_mouse_moved_y(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call("fx_mouse_moved_y()", INT)
+
+    def b_lock_mouse(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call(f"fx_g_lock_mouse(true, {e.line})")
+
+    def b_unlock_mouse(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call(f"fx_g_lock_mouse(false, {e.line})")
+
+    def b_mouse_locked(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call("fx_mouse_locked()", BOOL)
 
     def b_beep(self, e, args):
         self.arity(e, args, 1, 2)

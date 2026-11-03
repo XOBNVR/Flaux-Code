@@ -10,9 +10,11 @@ examples/**/*.flx         must compile (they're used in the README).
 tests/graphics/NAME.flx   graphics programs, run without a real screen. Header
                           lines: `# frames: N` (stop after N frames), `# hold: keys`
                           (pretend these keys are held), `# mouse: x,y` (pretend
-                          the mouse is there in the real window), `# pixel: x y #rrggbb`
+                          the mouse is there in the real window), `# mouse_move: dx,dy`
+                          (pretend the mouse moves that far every frame), `# pixel: x y #rrggbb`
                           (that pixel of the last frame must be this colour), or
-                          `# expect: ...` for programs that must fail.
+                          `# expect: ...` for programs that must fail. If NAME.out
+                          exists, what the program says must match it.
                           Skipped if SDL2 isn't installed.
 tests/errors/NAME.flx     must fail. Every `# expect: ...` line at the top
                           must appear in the error message. A `# stdin: ...`
@@ -153,7 +155,8 @@ def main():
             env = {"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "FLAUX_FAST": "1",
                    "FLAUX_FRAMES": header.get("frames", ["1"])[0], "FLAUX_SCREENSHOT": shot,
                    "FLAUX_HOLD_KEYS": ",".join(header.get("hold", [])),
-                   "FLAUX_MOUSE": header.get("mouse", [""])[0]}
+                   "FLAUX_MOUSE": header.get("mouse", [""])[0],
+                   "FLAUX_MOUSE_MOVE": header.get("mouse_move", [""])[0]}
             code, out, err = build_and_run(path, "", tmp, env)
             if "expect" in header:
                 missing = [e for e in header["expect"] if e not in err]
@@ -161,6 +164,10 @@ def main():
                 detail = f"exit {code}, missing {missing}\n{err}"
             else:
                 problems = [] if code == 0 else [f"exit {code}: {err}"]
+                if os.path.exists(path[:-4] + ".out"):
+                    expected = open(path[:-4] + ".out", encoding="utf-8").read()
+                    if out != expected:
+                        problems.append(f"--- expected\n{expected}--- got\n{out}")
                 for spec in header.get("pixel", []):
                     x, y, want = spec.split()
                     got = bmp_pixel(shot, int(x), int(y)) if code == 0 else "?"

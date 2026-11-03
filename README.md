@@ -589,6 +589,11 @@ Run it, and the arrow keys move the ball. Close the window to stop.
 made bigger to fit, and the mouse still gives places in your window's own
 pixels. To start a game fullscreen, put `fullscreen()` after `window(...)`.
 
+**Mouse look:** for a 3D game, `lock_mouse()` hides the pointer and lets the
+mouse turn the view: `set turn to turn + mouse_moved_x() * 0.004`. Esc gives
+the pointer back, and a click on the game locks it again. See
+[Mouse look](docs/LANGUAGE.md#mouse-look).
+
 **Drawing:**
 
 | Write | Draws |
@@ -612,6 +617,9 @@ pixels. To start a game fullscreen, put `fullscreen()` after `window(...)`.
 | `mouse_x()`, `mouse_y()` | where the mouse is |
 | `mouse_down()` | true while the mouse button is held |
 | `mouse_clicked()` | true only at the moment of a click |
+| `mouse_moved_x()`, `mouse_moved_y()` | how far the mouse moved since the last frame, in screen pixels (the same however big the game is shown) |
+| `lock_mouse()`, `unlock_mouse()` | hides the pointer so the mouse can turn a 3D view (Esc gives it back) |
+| `mouse_locked()` | true while the mouse is locked |
 | `beep(440, 0.2)` | plays a beep: pitch 440 for 0.2 seconds |
 
 **Colours:** `"black"`, `"white"`, `"gray"`, `"red"`, `"orange"`,
@@ -758,7 +766,8 @@ Built-in helpers: `ask`, `random`, `length`, `contains`, `text`, `number`,
 Graphics: `window`, `clear`, `rect`, `circle`, `triangle`, `line`, `dot`,
 `write`, `show`, `key_down`, `key_pressed`, `mouse_x`, `mouse_y`,
 `mouse_down`, `mouse_clicked`, `beep`, `text_width`, `screenshot`, `image`,
-`image_width`, `image_height`, `fullscreen`.
+`image_width`, `image_height`, `fullscreen`, `mouse_moved_x`, `mouse_moved_y`,
+`lock_mouse`, `unlock_mouse`, `mouse_locked`.
 Every one is explained in the [full guide](docs/LANGUAGE.md).
 
 ---

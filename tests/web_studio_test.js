@@ -7,7 +7,9 @@
 // Checks: Flaux starts in the page, a program runs and asks a question, a
 // problem while running is explained, Apply fix, Blocks mode, saving in the
 // browser, the graphics pixel tests from tests/graphics, pictures, keys,
-// fullscreen (size, keys and mouse positions), Export, and the Stop button.
+// fullscreen (size, keys and mouse positions), Export, the Stop button, and
+// mouse look (lock_mouse() asks for pointer lock, again on a click; mouse
+// movement; the pointer is let go at Stop), in the Studio and an exported game.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -144,6 +146,101 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   check(base === "web_test" && zip.readUInt32LE(0) === 0x04034b50 &&
         names.every((n) => zip.includes(Buffer.from(n))) && zip.includes(Buffer.from('start "" "%~dp0game.html"')),
         `Export downloads ${download.suggestedFilename()} (${zip.length} bytes)`);
+
+  // mouse look. Headless Chromium locks the pointer (clicking Run counts as the click
+  // browsers want), but its pretend mouse doesn't move a locked pointer. So: lock_mouse()
+  // asks for the lock; letting go (what Esc does) leaves the program wanting it; the
+  // mouse moves unlocked; and a click on the game asks for the lock again. Movement is
+  // in screen (CSS) pixels: the 800x600 game is shown smaller in the panel and bigger
+  // fullscreen, and the same movement must give the same numbers everywhere.
+  const spyLocks = () => {
+    window.__locks = 0;
+    const ask = HTMLCanvasElement.prototype.requestPointerLock;
+    HTMLCanvasElement.prototype.requestPointerLock = function (...a) { window.__locks++; return ask.apply(this, a); };
+  };
+  const LOOK = 'window(800, 600)\nlock_mouse()\nset tx to 0\nset ty to 0\nrepeat forever\n' +
+    '    if mouse_moved_x() != 0 or mouse_moved_y() != 0\n        set tx to tx + mouse_moved_x()\n' +
+    '        set ty to ty + mouse_moved_y()\n        say "moved {tx} {ty}"\n    end\n' +
+    '    if mouse_clicked()\n        say "click locked={mouse_locked()}"\n    end\n    show()\nend\n';
+  const lastMove = async (pg, out) => {
+    const m = (await pg.textContent(out)).match(/moved (-?\d+) (-?\d+)\n(?![\s\S]*moved)/);
+    return m ? [+m[1], +m[2]] : [0, 0];
+  };
+  // move the (unlocked) mouse dx, dy screen pixels over the canvas: mouse_moved_x/y() must add up to that
+  const moveCheck = async (pg, canvasSel, out, dx, dy, where) => {
+    const r = await pg.evaluate((sel) => { const b = document.querySelector(sel).getBoundingClientRect();
+      return { x: b.left, y: b.top, w: b.width, h: b.height, cw: document.querySelector(sel).width }; }, canvasSel);
+    await pg.mouse.move(r.x + r.w / 2, r.y + r.h / 2);
+    await pg.waitForTimeout(200);
+    const [sx, sy] = await lastMove(pg, out);
+    await pg.mouse.move(r.x + r.w / 2 + dx, r.y + r.h / 2 + dy, { steps: 5 });
+    await pg.waitForTimeout(300);
+    const [ex, ey] = await lastMove(pg, out);
+    check(ex - sx === dx && ey - sy === dy, `${where}: mouse_moved_x/y() give screen pixels (${ex - sx}, ${ey - sy}` +
+          ` for ${dx}, ${dy}; the game is shown at ${(r.w / r.cw).toFixed(2)}x)`);
+  };
+  const lookTest = async (pg, canvasSel, out, where, hintSel) => {
+    await pg.waitForTimeout(300);
+    check(await pg.evaluate(() => window.__locks) >= 1, `${where}: lock_mouse() asks the browser to lock the pointer` +
+          ` (locked: ${await pg.evaluate(() => !!document.pointerLockElement)})`);
+    await pg.evaluate(() => document.exitPointerLock());           // what Esc does
+    await pg.waitForFunction(() => !document.pointerLockElement);
+    await pg.waitForTimeout(100);
+    if (hintSel) {
+      const hint = await pg.textContent(hintSel);
+      check(hint.includes("click the game to look around"), `${where}: after Esc it says to click to look around ("${hint}")`);
+    }
+    await moveCheck(pg, canvasSel, out, 30, 20, where);
+    const before = await pg.evaluate(() => window.__locks);
+    await pg.mouse.down(); await pg.mouse.up();
+    await pg.waitForFunction((o) => document.querySelector(o).textContent.includes("click locked="), out, { timeout: 5000 });
+    await pg.waitForTimeout(200);
+    const after = await pg.evaluate(() => [window.__locks, !!document.pointerLockElement]);
+    check(after[0] > before, `${where}: a click on the game locks it again (locked: ${after[1]}), and counts as a click`);
+  };
+  await page.evaluate(spyLocks);
+  await setCode(LOOK);
+  await page.click("#btn-run");
+  await page.waitForSelector("#game:not([hidden])", { timeout: 60000 });
+  await lookTest(page, "#game-canvas", "#console", "Studio", "#game-title");
+  // and fullscreen: a click on the game locks the mouse there too, still fullscreen
+  await page.evaluate(() => document.exitPointerLock());
+  await page.waitForFunction(() => !document.pointerLockElement);
+  await page.click("#btn-fullscreen");
+  await page.waitForFunction(() => document.fullscreenElement && document.fullscreenElement.id === "game-screen", null, { timeout: 5000 });
+  await page.waitForTimeout(1200);       // (browsers refuse a lock straight after one was let go)
+  const fb = await page.evaluate(() => { const b = document.getElementById("game-canvas").getBoundingClientRect();
+    return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+  await page.mouse.click(fb.x, fb.y);
+  await page.waitForTimeout(300);
+  check(await page.evaluate(() => document.pointerLockElement === document.getElementById("game-canvas") &&
+        document.fullscreenElement && document.fullscreenElement.id === "game-screen"),
+        "fullscreen: a click on the game locks the mouse, and it stays fullscreen");
+  await page.evaluate(() => document.exitPointerLock());
+  await page.waitForFunction(() => !document.pointerLockElement);
+  await moveCheck(page, "#game-canvas", "#console", 30, 20, "fullscreen");
+  await page.evaluate(() => document.getElementById("btn-stop").click());   // (a locked pointer can't click it)
+  await page.waitForFunction(() => document.getElementById("console").textContent.includes("Stopped"), null, { timeout: 15000 });
+  check(await page.evaluate(() => !document.pointerLockElement && !FlauxWeb.mouseLook().wanted),
+        "Stop lets go of the mouse");
+
+  // the same in an exported game.html
+  const [lookZip] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
+  const zbytes = fs.readFileSync(await lookZip.path());
+  let html = null;
+  for (let at = 0; zbytes.readUInt32LE(at) === 0x04034b50;) {      // stored files, one after another
+    const size = zbytes.readUInt32LE(at + 18), nlen = zbytes.readUInt16LE(at + 26), xlen = zbytes.readUInt16LE(at + 28);
+    const name = zbytes.slice(at + 30, at + 30 + nlen).toString();
+    const data = zbytes.slice(at + 30 + nlen + xlen, at + 30 + nlen + xlen + size);
+    if (name.endsWith("/game.html")) html = data.toString();
+    at += 30 + nlen + xlen + size;
+  }
+  const player = await browser.newPage({ viewport: { width: 1000, height: 600 } });   // (the game shown smaller)
+  player.on("pageerror", (e) => errors.push("game.html: " + e.message));
+  // (the spy goes in first, so it's there when the program calls lock_mouse())
+  await player.setContent((html || "<p>no game.html</p>").replace("<head>", `<head><script>(${spyLocks})()</script>`));
+  await lookTest(player, "#canvas", "#out", "exported game", "#title");
+  await player.close();
 
   check(!errors.length, "no errors in the page" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();

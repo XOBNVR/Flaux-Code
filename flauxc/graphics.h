@@ -9,6 +9,8 @@
  *   FLAUX_HOLD_KEYS=a,b   pretend these keys are held down the whole time
  *   FLAUX_MOUSE=x,y       pretend the mouse is at x, y in the real window
  *                         (window pixels, before fullscreen scaling)
+ *   FLAUX_MOUSE_MOVE=dx,dy pretend the mouse moves this far every frame
+ *                         (screen pixels: what mouse_moved_x/y() give)
  *
  * Fullscreen: everything is drawn on a canvas texture the size of window(...).
  * show() copies it to the real window, scaled to fit and letterboxed with black
@@ -16,6 +18,16 @@
  * F11 or Alt+Enter switch fullscreen on and off (they're kept for that, so the
  * program doesn't see F11, or Enter while Alt is held), and fullscreen() asks
  * for it. Mouse positions are turned back into canvas pixels.
+ *
+ * Mouse look: lock_mouse() hides the pointer and uses SDL's relative mouse
+ * mode, so the mouse can move forever without stopping at the screen's edge.
+ * mouse_moved_x/y() add up every SDL_MOUSEMOTION's xrel/yrel between frames,
+ * locked or not, in window coordinates as SDL gives them (screen pixels). They
+ * are NOT scaled like mouse_x/y(): the same hand movement gives the same
+ * numbers in a window and fullscreen, so a game's turn speed feels the same.
+ * Esc lets go of the mouse (the
+ * program still sees Esc), and while the program wants it locked, a click on
+ * the window locks it again; unlock_mouse() lets go for good.
  * =================================================================== */
 #define FX_USES_GRAPHICS 1
 #define SDL_MAIN_HANDLED
@@ -47,6 +59,9 @@ static bool fx_dirty;              /* something drawn since the last show() */
 static uint8_t fx_keys_now[SDL_NUM_SCANCODES], fx_keys_prev[SDL_NUM_SCANCODES];
 static bool fx_mouse_now, fx_mouse_prev;
 static int fx_mouse_xv, fx_mouse_yv;
+static double fx_move_x, fx_move_y;        /* mouse movement since the last frame, screen pixels */
+static int64_t fx_moved_xv, fx_moved_yv;   /* ... as the program sees it this frame */
+static bool fx_lock_wanted;                /* lock_mouse() was called (and not unlock_mouse()) */
 static uint64_t fx_next_frame;
 static int64_t fx_frames, fx_frame_limit = -1;
 static const char *fx_shot_path;
@@ -281,9 +296,32 @@ static void fx_set_fullscreen(bool on) {
     fx_read_mouse();    /* the same spot on the screen is somewhere else on the canvas now */
 }
 
+/* ------------------------------------------------------- mouse look */
+
+static void fx_set_mouse_lock(bool on) {
+    if (!fx_win || on == (bool)SDL_GetRelativeMouseMode()) return;
+    SDL_SetRelativeMouseMode(on ? SDL_TRUE : SDL_FALSE);   /* fails quietly if this computer can't */
+}
+
+static void fx_g_lock_mouse(bool on, int line) {
+    if (on) fx_need_window(line);
+    fx_lock_wanted = on;
+    fx_set_mouse_lock(on);
+}
+
+static bool fx_mouse_locked(void) { return fx_win && SDL_GetRelativeMouseMode(); }
+
 /* Handle one event from the window. Gives true when the window was closed. */
 static bool fx_handle_event(const SDL_Event *ev) {
     if (ev->type == SDL_QUIT) return true;
+    if (ev->type == SDL_MOUSEMOTION) {      /* as SDL gives it: not scaled to the canvas */
+        fx_move_x += ev->motion.xrel;
+        fx_move_y += ev->motion.yrel;
+    }
+    /* Esc lets go of a locked mouse; a click locks it again while the program wants that */
+    if (ev->type == SDL_KEYDOWN && !ev->key.repeat && ev->key.keysym.scancode == SDL_SCANCODE_ESCAPE)
+        fx_set_mouse_lock(false);
+    if (ev->type == SDL_MOUSEBUTTONDOWN && fx_lock_wanted) fx_set_mouse_lock(true);
     if (ev->type == SDL_KEYDOWN && !ev->key.repeat &&
         (ev->key.keysym.scancode == SDL_SCANCODE_F11 ||
          ((ev->key.keysym.scancode == SDL_SCANCODE_RETURN || ev->key.keysym.scancode == SDL_SCANCODE_KP_ENTER) &&
@@ -323,12 +361,26 @@ static void fx_read_input(void) {
         fx_keys_now[SDL_SCANCODE_RETURN] = fx_keys_now[SDL_SCANCODE_KP_ENTER] = 0;
     fx_mouse_prev = fx_mouse_now;
     fx_mouse_now = (fx_read_mouse() & SDL_BUTTON_LMASK) != 0;
+    /* mouse movement: whole pixels this frame, the rest is kept for the next one */
+    const char *move = getenv("FLAUX_MOUSE_MOVE"); /* for tests */
+    if (move && *move) {
+        double dx = 0, dy = 0;
+        sscanf(move, "%lf,%lf", &dx, &dy);
+        fx_move_x += dx;
+        fx_move_y += dy;
+    }
+    fx_moved_xv = (int64_t)fx_move_x;
+    fx_moved_yv = (int64_t)fx_move_y;
+    fx_move_x -= (double)fx_moved_xv;
+    fx_move_y -= (double)fx_moved_yv;
 }
 
 static int64_t fx_mouse_x(void) { return fx_mouse_xv; }
 static int64_t fx_mouse_y(void) { return fx_mouse_yv; }
 static bool fx_mouse_down(void) { return fx_mouse_now; }
 static bool fx_mouse_clicked(void) { return fx_mouse_now && !fx_mouse_prev; }
+static int64_t fx_mouse_moved_x(void) { return fx_moved_xv; }
+static int64_t fx_mouse_moved_y(void) { return fx_moved_yv; }
 
 /* ----------------------------------------------------------- window */
 

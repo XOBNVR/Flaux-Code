@@ -1,0 +1,26 @@
+# frames: 4
+# mouse_move: 2.5,-1.5
+# pixel: 31 45 #ffe135
+# pixel: 21 51 #000000
+# Mouse look: mouse_moved_x/y() give whole pixels each frame and keep the
+# rest for the next one (2.5 a frame gives 2, 3, 2, 3), locked or not.
+# The yellow square moves by everything the mouse moved: 10 right, 6 up.
+window(200, 100)
+lock_mouse()
+set x to 20
+set y to 50
+set turn to 0
+repeat with i from 1 to 4
+    set x to x + mouse_moved_x()
+    set y to y + mouse_moved_y()
+    set turn to turn + mouse_moved_x() * 0.005
+    if i = 4
+        unlock_mouse()
+        say "locked after unlock_mouse: {mouse_locked()}"
+        say "turned {round(turn * 1000)} thousandths"
+    end
+    say "{mouse_moved_x()} {mouse_moved_y()}"
+    clear("black")
+    rect(x, y, 4, 4, "yellow")
+    show()
+end

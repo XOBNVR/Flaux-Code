@@ -73,7 +73,8 @@ def main():
         print("(skipping the block editor test: Node.js with Playwright isn't installed)")
         return 0
     files = sorted(glob.glob(os.path.join(ROOT, "examples", "**", "*.flx"), recursive=True)
-                   + glob.glob(os.path.join(HERE, "programs", "*.flx")))
+                   + glob.glob(os.path.join(HERE, "programs", "*.flx"))
+                   + [p for p in glob.glob(os.path.join(HERE, "graphics", "*.flx")) if os.path.exists(p[:-4] + ".out")])
     with tempfile.TemporaryDirectory() as home:
         env = dict(os.environ, HOME=home, USERPROFILE=home)
         server = subprocess.Popen([sys.executable, os.path.join(ROOT, "flaux"), "studio", "--no-window",

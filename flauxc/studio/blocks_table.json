@@ -80,6 +80,11 @@
     {"name": "mouse_y", "args": [], "label": "mouse y", "kind": "value", "category": "Keys & Mouse"},
     {"name": "mouse_down", "args": [], "label": "mouse button is held down", "kind": "value", "category": "Keys & Mouse"},
     {"name": "mouse_clicked", "args": [], "label": "mouse was just clicked", "kind": "value", "category": "Keys & Mouse"},
+    {"name": "mouse_moved_x", "args": [], "label": "how far the mouse moved left-right", "kind": "value", "category": "Keys & Mouse"},
+    {"name": "mouse_moved_y", "args": [], "label": "how far the mouse moved up-down", "kind": "value", "category": "Keys & Mouse"},
+    {"name": "lock_mouse", "args": [], "label": "lock the mouse to look around", "kind": "statement", "category": "Keys & Mouse"},
+    {"name": "unlock_mouse", "args": [], "label": "unlock the mouse", "kind": "statement", "category": "Keys & Mouse"},
+    {"name": "mouse_locked", "args": [], "label": "mouse is locked", "kind": "value", "category": "Keys & Mouse"},
 
     {"name": "beep", "args": ["num", "num"], "label": "beep pitch %1 for %2 seconds", "kind": "statement", "category": "Sound", "defaults": ["440", "0.2"]},
     {"name": "beep", "args": ["num"], "label": "beep pitch %1", "kind": "statement", "category": "Sound", "toolbox": false}
