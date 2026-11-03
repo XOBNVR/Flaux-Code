@@ -9,6 +9,7 @@ comes in the Flaux installer.
     flaux studio game.flx        open Studio with a file
 """
 
+import codecs
 import json
 import os
 import re
@@ -69,36 +70,71 @@ def safe_name(name):
 class Run:
     """One running program: its process and everything it has printed."""
 
+    MARKER = "Problem while running"   # how a problem message starts
+
     def __init__(self, proc):
         self.proc = proc
         self.chunks = []  # [stream, text]
         self.lock = threading.Lock()
         self.exit_code = None
         self.in_problem = False
+        self.pending = ""        # text held back for a moment (see take)
+        self.pending_since = 0.0
         # Normal output and problem messages come through one pipe so they
         # stay in the order they happened. Problems are spotted by their heading.
         self.readers = [threading.Thread(target=self.read, args=(proc.stdout,), daemon=True)]
         for t in self.readers:
             t.start()
 
-    MARKER = "Problem while running"
-
     def read(self, pipe):
-        decoder = __import__("codecs").getincrementaldecoder("utf-8")("replace")
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while True:
             data = pipe.read1(4096) if hasattr(pipe, "read1") else pipe.read(1)
             if not data:
                 break
-            text = decoder.decode(data)
             with self.lock:
-                if not self.in_problem and self.MARKER in text:
-                    before, after = text.split(self.MARKER, 1)
-                    if before:
-                        self.chunks.append(["out", before])
-                    self.chunks.append(["err", self.MARKER + after])
-                    self.in_problem = True
-                elif text:
-                    self.chunks.append(["err" if self.in_problem else "out", text])
+                self.take(decoder.decode(data))
+        with self.lock:
+            self.take(decoder.decode(b"", final=True), final=True)
+
+    def take(self, text, final=False):
+        """Add a new piece of output. Windows can split a problem message's
+        heading over several pieces ("Probl" + "em while..."), so the end of a
+        piece that might be the start of the heading waits for the next piece."""
+        text = (self.pending + text).replace("\r\n", "\n")
+        self.pending = ""
+        if self.in_problem:
+            text = text.replace("\r", "")
+            if text:
+                self.chunks.append(["err", text])
+            return
+        i = text.find(self.MARKER)
+        if i >= 0:
+            if i:
+                self.chunks.append(["out", text[:i]])
+            self.chunks.append(["err", text[i:]])
+            self.in_problem = True
+            return
+        keep = 0
+        if not final:
+            if text.endswith("\r"):
+                keep = 1
+            else:
+                for n in range(min(len(self.MARKER) - 1, len(text)), 0, -1):
+                    if self.MARKER.startswith(text[-n:]):
+                        keep = n
+                        break
+        if keep:
+            self.pending, text = text[-keep:], text[:-keep]
+            self.pending_since = time.time()
+        if text:
+            self.chunks.append(["out", text])
+
+    def flush_pending(self, force=False):
+        """Don't hold text back for long (call with the lock held)."""
+        if self.pending and (force or time.time() - self.pending_since > 0.25):
+            text, self.pending = self.pending.replace("\r", ""), ""
+            self.chunks.append(["err" if self.in_problem else "out", text])
 
     def add(self, stream, text):
         with self.lock:
@@ -108,6 +144,8 @@ class Run:
         if self.exit_code is None and self.proc.poll() is not None:
             for t in self.readers:
                 t.join(timeout=1)
+            with self.lock:
+                self.flush_pending(force=True)
             self.exit_code = self.proc.returncode
         return self.exit_code is not None
 
@@ -217,6 +255,7 @@ class Studio:
             return {"chunks": [], "done": True, "exit": None}
         done = run.done()
         with run.lock:
+            run.flush_pending()
             chunks = run.chunks[start:]
         return {"chunks": chunks, "done": done, "exit": run.exit_code}
 

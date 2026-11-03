@@ -531,7 +531,7 @@ async function poll() {
   try { r = await api("/api/output", { run: id, from: state.from }); }
   catch (err) { status(err.message, "bad"); return finish(null); }
   for (const [stream, text] of r.chunks) {
-    print(text.replace(/\x1b\[[0-9;]*m/g, ""), stream === "err" ? "err" : "");
+    print(text.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, ""), stream === "err" ? "err" : "");
     if (stream === "err") {
       const m = /Problem while running [^,]*, line (\d+)/.exec(cons.textContent);
       if (m) { state.runtimeLine = Number(m[1]); render(); }
