@@ -13,10 +13,19 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
-#include <signal.h>
-#include <unistd.h>
 #include <stdarg.h>
 #include <ctype.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <io.h>
+#define fx_isatty(fd) _isatty(fd)
+#else
+#include <signal.h>
+#include <unistd.h>
+#define fx_isatty(fd) isatty(fd)
+#endif
 
 #define FX_INLINE static inline __attribute__((always_inline))
 
@@ -34,7 +43,7 @@ static int fx_nlines = 0;
 __attribute__((noinline, cold, noreturn, format(printf, 3, 4)))
 static void fx_fail(int line, const char *fix, const char *fmt, ...) {
     fflush(stdout);
-    bool color = isatty(2);
+    bool color = fx_isatty(2);
     const char *red = color ? "\033[1;31m" : "", *bold = color ? "\033[1m" : "";
     const char *dim = color ? "\033[2m" : "", *off = color ? "\033[0m" : "";
     if (line > 0) {
@@ -380,19 +389,28 @@ static int64_t fx_whole_text(fx_text t, int line) {
     return (int64_t)trunc(fx_number(t, line));
 }
 
-static struct timespec fx_t0;
-
-static double fx_clock(void) {
+/* seconds on a clock that only goes forwards */
+static double fx_now(void) {
+#ifdef _WIN32
+    static LARGE_INTEGER freq;
+    LARGE_INTEGER t;
+    if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t);
+    return (double)t.QuadPart / (double)freq.QuadPart;
+#else
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
-    return (double)(t.tv_sec - fx_t0.tv_sec) + (double)(t.tv_nsec - fx_t0.tv_nsec) * 1e-9;
+    return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
+#endif
 }
+
+static double fx_t0;
+
+static double fx_clock(void) { return fx_now() - fx_t0; }
 
 /* ----------------------------------------------------------- start up */
 
-static void fx_crash(int sig) {
-    (void)sig;
-    static const char msg[] =
+static const char fx_crash_msg[] =
         "\nProblem while running the program: it crashed.\n\n"
         "This almost always means a function kept calling itself and never stopped.\n\n"
         "How to fix it:\n"
@@ -404,20 +422,58 @@ static void fx_crash(int sig) {
         "          end\n"
         "          return count_down(n - 1)\n"
         "      end\n";
-    ssize_t ignored = write(2, msg, sizeof msg - 1);
+
+#ifdef _WIN32
+static LONG CALLBACK fx_crash(PEXCEPTION_POINTERS info) {
+    DWORD code = info->ExceptionRecord->ExceptionCode;
+    if (code != EXCEPTION_STACK_OVERFLOW && code != EXCEPTION_ACCESS_VIOLATION)
+        return EXCEPTION_CONTINUE_SEARCH;
+    DWORD written;
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), fx_crash_msg, (DWORD)(sizeof fx_crash_msg - 1), &written, NULL);
+    ExitProcess(1);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#else
+static void fx_crash(int sig) {
+    (void)sig;
+    ssize_t ignored = write(2, fx_crash_msg, sizeof fx_crash_msg - 1);
     (void)ignored;
     _exit(1);
 }
+#endif
 
 static void fx_init(const char *file, const char *const *lines, int nlines) {
     fx_file = file;
     fx_lines = lines;
     fx_nlines = nlines;
-    clock_gettime(CLOCK_MONOTONIC, &fx_t0);
-    fx_rng_state ^= (uint64_t)fx_t0.tv_nsec * 0x9E3779B97F4A7C15ull
-                  ^ (uint64_t)time(NULL) ^ ((uint64_t)getpid() << 32);
+    fx_t0 = fx_now();
+    uint64_t pid;
+#ifdef _WIN32
+    pid = GetCurrentProcessId();
+#else
+    pid = (uint64_t)getpid();
+#endif
+    fx_rng_state ^= (uint64_t)(fx_t0 * 1e9) * 0x9E3779B97F4A7C15ull ^ (uint64_t)time(NULL) ^ (pid << 32);
     if (!fx_rng_state) fx_rng_state = 1;
     for (int i = 0; i < 256; i++) { fx_chars[2 * i] = (char)i; fx_chars[2 * i + 1] = 0; }
+    /* Flaux Studio reads the output as it comes, so don't hold it back */
+    const char *unbuffered = getenv("FLAUX_UNBUFFERED");
+    if (unbuffered && *unbuffered) setvbuf(stdout, NULL, _IONBF, 0);
+#ifdef _WIN32
+    /* show letters like é and emoji properly, and allow colours */
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    for (DWORD which = STD_OUTPUT_HANDLE; ; which = STD_ERROR_HANDLE) {
+        HANDLE h = GetStdHandle(which);
+        DWORD mode;
+        if (h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode))
+            SetConsoleMode(h, mode | 0x0004 /* ENABLE_VIRTUAL_TERMINAL_PROCESSING */);
+        if (which == STD_ERROR_HANDLE) break;
+    }
+    ULONG guarantee = 1 << 16; /* room to print the message if the stack runs out */
+    SetThreadStackGuarantee(&guarantee);
+    AddVectoredExceptionHandler(1, fx_crash);
+#else
     static char alt_stack[1 << 16];
     stack_t ss;
     ss.ss_sp = alt_stack;
@@ -430,6 +486,7 @@ static void fx_init(const char *file, const char *const *lines, int nlines) {
     sa.sa_flags = SA_ONSTACK;
     sigaction(SIGSEGV, &sa, NULL);
     sigaction(SIGBUS, &sa, NULL);
+#endif
 }
 
 /* ============================== end of runtime ============================= */

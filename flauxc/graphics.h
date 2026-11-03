@@ -12,6 +12,21 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 
+/* stb_image (public domain) reads .png, .jpg, .bmp and .gif pictures */
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_BMP
+#define STBI_ONLY_GIF
+#ifdef _WIN32
+#define STBI_WINDOWS_UTF8
+#endif
+#include "stb_image.h"
+
+#ifndef FX_PROGRAM_DIR
+#define FX_PROGRAM_DIR ""
+#endif
+
 static SDL_Window *fx_win;
 static SDL_Renderer *fx_ren;
 static SDL_Texture *fx_font_tex;
@@ -404,6 +419,95 @@ static void fx_g_write(fx_text t, double x, double y, fx_text color, int64_t siz
         col++;
     }
 }
+
+/* ------------------------------------------------------------ pictures */
+
+typedef struct { char *name; SDL_Texture *tex; int w, h; } fx_image_t;
+static fx_image_t *fx_images;
+static int fx_image_count, fx_image_cap;
+
+static bool fx_is_absolute(const char *p) {
+    return p[0] == '/' || p[0] == '\\' || (p[0] && p[1] == ':');
+}
+
+/* Load a picture (once; after that it comes from the cache). Pictures are
+   looked for next to the program first, then in the current folder. */
+static fx_image_t *fx_image(fx_text name, int line) {
+    static const char *last_p;
+    static int64_t last_n = -1;
+    static int last_i = -1;
+    if (name.p == last_p && name.n == last_n && last_i >= 0) return &fx_images[last_i];
+    fx_need_window(line);
+    int found = -1;
+    for (int i = 0; i < fx_image_count && found < 0; i++)
+        if ((int64_t)strlen(fx_images[i].name) == name.n && memcmp(fx_images[i].name, name.p, (size_t)name.n) == 0)
+            found = i;
+    if (found < 0) {
+        char *file = (char *)fx_text_make(name.p, name.n).p;
+        char path[4096];
+        int w = 0, h = 0, comp = 0;
+        unsigned char *px = NULL;
+        if (!fx_is_absolute(file) && FX_PROGRAM_DIR[0]) {
+            snprintf(path, sizeof path, "%s/%s", FX_PROGRAM_DIR, file);
+            px = stbi_load(path, &w, &h, &comp, 4);
+        }
+        if (!px) {
+            snprintf(path, sizeof path, "%s", file);
+            px = stbi_load(path, &w, &h, &comp, 4);
+        }
+        if (!px) {
+            FILE *f = fopen(path, "rb");
+            if (!f && FX_PROGRAM_DIR[0]) {
+                char there[4096];
+                snprintf(there, sizeof there, "%s/%s", FX_PROGRAM_DIR, file);
+                f = fopen(there, "rb");
+            }
+            if (!f) {
+                char fix[4400];
+                snprintf(fix, sizeof fix, "Put the picture in the same folder as your program%s%s,\n"
+                         "  and check the name is exactly right (including .png at the end).",
+                         FX_PROGRAM_DIR[0] ? ":\n\n      " : "", FX_PROGRAM_DIR[0] ? FX_PROGRAM_DIR : "");
+                fx_fail(line, fix, "I can't find the picture \"%s\".", file);
+            }
+            fclose(f);
+            fx_fail(line, "Flaux can read .png, .jpg, .bmp and .gif pictures. Try opening it in a paint\n"
+                          "  program and saving it again as a .png.",
+                    "I couldn't read the picture \"%s\" (%s).", file, stbi_failure_reason());
+        }
+        SDL_Surface *s = SDL_CreateRGBSurfaceWithFormatFrom(px, w, h, 32, w * 4, SDL_PIXELFORMAT_RGBA32);
+        SDL_Texture *tex = s ? SDL_CreateTextureFromSurface(fx_ren, s) : NULL;
+        if (s) SDL_FreeSurface(s);
+        stbi_image_free(px);
+        if (!tex) fx_fail(line, NULL, "Flaux couldn't use the picture \"%s\": %s", file, SDL_GetError());
+        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+        if (fx_image_count == fx_image_cap) {
+            fx_image_cap = fx_image_cap ? fx_image_cap * 2 : 8;
+            fx_images = fx_realloc(fx_images, sizeof(fx_image_t) * (size_t)fx_image_cap);
+        }
+        fx_images[fx_image_count] = (fx_image_t){ file, tex, w, h };
+        found = fx_image_count++;
+    }
+    last_p = name.p;
+    last_n = name.n;
+    last_i = found;
+    return &fx_images[found];
+}
+
+static void fx_g_image(fx_text name, double x, double y, double w, double h, double angle,
+                       bool sized, int line) {
+    fx_image_t *im = fx_image(name, line);
+    fx_dirty = true;
+    double dw = sized ? w : im->w, dh = sized ? h : im->h;
+    int flip = SDL_FLIP_NONE;
+    if (dw < 0) { dw = -dw; flip |= SDL_FLIP_HORIZONTAL; }  /* a negative width flips it */
+    if (dh < 0) { dh = -dh; flip |= SDL_FLIP_VERTICAL; }
+    SDL_Rect dst = { fx_px(x), fx_px(y), fx_px(x + dw) - fx_px(x), fx_px(y + dh) - fx_px(y) };
+    if (angle == 0 && flip == SDL_FLIP_NONE) SDL_RenderCopy(fx_ren, im->tex, NULL, &dst);
+    else SDL_RenderCopyEx(fx_ren, im->tex, NULL, &dst, angle, NULL, (SDL_RendererFlip)flip);
+}
+
+static int64_t fx_image_width(fx_text name, int line) { return fx_image(name, line)->w; }
+static int64_t fx_image_height(fx_text name, int line) { return fx_image(name, line)->h; }
 
 /* How wide text is on screen, to help centre it. */
 static int64_t fx_text_width(fx_text t, int64_t size) {

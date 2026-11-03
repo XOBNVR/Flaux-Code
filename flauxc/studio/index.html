@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flaux Studio</title>
+<style>
+:root {
+  --bg: #f4f5fb; --panel: #ffffff; --line: #dfe2ee; --text: #1d2033; --muted: #6a6f87;
+  --accent: #5b4bff; --accent-2: #8a7dff; --run: #1fa463; --run-hover: #188a53; --stop: #e5484d;
+  --ed-bg: #1b1d2b; --ed-gutter: #151724; --ed-text: #e6e8f2; --ed-muted: #5d6280; --ed-sel: #3a3f66;
+  --kw: #c792ea; --fn: #82aaff; --str: #c3e88d; --interp: #ffcb6b; --num: #f78c6c; --com: #6f7699; --op: #89ddff;
+  --problem: #fff4e5; --problem-line: #f5a524; --error: #e5484d; --ok: #1fa463;
+  --font: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, "DejaVu Sans Mono", monospace;
+  --code-size: 16px;
+  --hint: #3b3f55; --good-bg: #e9f8ef; --console-bg: #f4f5fb; --console-err: #c22f35; --apply-hover: #4a3be0;
+  --field: #ffffff; --shadow: rgba(20, 20, 60, .12);
+  color-scheme: light;
+}
+/* Night mode: picked with the moon button, or automatically when the computer is in dark mode */
+:root[data-theme="dark"] {
+  --bg: #0e1016; --panel: #171a24; --line: #2a2f42; --text: #e6e8f2; --muted: #9298b5;
+  --accent: #7b6dff; --accent-2: #9d93ff; --ed-bg: #12141d; --ed-gutter: #0d0f16;
+  --problem: #2b2214; --problem-line: #e0a030; --hint: #c9cde0; --good-bg: #13261b;
+  --console-bg: #12141c; --console-err: #ff7b80; --apply-hover: #6a5bf0; --field: #0f1118;
+  --shadow: rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1016; --panel: #171a24; --line: #2a2f42; --text: #e6e8f2; --muted: #9298b5;
+    --accent: #7b6dff; --accent-2: #9d93ff; --ed-bg: #12141d; --ed-gutter: #0d0f16;
+    --problem: #2b2214; --problem-line: #e0a030; --hint: #c9cde0; --good-bg: #13261b;
+    --console-bg: #12141c; --console-err: #ff7b80; --apply-hover: #6a5bf0; --field: #0f1118;
+    --shadow: rgba(0, 0, 0, .45);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px;
+       display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel);
+         color: var(--text); border-radius: 8px; padding: 7px 12px; }
+button:hover { border-color: var(--accent-2); }
+button:focus-visible, input:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 1px; }
+
+/* ------------------------------------------------------------- header */
+header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel);
+         border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; margin-right: 10px; }
+.logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #fff;
+        background: linear-gradient(135deg, var(--accent), #ff6fb5); font-weight: 800; font-size: 18px; }
+#filename { color: var(--muted); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#filename b { color: var(--text); }
+.spacer { flex: 1; }
+.run { background: var(--run); border-color: var(--run); color: #fff; font-weight: 700; padding: 8px 22px;
+       font-size: 16px; }
+.run:hover { background: var(--run-hover); border-color: var(--run-hover); }
+.stop { background: var(--stop); border-color: var(--stop); color: #fff; font-weight: 700; padding: 8px 18px; }
+.small { padding: 7px 10px; }
+
+/* --------------------------------------------------------------- main */
+main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr); gap: 12px; padding: 12px;
+       min-height: 0; }
+#left { display: grid; grid-template-rows: 1fr auto; gap: 12px; min-height: 0; min-width: 0; }
+#editor { position: relative; display: flex; background: var(--ed-bg); border-radius: 12px; overflow: hidden;
+          min-height: 0; box-shadow: 0 2px 10px var(--shadow); }
+#gutter { width: 52px; flex: none; background: var(--ed-gutter); color: var(--ed-muted); text-align: right;
+          padding: 14px 10px 14px 0; font-family: var(--mono); font-size: var(--code-size); line-height: 1.6;
+          overflow: hidden; user-select: none; }
+#gutter-inner div { height: calc(var(--code-size) * 1.6); }
+#gutter-inner .err { color: var(--error); font-weight: 700; }
+#code-wrap { position: relative; flex: 1; min-width: 0; }
+#highlight, #code { position: absolute; inset: 0; margin: 0; padding: 14px 16px; border: 0;
+  font-family: var(--mono); font-size: var(--code-size); line-height: 1.6; tab-size: 4;
+  white-space: pre; letter-spacing: 0; font-variant-ligatures: none; font-kerning: none; }
+#highlight { color: var(--ed-text); overflow: hidden; pointer-events: none; }
+#highlight-inner > div { height: calc(var(--code-size) * 1.6); }
+#highlight-inner > div.errline { background: rgba(229, 72, 77, .14); }
+#highlight-inner > div.runline { background: rgba(245, 165, 36, .18); }
+#code { background: transparent; color: transparent; caret-color: #fff; resize: none; outline: none;
+        overflow: auto; overflow-wrap: normal; }
+#code::selection { background: var(--ed-sel); color: transparent; }
+.kw { color: var(--kw); font-weight: 600; } .fn { color: var(--fn); } .str { color: var(--str); }
+.interp { color: var(--interp); } .num { color: var(--num); } .com { color: var(--com); font-style: italic; }
+.op { color: var(--op); }
+.squiggle { text-decoration: underline wavy var(--error); text-decoration-skip-ink: none;
+            text-underline-offset: 4px; text-decoration-thickness: 2px; }
+
+/* ------------------------------------------------------------ problem */
+#problem { background: var(--problem); border: 2px solid var(--problem-line); border-radius: 12px;
+           padding: 12px 16px; max-height: 42vh; overflow: auto; }
+#problem.good { background: var(--good-bg); border-color: var(--ok); }
+.p-head { display: flex; align-items: center; gap: 10px; }
+.p-icon { width: 24px; height: 24px; border-radius: 50%; background: var(--problem-line); color: #fff;
+          display: grid; place-items: center; font-weight: 800; flex: none; }
+#problem.good .p-icon { background: var(--ok); }
+#p-title { font-size: 16px; }
+#p-message { margin: 8px 0 4px; font-size: 16px; }
+.p-label { font-weight: 700; margin-top: 10px; }
+#p-hint { margin: 4px 0; color: var(--hint); }
+#problem pre { background: var(--ed-bg); color: var(--ed-text); border-radius: 8px; padding: 9px 12px; margin: 6px 0;
+               font-family: var(--mono); font-size: 14px; overflow: auto; }
+#problem pre .added { color: var(--str); }
+#problem pre .ln { color: var(--ed-muted); user-select: none; }
+.apply { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.apply:hover { background: var(--apply-hover); }
+.p-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+/* -------------------------------------------------------- right panel */
+#right { display: grid; grid-template-rows: auto 1fr; background: var(--panel); border: 1px solid var(--line);
+         border-radius: 12px; min-height: 0; overflow: hidden; }
+.tabs { display: flex; gap: 4px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; border-radius: 8px 8px 0 0; background: transparent; padding: 9px 16px; font-weight: 600;
+               color: var(--muted); }
+.tabs button.active { background: var(--bg); color: var(--text); }
+.panel { min-height: 0; overflow: auto; }
+#output-panel { display: grid; grid-template-rows: 1fr auto; min-height: 0; }
+#console { margin: 0; padding: 14px; overflow: auto; font-family: var(--mono); font-size: 15px; line-height: 1.5;
+           white-space: pre-wrap; word-break: break-word; background: var(--console-bg); color: var(--text); }
+#console .err { color: var(--console-err); }
+#console .in { color: var(--accent); font-weight: 700; }
+#console .note { color: var(--muted); font-family: var(--font); font-style: italic; }
+#console .hello { color: var(--muted); font-family: var(--font); white-space: normal; }
+#input-row { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); background: var(--panel); }
+#input-row input { flex: 1; font: inherit; font-size: 16px; padding: 9px 12px; border: 2px solid var(--accent-2);
+                   background: var(--field); color: var(--text);
+                   border-radius: 8px; }
+#learn-panel { padding: 14px 16px; }
+#learn-panel h3 { margin: 16px 0 8px; font-size: 15px; color: var(--muted); text-transform: uppercase;
+                  letter-spacing: .05em; }
+#learn-panel h3:first-child { margin-top: 0; }
+.list { display: flex; flex-direction: column; gap: 6px; }
+.list button { text-align: left; }
+.snippet { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.snippet-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 600; }
+.snippet pre { margin: 8px 0 0; background: var(--ed-bg); color: var(--ed-text); border-radius: 8px;
+               padding: 8px 10px; font-family: var(--mono); font-size: 13.5px; overflow: auto; }
+
+/* ------------------------------------------------------------- footer */
+footer { padding: 6px 14px; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted);
+         font-size: 13.5px; display: flex; gap: 14px; }
+footer .good { color: var(--ok); font-weight: 600; } footer .bad { color: #b76b00; font-weight: 600; }
+
+/* ------------------------------------------------------------ dialogs */
+dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(560px, 92vw);
+         box-shadow: 0 20px 60px rgba(0,0,0,.3); background: var(--panel); color: var(--text); }
+dialog::backdrop { background: rgba(20, 22, 40, .45); }
+.d-body { padding: 18px 20px; max-height: 70vh; overflow: auto; }
+.d-body h2 { margin: 0 0 12px; font-size: 19px; }
+.d-body h3 { margin: 14px 0 6px; font-size: 14px; color: var(--muted); text-transform: uppercase; }
+.d-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line);
+          background: var(--bg); }
+#save-name { width: 100%; font: inherit; font-size: 17px; padding: 10px 12px; border: 2px solid var(--line);
+             background: var(--field); color: var(--text);
+             border-radius: 8px; }
+.hint { color: var(--muted); font-size: 13.5px; margin-top: 8px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">F</span>Flaux Studio</div>
+  <button id="btn-new" title="New program (Ctrl+N)">New</button>
+  <button id="btn-open" title="Open a program (Ctrl+O)">Open</button>
+  <button id="btn-save" title="Save (Ctrl+S)">Save</button>
+  <span id="filename"></span>
+  <div class="spacer"></div>
+  <button id="btn-theme" class="small" title="Night mode / day mode"></button>
+  <button id="btn-smaller" class="small" title="Smaller text">A&minus;</button>
+  <button id="btn-bigger" class="small" title="Bigger text">A+</button>
+  <button id="btn-stop" class="stop" hidden title="Stop the program">&#9632; Stop</button>
+  <button id="btn-run" class="run" title="Run (F5)">&#9654; Run</button>
+</header>
+
+<main>
+  <section id="left">
+    <div id="editor">
+      <div id="gutter"><div id="gutter-inner"></div></div>
+      <div id="code-wrap">
+        <div id="highlight" aria-hidden="true"><div id="highlight-inner"></div></div>
+        <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"
+                  aria-label="Your Flaux program"></textarea>
+      </div>
+    </div>
+    <div id="problem" hidden>
+      <div class="p-head"><span class="p-icon">!</span><b id="p-title"></b></div>
+      <div id="p-message"></div>
+      <div id="p-fix">
+        <div class="p-label">How to fix it</div>
+        <div id="p-hint"></div>
+        <pre id="p-fixed" hidden></pre>
+        <pre id="p-example" hidden></pre>
+        <div id="p-see" class="hint" hidden></div>
+        <div class="p-actions">
+          <button id="p-apply" class="apply" hidden>&#10003; Apply fix</button>
+          <button id="p-goto">Show me the line</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="right">
+    <nav class="tabs">
+      <button data-tab="output" class="active">Output</button>
+      <button data-tab="learn">Learn</button>
+    </nav>
+    <div id="output-panel" class="panel">
+      <pre id="console"></pre>
+      <form id="input-row" hidden>
+        <input id="input" autocomplete="off" placeholder="Type your answer here and press Enter">
+        <button class="apply">Send</button>
+      </form>
+    </div>
+    <div id="learn-panel" class="panel" hidden></div>
+  </section>
+</main>
+
+<footer><span id="status">Ready</span><span id="where"></span></footer>
+
+<dialog id="open-dialog">
+  <div class="d-body">
+    <h2>Open a program</h2>
+    <h3>My programs</h3>
+    <div class="list" id="open-mine"></div>
+    <h3>Lessons</h3>
+    <div class="list" id="open-lessons"></div>
+    <h3>Games</h3>
+    <div class="list" id="open-games"></div>
+    <h3>More examples</h3>
+    <div class="list" id="open-examples"></div>
+  </div>
+  <div class="d-foot">
+    <button id="open-folder">Show my programs folder</button>
+    <div class="spacer"></div>
+    <button id="open-cancel">Cancel</button>
+  </div>
+</dialog>
+
+<dialog id="save-dialog">
+  <form class="d-body" id="save-form">
+    <h2>Save your program</h2>
+    <label for="save-name">Name:</label>
+    <input id="save-name" autocomplete="off" placeholder="my_game">
+    <div class="hint" id="save-where"></div>
+  </form>
+  <div class="d-foot">
+    <button id="save-cancel">Cancel</button>
+    <button id="save-ok" class="apply">Save</button>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+const TOKEN = "@@TOKEN@@";
+const $ = (id) => document.getElementById(id);
+const code = $("code"), hi = $("highlight-inner"), gutter = $("gutter-inner");
+
+const KEYWORDS = new Set(("set to add subtract from say if then else end repeat times while until with in by " +
+  "forever function return and or not is true false mod stop skip copies of more less than at least most " +
+  "equal greater fewer bigger smaller").split(" "));
+const BUILTINS = new Set(("sqrt sin cos tan log abs floor ceil round min max random text number whole ask " +
+  "is_number clock length contains uppercase lowercase distance rgb window show clear rect circle line " +
+  "triangle dot write key_down key_pressed mouse_x mouse_y mouse_down mouse_clicked beep screenshot " +
+  "text_width image image_width image_height").split(" "));
+const BLOCK_START = /^\s*(if|else|repeat|function)\b/;
+
+const SNIPPETS = [
+  ["Say something", 'say "Hello!"'],
+  ["Make a variable", "set score to 0\nadd 1 to score"],
+  ["Ask a question", 'set name to ask("What\'s your name?")\nsay "Hi {name}!"'],
+  ["If ... else", 'if score > 10\n    say "You win!"\nelse\n    say "Keep going"\nend'],
+  ["Repeat", "repeat 3 times\n    say \"hooray!\"\nend"],
+  ["Count", "repeat with i from 1 to 10\n    say i\nend"],
+  ["A list", 'set pets to ["cat", "dog"]\nadd "fish" to pets\nrepeat with pet in pets\n    say pet\nend'],
+  ["A function", 'function greet(name)\n    say "Hello, {name}!"\nend\n\ngreet("Sam")'],
+  ["Random number", "set dice to random(1, 6)\nsay dice"],
+  ["Game window", 'window(800, 600, "My Game")\nset x to 400\n\nrepeat forever\n    if key_down("left")\n' +
+   '        subtract 5 from x\n    end\n    if key_down("right")\n        add 5 to x\n    end\n' +
+   '    clear("navy")\n    circle(x, 300, 30, "yellow")\n    show()\nend'],
+  ["Draw shapes", 'rect(50, 50, 200, 100, "blue")\ncircle(400, 300, 40, "red")\n' +
+   'triangle(500, 200, 550, 100, 600, 200, "orange")\nwrite("Hello!", 20, 20, "white", 3)'],
+  ["A picture", 'image("ship.png", 100, 200, 64, 64)'],
+  ["A beep", "beep(440, 0.2)"],
+];
+
+const state = { path: null, example: false, dirty: false, run: null, from: 0, problem: null, checkTimer: null,
+                lastChecked: null, runtimeLine: null, info: null };
+
+// ------------------------------------------------------------------ server
+async function api(path, data = {}) {
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json",
+    "X-Flaux-Token": TOKEN }, body: JSON.stringify(data) });
+  if (!res.ok) throw new Error("Flaux Studio's helper stopped. Close this window and open Flaux Studio again.");
+  return res.json();
+}
+setInterval(() => api("/api/ping").catch(() => {}), 4000);
+
+// ------------------------------------------------------------- highlighting
+function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+function tokens(line) {
+  const out = []; let i = 0;
+  const push = (cls, text) => { if (text) out.push([cls, text]); };
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === "#") { push("com", line.slice(i)); break; }
+    if (ch === '"') {
+      let j = i + 1, buf = '"';
+      while (j < line.length && line[j] !== '"') {
+        if (line[j] === "\\" && j + 1 < line.length) { buf += line.slice(j, j + 2); j += 2; continue; }
+        if (line[j] === "{") {
+          push("str", buf); buf = "";
+          const close = line.indexOf("}", j);
+          const end = close === -1 ? line.length : close + 1;
+          push("interp", line.slice(j, end)); j = end; continue;
+        }
+        buf += line[j++];
+      }
+      if (j < line.length) { buf += '"'; j++; }
+      push("str", buf); i = j; continue;
+    }
+    let m;
+    if ((m = /^\d[\d_]*(\.\d+)?(e[+-]?\d+)?/i.exec(line.slice(i)))) { push("num", m[0]); i += m[0].length; continue; }
+    if ((m = /^[A-Za-z_]\w*/.exec(line.slice(i)))) {
+      const w = m[0], next = line.slice(i + w.length);
+      let cls = "";
+      if (KEYWORDS.has(w)) cls = "kw";
+      else if (/^\s*\(/.test(next)) cls = "fn";
+      push(cls, w); i += w.length; continue;
+    }
+    if ("+-*/^%=<>!,()[]".includes(ch)) { push("op", ch); i++; continue; }
+    push("", ch); i++;
+  }
+  return out;
+}
+
+// Turn a line into HTML, with a wavy underline from column `a` to `b` (0-based)
+function lineHTML(line, a = -1, b = -1) {
+  let html = "", pos = 0;
+  for (const [cls, text] of tokens(line)) {
+    for (let k = 0; k < text.length; ) {
+      const inErr = pos + k >= a && pos + k < b;
+      let n = 1;
+      while (k + n < text.length && ((pos + k + n >= a && pos + k + n < b) === inErr)) n++;
+      const piece = esc(text.slice(k, k + n));
+      const classes = [cls, inErr ? "squiggle" : ""].filter(Boolean).join(" ");
+      html += classes ? `<span class="${classes}">${piece}</span>` : piece;
+      k += n;
+    }
+    pos += text.length;
+  }
+  if (a >= line.length && b > a) html += '<span class="squiggle">&nbsp;</span>';
+  return html || "&#8203;";
+}
+
+function render() {
+  const lines = code.value.split("\n");
+  const p = state.problem;
+  let h = "", g = "";
+  lines.forEach((line, i) => {
+    const n = i + 1;
+    const isErr = p && p.line === n;
+    const isRun = state.runtimeLine === n;
+    let a = -1, b = -1;
+    if (isErr && p.col) { a = p.col - 1; b = a + (p.length || 1); }
+    h += `<div class="${isErr ? "errline" : isRun ? "runline" : ""}">${lineHTML(line, a, b)}</div>`;
+    g += `<div class="${isErr || isRun ? "err" : ""}">${n}</div>`;
+  });
+  hi.innerHTML = h; gutter.innerHTML = g;
+  syncScroll();
+}
+
+function syncScroll() {
+  hi.style.transform = `translate(${-code.scrollLeft}px, ${-code.scrollTop}px)`;
+  gutter.style.transform = `translateY(${-code.scrollTop}px)`;
+}
+code.addEventListener("scroll", syncScroll);
+
+// --------------------------------------------------------------- editing
+function insertText(text) {
+  code.focus();
+  if (!document.execCommand("insertText", false, text)) code.setRangeText(text, code.selectionStart, code.selectionEnd, "end");
+}
+
+function lineStart(pos) { return code.value.lastIndexOf("\n", pos - 1) + 1; }
+
+code.addEventListener("keydown", (e) => {
+  if (e.key === "Tab") {
+    e.preventDefault();
+    const s = code.selectionStart, t = code.selectionEnd;
+    if (s === t && !e.shiftKey) return insertText("    ");
+    const start = lineStart(s), end = t;
+    const block = code.value.slice(start, end);
+    const changed = e.shiftKey ? block.replace(/^ {1,4}/gm, "") : block.replace(/^/gm, "    ");
+    code.setSelectionRange(start, end); insertText(changed);
+    code.setSelectionRange(start, start + changed.length);
+  } else if (e.key === "Enter" && !e.ctrlKey) {
+    e.preventDefault();
+    const s = code.selectionStart;
+    const line = code.value.slice(lineStart(s), s);
+    let indent = /^\s*/.exec(line)[0];
+    if (BLOCK_START.test(line) && !/^\s*end\b/.test(line)) indent += "    ";
+    insertText("\n" + indent);
+  }
+});
+
+code.addEventListener("input", () => {
+  // typing "end" or "else" at the start of a line moves it back out of the block
+  const s = code.selectionStart, start = lineStart(s);
+  const line = code.value.slice(start, s);
+  const m = /^(\s+)(end|else)$/.exec(line);
+  if (m && m[1].length >= 4) {
+    const prev = code.value.slice(lineStart(start - 1), start - 1);
+    const prevIndent = /^\s*/.exec(prev)[0].length;
+    if (m[1].length >= prevIndent && !/^\s*(if|else|repeat|function)\b/.test(prev)) {
+      code.setSelectionRange(start, start + 4); insertText(""); code.setSelectionRange(s - 4, s - 4);
+    }
+  }
+  setDirty(true);
+  state.runtimeLine = null;
+  render();
+  clearTimeout(state.checkTimer);
+  state.checkTimer = setTimeout(check, 600);
+});
+
+function setContent(text) {
+  code.value = text; code.scrollTop = 0; code.scrollLeft = 0;
+  state.problem = null; state.runtimeLine = null; render(); check();
+}
+
+function goToLine(n, col = 1) {
+  const lines = code.value.split("\n");
+  let pos = 0;
+  for (let i = 0; i < n - 1 && i < lines.length; i++) pos += lines[i].length + 1;
+  code.focus(); code.setSelectionRange(pos + col - 1, pos + col - 1);
+  const lh = parseFloat(getComputedStyle(code).lineHeight);
+  code.scrollTop = Math.max(0, (n - 4) * lh);
+}
+
+// --------------------------------------------------------------- problems
+async function check() {
+  const text = code.value;
+  if (text === state.lastChecked) return;
+  try {
+    const r = await api("/api/check", { content: text, path: state.path });
+    if (code.value !== text) return;      // they kept typing
+    state.lastChecked = text;
+    showProblem(r.ok ? null : r.error);
+  } catch (err) { status(err.message, "bad"); }
+}
+
+function showProblem(p, fromRun = false) {
+  state.problem = p;
+  render();
+  const box = $("problem");
+  if (!p) {
+    box.hidden = true;
+    status("No problems found", "good");
+    return;
+  }
+  box.hidden = false; box.classList.remove("good");
+  $("p-title").textContent = p.line ? `Problem on line ${p.line}` : "Problem";
+  $("p-message").textContent = p.message;
+  $("p-hint").textContent = p.hint || (p.fixed ? "Change it to:" : "");
+  const fixed = $("p-fixed");
+  if (p.fixed && p.fixed.length) {
+    const width = Math.max(...p.fixed.map(([n]) => String(n).length));
+    fixed.innerHTML = p.fixed.map(([n, t]) => n === "..." ? '<span class="ln">   ...</span>' :
+      `<span class="ln">${String(n).padStart(width)} | </span><span class="${n === "+" || n === p.line ? "added" : ""}">${esc(t)}</span>`).join("\n");
+    fixed.hidden = false;
+  } else fixed.hidden = true;
+  const ex = $("p-example");
+  ex.hidden = !p.example; ex.textContent = p.example || "";
+  const see = $("p-see");
+  see.hidden = !p.see;
+  if (p.see) see.textContent = `${p.see.words}  line ${p.see.line}: ${p.see.text.trim()}`;
+  $("p-apply").hidden = !p.fixed_source;
+  $("p-goto").hidden = !p.line;
+  status(p.line ? `Problem on line ${p.line}` : "Problem", "bad");
+}
+
+$("p-apply").addEventListener("click", () => {
+  const p = state.problem;
+  if (!p || !p.fixed_source) return;
+  const line = p.line;
+  code.focus(); code.select(); insertText(p.fixed_source);   // keeps Ctrl+Z working
+  setDirty(true); render(); check();
+  if (line) goToLine(line);
+  status("Fix applied. Press Run to try it.", "good");
+});
+$("p-goto").addEventListener("click", () => state.problem && goToLine(state.problem.line, state.problem.col || 1));
+
+// ---------------------------------------------------------------- running
+const cons = $("console");
+function print(text, cls = "") {
+  const span = document.createElement("span");
+  if (cls) span.className = cls;
+  span.textContent = text;
+  cons.appendChild(span);
+  cons.scrollTop = cons.scrollHeight;
+}
+
+async function run() {
+  if (state.run) await stop();
+  showTab("output");
+  if (state.path && !state.example && state.dirty) await save(true);
+  cons.textContent = "";
+  status("Getting ready...");
+  const r = await api("/api/run", { content: code.value, path: state.path });
+  if (!r.ok) {
+    showProblem(r.error, true);
+    print(`Your program has a problem${r.error.line ? " on line " + r.error.line : ""}, so it can't run yet.\n` +
+          "Look below your code to see how to fix it.\n", "note");
+    return;
+  }
+  showProblem(null);
+  state.run = r.run; state.from = 0; state.runtimeLine = null; render();
+  $("btn-run").hidden = true; $("btn-stop").hidden = false;
+  $("input-row").hidden = false; $("input").value = "";
+  status("Running... (programs that ask questions wait for you to type below)");
+  poll();
+}
+
+async function poll() {
+  const id = state.run;
+  if (!id) return;
+  let r;
+  try { r = await api("/api/output", { run: id, from: state.from }); }
+  catch (err) { status(err.message, "bad"); return finish(null); }
+  for (const [stream, text] of r.chunks) {
+    print(text.replace(/\x1b\[[0-9;]*m/g, ""), stream === "err" ? "err" : "");
+    if (stream === "err") {
+      const m = /Problem while running [^,]*, line (\d+)/.exec(cons.textContent);
+      if (m) { state.runtimeLine = Number(m[1]); render(); }
+    }
+  }
+  state.from += r.chunks.length;
+  if (r.done) return finish(r.exit);
+  setTimeout(poll, 80);
+}
+
+function finish(exit) {
+  if (exit === 0) print("\n— Finished —\n", "note");
+  else if (exit !== null) print(`\n— Stopped${state.runtimeLine ? " (see the highlighted line)" : ""} —\n`, "note");
+  state.run = null;
+  $("btn-run").hidden = false; $("btn-stop").hidden = true; $("input-row").hidden = true;
+  status(exit === 0 ? "Finished" : "Stopped", exit === 0 ? "good" : "bad");
+}
+
+async function stop() {
+  if (!state.run) return;
+  const id = state.run;
+  await api("/api/stop", { run: id });
+}
+
+$("input-row").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("input").value;
+  $("input").value = "";
+  print(text + "\n", "in");
+  if (state.run) await api("/api/input", { run: state.run, text });
+});
+
+// ------------------------------------------------------------------ files
+function setDirty(d) { state.dirty = d; showName(); }
+function showName() {
+  const name = state.path ? state.path.split(/[\\/]/).pop() : "untitled.flx";
+  $("filename").innerHTML = `<b>${esc(name)}</b>${state.dirty ? " • not saved" : ""}` +
+    (state.example ? " (example: Save makes your own copy)" : "");
+  document.title = `${name} - Flaux Studio`;
+  $("where").textContent = state.path ? state.path : "";
+}
+
+async function openFile(path) {
+  if (!confirmLose()) return;
+  const r = await api("/api/open", { path });
+  if (r.ok === false) { status(r.message, "bad"); return false; }
+  state.path = r.path; state.example = r.example; state.lastChecked = null;
+  setContent(r.content); setDirty(false);
+  try { localStorage.setItem("flaux-last", r.path); } catch (e) {}
+  if ($("open-dialog").open) $("open-dialog").close();
+  return true;
+}
+
+function confirmLose() {
+  return !state.dirty || confirm("Your changes aren't saved. Continue without saving them?");
+}
+
+async function save(quiet = false) {
+  if (!state.path || state.example) {
+    const d = $("save-dialog");
+    const base = state.path ? state.path.split(/[\\/]/).pop().replace(/\.flx$/, "") : "";
+    $("save-name").value = state.example ? "my_" + base : base;
+    $("save-where").textContent = `It will be saved in ${state.info ? state.info.home : "your Flaux folder"}.`;
+    d.showModal(); $("save-name").select();
+    return;
+  }
+  const r = await api("/api/save", { path: state.path, content: code.value });
+  if (r.ok === false) return status(r.message, "bad");
+  setDirty(false);
+  if (!quiet) status("Saved", "good");
+}
+
+async function saveAs() {
+  const name = $("save-name").value.trim();
+  if (!name) return $("save-name").focus();
+  const r = await api("/api/save", { name, content: code.value, from_path: state.path });
+  if (r.ok === false) return status(r.message, "bad");
+  $("save-dialog").close();
+  state.path = r.path; state.example = false; setDirty(false);
+  try { localStorage.setItem("flaux-last", r.path); } catch (e) {}
+  status(`Saved as ${r.name}`, "good");
+  refreshInfo();
+}
+$("save-ok").addEventListener("click", saveAs);
+$("save-form").addEventListener("submit", (e) => { e.preventDefault(); saveAs(); });
+$("save-cancel").addEventListener("click", () => $("save-dialog").close());
+
+function fillList(id, items, label = (f) => f.name.replace(/\.flx$/, "").replace(/_/g, " ")) {
+  const box = $(id); box.innerHTML = "";
+  if (!items.length) { box.innerHTML = '<div class="hint">Nothing here yet.</div>'; return; }
+  for (const f of items) {
+    const b = document.createElement("button");
+    b.textContent = label(f);
+    b.addEventListener("click", () => openFile(f.path));
+    box.appendChild(b);
+  }
+}
+
+async function refreshInfo() {
+  state.info = await api("/api/state");
+  return state.info;
+}
+
+async function showOpen() {
+  const info = await refreshInfo();
+  fillList("open-mine", info.mine, (f) => f.name);
+  fillList("open-lessons", info.lessons, lessonName);
+  fillList("open-games", info.games);
+  fillList("open-examples", info.examples);
+  $("open-dialog").showModal();
+}
+function lessonName(f) {
+  const m = /^(\d+)_(.*)\.flx$/.exec(f.name);
+  return m ? `Lesson ${Number(m[1])}: ${m[2].replace(/_/g, " ")}` : f.name;
+}
+$("open-cancel").addEventListener("click", () => $("open-dialog").close());
+$("open-folder").addEventListener("click", () => api("/api/folder", {}));
+
+function newFile() {
+  if (!confirmLose()) return;
+  state.path = null; state.example = false; state.lastChecked = null;
+  setContent('say "Hello!"\n'); setDirty(false);
+  goToLine(1, 13);
+}
+
+// ------------------------------------------------------------------ learn
+function buildLearn(info) {
+  const panel = $("learn-panel");
+  panel.innerHTML = "<h3>Lessons</h3><div class='list' id='learn-lessons'></div>" +
+    "<h3>Games</h3><div class='list' id='learn-games'></div>" +
+    "<h3>Code you can add</h3><div id='learn-snippets'></div>";
+  fillList("learn-lessons", info.lessons, lessonName);
+  fillList("learn-games", info.games);
+  const box = $("learn-snippets");
+  for (const [title, snippet] of SNIPPETS) {
+    const div = document.createElement("div");
+    div.className = "snippet";
+    div.innerHTML = `<div class="snippet-head"><span>${esc(title)}</span><button>Add to my code</button></div>` +
+      `<pre>${snippet.split("\n").map((l) => lineHTML(l)).join("\n")}</pre>`;
+    div.querySelector("button").addEventListener("click", () => {
+      const s = code.selectionStart, start = lineStart(s);
+      const atLineStart = code.value.slice(start, s).trim() === "";
+      const indent = /^\s*/.exec(code.value.slice(start, s))[0];
+      const text = snippet.split("\n").join("\n" + indent) + "\n" + indent;
+      insertText(atLineStart ? text : "\n" + indent + text);
+    });
+    box.appendChild(div);
+  }
+}
+
+function showTab(name) {
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  $("output-panel").hidden = name !== "output";
+  $("learn-panel").hidden = name !== "learn";
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+
+// ------------------------------------------------------------- the rest
+function status(text, kind = "") {
+  $("status").innerHTML = kind === "good" ? `<span class="good">✓ ${esc(text)}</span>`
+    : kind === "bad" ? `<span class="bad">${esc(text)}</span>` : esc(text);
+}
+
+// Night mode: remembered on this computer; otherwise follows Windows' own setting
+function isDark() {
+  const t = document.documentElement.dataset.theme;
+  return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+}
+function showThemeButton() {
+  $("btn-theme").innerHTML = isDark() ? "\u2600\ufe0f Day" : "\ud83c\udf19 Night";
+}
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem("flaux-theme", theme); } catch (e) {}
+  showThemeButton();
+}
+$("btn-theme").addEventListener("click", () => setTheme(isDark() ? "light" : "dark"));
+try { const t = localStorage.getItem("flaux-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+showThemeButton();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", showThemeButton);
+
+function setSize(px) {
+  px = Math.max(12, Math.min(28, px));
+  document.documentElement.style.setProperty("--code-size", px + "px");
+  try { localStorage.setItem("flaux-size", px); } catch (e) {}
+  render();
+}
+function codeSize() { return parseInt(getComputedStyle(document.documentElement).getPropertyValue("--code-size")); }
+$("btn-bigger").addEventListener("click", () => setSize(codeSize() + 2));
+$("btn-smaller").addEventListener("click", () => setSize(codeSize() - 2));
+
+$("btn-run").addEventListener("click", run);
+$("btn-stop").addEventListener("click", stop);
+$("btn-new").addEventListener("click", newFile);
+$("btn-open").addEventListener("click", showOpen);
+$("btn-save").addEventListener("click", () => save());
+
+document.addEventListener("keydown", (e) => {
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (e.key === "F5" || (ctrl && e.key === "Enter")) { e.preventDefault(); run(); }
+  else if (ctrl && e.key.toLowerCase() === "s") { e.preventDefault(); save(); }
+  else if (ctrl && e.key.toLowerCase() === "o") { e.preventDefault(); showOpen(); }
+  else if (ctrl && e.key.toLowerCase() === "n") { e.preventDefault(); newFile(); }
+  else if (ctrl && (e.key === "=" || e.key === "+")) { e.preventDefault(); setSize(codeSize() + 2); }
+  else if (ctrl && e.key === "-") { e.preventDefault(); setSize(codeSize() - 2); }
+});
+window.addEventListener("beforeunload", (e) => { if (state.dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+(async function start() {
+  try { const s = localStorage.getItem("flaux-size"); if (s) setSize(Number(s)); } catch (e) {}
+  print("Press the green ▶ Run button (or F5) to run your program.\n" +
+        "What your program says will show up here.\n", "hello");
+  const info = await refreshInfo();
+  buildLearn(info);
+  let first = info.open_file;
+  if (!first) { try { first = localStorage.getItem("flaux-last"); } catch (e) {} }
+  if (!first && info.mine.length) first = info.mine[0].path;
+  let opened = false;
+  if (first) { try { opened = await openFile(first); } catch (e) {} }
+  if (!opened) newFile();
+  code.focus();
+})();
+</script>
+</body>
+</html>

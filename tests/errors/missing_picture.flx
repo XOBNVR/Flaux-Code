@@ -1,0 +1,4 @@
+# expect: I can't find the picture "hero.png".
+# expect: Put the picture file in the same folder as your program
+window(100, 100)
+image("hero.png", 10, 10)

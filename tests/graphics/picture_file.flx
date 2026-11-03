@@ -1,0 +1,16 @@
+# frames: 1
+# pixel: 10 10 #ff0000
+# pixel: 30 10 #0000ff
+# pixel: 10 30 #00ff00
+# pixel: 30 30 #ffffff
+# pixel: 50 10 #0000ff
+# pixel: 70 10 #ff0000
+# pixel: 5 55 #ff0000
+# pixel: 5 65 #00ff00
+# pixel: 15 65 #ffffff
+window(100, 100)
+clear("white")
+image("checker.png", 0, 0, 40, 40)
+image("checker.png", 40, 0, -40, 40)
+image("checker.png", 0, 50, image_width("checker.png") * 10, image_height("checker.png") * 10)
+show()

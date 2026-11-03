@@ -76,12 +76,19 @@ BUILTINS = {
     "mouse_clicked": "if mouse_clicked()\n    add 1 to clicks\nend",
     "beep": "beep(440, 0.2)    # pitch, seconds",
     "screenshot": "screenshot(\"picture.bmp\")",
+    "image": "image(\"ship.png\", 100, 200)              # a picture at x, y\n"
+             "image(\"ship.png\", 100, 200, 64, 64)      # ...64 by 64 pixels\n"
+             "image(\"ship.png\", 100, 200, 64, 64, 90)  # ...turned 90 degrees",
+    "image_width": "say image_width(\"ship.png\")",
+    "image_height": "say image_height(\"ship.png\")",
     "text_width": "set w to text_width(\"GAME OVER\", 5)\nwrite(\"GAME OVER\", (800 - w) / 2, 280, \"red\", 5)",
 }
 
 GRAPHICS_BUILTINS = {"window", "show", "clear", "rect", "circle", "line", "triangle", "dot", "write", "key_down",
                      "key_pressed", "mouse_x", "mouse_y", "mouse_down", "mouse_clicked", "beep",
-                     "screenshot", "text_width"}
+                     "screenshot", "text_width", "image", "image_width", "image_height"}
+
+PICTURE_TYPES = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 
 # Function names from other languages, and the Flaux version.
 OTHER_LANGUAGE_FUNCTIONS = {
@@ -263,9 +270,10 @@ class Scope:
 
 
 class Compiler:
-    def __init__(self, program, filename, source):
+    def __init__(self, program, filename, source, program_dir=None):
         self.filename = filename
         self.source = source
+        self.program_dir = program_dir  # the folder the program is in, for finding pictures
         self.lines = source.splitlines()
         self.funcs = {}
         for f in program.funcs:
@@ -330,7 +338,7 @@ class Compiler:
         with open(RUNTIME_PATH, encoding="utf-8") as fh:
             runtime = fh.read()
         if self.uses_graphics:
-            runtime += "\n" + graphics.runtime_c()
+            runtime += f"\n#define FX_PROGRAM_DIR {c_string(self.program_dir or '')}\n" + graphics.runtime_c()
             main_code = main_code.replace("/*@FINISH@*/", "fx_g_finish();")
         else:
             main_code = main_code.replace("    /*@FINISH@*/\n", "")
@@ -1800,6 +1808,55 @@ class Compiler:
         seconds = nums[1] if len(nums) > 1 else "0.1"
         return self.graphics_call(f"fx_g_beep({nums[0]}, {seconds}, {e.line})")
 
+    def picture_arg(self, e, args):
+        """C code for a picture's file name, checking the file is really there."""
+        node, (c, t) = e.args[0], args[0]
+        self.need_text(e, node, t)
+        if (self.program_dir and isinstance(node, N.Str) and len(node.parts) == 1
+                and isinstance(node.parts[0], str)):
+            name = node.parts[0]
+            here = os.path.join(self.program_dir, name)
+            if not os.path.isfile(here) and not os.path.isfile(name):
+                try:
+                    pictures = [f for f in os.listdir(self.program_dir) if f.lower().endswith(PICTURE_TYPES)]
+                except OSError:
+                    pictures = []
+                close = difflib.get_close_matches(name, pictures, n=1, cutoff=0.5)
+                if close:
+                    raise self.err(node, f"I can't find the picture \"{name}\".",
+                                   hint=f"There's a picture called \"{close[0]}\" next to your program. "
+                                        f"Did you mean that? Change the line to:",
+                                   fix=f'"{close[0]}"')
+                raise self.err(node, f"I can't find the picture \"{name}\".",
+                               hint=f"Put the picture file in the same folder as your program "
+                                    f"({self.program_dir}), and check its name is exactly right, "
+                                    f"including the .png at the end.")
+        return c
+
+    def b_image(self, e, args):
+        if len(args) == 4:
+            raise self.err(e, "`image` needs both a width and a height, or neither.",
+                           hint="Give the size as width, height:", example=BUILTINS["image"])
+        self.arity(e, args, 3, 6)
+        name = self.picture_arg(e, args)
+        nums = self.numbers(e, args, 1)
+        if nums is None:
+            return "", VOID
+        x, y = nums[0], nums[1]
+        sized = len(nums) >= 4
+        w, h = (nums[2], nums[3]) if sized else ("0", "0")
+        angle = nums[4] if len(nums) == 5 else "0"
+        return self.graphics_call(f"fx_g_image({name}, {x}, {y}, {w}, {h}, {angle}, "
+                                  f"{'true' if sized else 'false'}, {e.line})")
+
+    def b_image_width(self, e, args):
+        self.arity(e, args, 1)
+        return self.graphics_call(f"fx_image_width({self.picture_arg(e, args)}, {e.line})", INT)
+
+    def b_image_height(self, e, args):
+        self.arity(e, args, 1)
+        return self.graphics_call(f"fx_image_height({self.picture_arg(e, args)}, {e.line})", INT)
+
     def b_text_width(self, e, args):
         self.arity(e, args, 1, 2)
         tc, tt = args[0]
@@ -1815,7 +1872,7 @@ class Compiler:
         return self.graphics_call(f"fx_g_screenshot({c}, {e.line})")
 
 
-def compile_source(source, filename="program.flx"):
+def compile_source(source, filename="program.flx", program_dir=None):
     """Compile Flaux source code to C source code."""
     from .lexer import Lexer
     from .parser import Parser
@@ -1831,4 +1888,4 @@ def compile_source(source, filename="program.flx"):
         raise
     if lexer.first_error:
         raise lexer.first_error
-    return Compiler(program, filename, source).compile()
+    return Compiler(program, filename, source, program_dir).compile()

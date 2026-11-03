@@ -1,0 +1,88 @@
+# Space Dodge: steer your ship with the arrow keys and dodge the rocks.
+# The pictures ship.png and rock.png are in the same folder as this program.
+window(800, 600, "Space Dodge")
+
+set ship_x to 400
+set rock_speed to 5
+set frames to 0
+set alive to true
+
+# six rocks, starting above the top of the screen
+set rocks_x to []
+set rocks_y to []
+repeat with i from 1 to 6
+    add random(30, 770) to rocks_x
+    add -120 * i to rocks_y
+end
+
+# a starry sky
+set stars_x to []
+set stars_y to []
+repeat 80 times
+    add random(0, 800) to stars_x
+    add random(0, 600) to stars_y
+end
+
+repeat forever
+    if alive
+        if key_down("left") and ship_x > 32
+            subtract 7 from ship_x
+        end
+        if key_down("right") and ship_x < 768
+            add 7 to ship_x
+        end
+        add 1 to frames
+
+        repeat with i from 1 to length of rocks_y
+            add rock_speed to rocks_y[i]
+            # a rock that falls off the bottom goes back to the top
+            if rocks_y[i] > 640
+                set rocks_y[i] to -40
+                set rocks_x[i] to random(30, 770)
+            end
+            # did it hit the ship?
+            if distance(rocks_x[i], rocks_y[i], ship_x, 530) < 44
+                set alive to false
+                beep(110, 0.6)
+            end
+        end
+
+        # every 10 seconds the rocks get faster
+        if frames mod 600 = 0
+            add 1 to rock_speed
+            beep(660, 0.1)
+        end
+    else if key_pressed("space")
+        set frames to 0
+        set rock_speed to 5
+        repeat with i from 1 to length of rocks_y
+            set rocks_y[i] to -120 * i
+        end
+        set alive to true
+    end
+
+    # draw everything
+    clear("black")
+    repeat with i from 1 to length of stars_y
+        add 1 to stars_y[i]
+        if stars_y[i] > 600
+            set stars_y[i] to 0
+        end
+        dot(stars_x[i], stars_y[i], "white")
+    end
+    repeat with i from 1 to length of rocks_x
+        image("rock.png", rocks_x[i] - 28, rocks_y[i] - 28, 56, 56)
+    end
+    image("ship.png", ship_x - 32, 498, 64, 64)
+    write("Time: {frames // 60}", 20, 20, "white", 3)
+    if not alive
+        centered("BOOM!", 230, "orange", 8)
+        centered("You lasted {frames // 60} seconds", 320, "white", 3)
+        centered("Press space to try again", 370, "gray", 2)
+    end
+    show()
+end
+
+function centered(message, y, color, size)
+    write(message, (800 - text_width(message, size)) / 2, y, color, size)
+end

@@ -29,13 +29,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from flauxc.cli import compile_c  # noqa: E402
+from flauxc.cli import BUNDLED_SDL, EXE, compile_c  # noqa: E402
 from flauxc.compiler import compile_source  # noqa: E402
 from flauxc.errors import FlauxError  # noqa: E402
 
 
 def sdl_installed():
-    if shutil.which("sdl2-config"):
+    if os.path.isdir(BUNDLED_SDL) or shutil.which("sdl2-config"):
         return True
     return bool(shutil.which("pkg-config")) and \
         subprocess.run(["pkg-config", "--exists", "sdl2"]).returncode == 0
@@ -59,14 +59,42 @@ def build_and_run(path, stdin, tmp, env=None):
     source = open(path, encoding="utf-8").read()
     name = os.path.basename(path)
     try:
-        c_code = compile_source(source, name)
+        c_code = compile_source(source, name, os.path.dirname(os.path.abspath(path)))
     except FlauxError as e:
         return 1, "", e.render(name, source)
-    exe = os.path.join(tmp, name[:-4])
+    exe = os.path.join(tmp, name[:-4] + EXE)
     compile_c(c_code, exe)
     r = subprocess.run([exe], input=stdin, capture_output=True, text=True, timeout=60,
                        env={**os.environ, **(env or {})})
     return r.returncode, r.stdout, r.stderr
+
+
+def studio_checks():
+    import time
+    from flauxc.studio.server import Studio
+    problems = []
+    with tempfile.TemporaryDirectory() as home:
+        studio = Studio(home=home)
+        r = studio.check("set score to 10\nsay scroe\n")
+        if r["ok"] or r["error"]["fixed_source"] != "set score to 10\nsay score\n":
+            problems.append(f"check/apply fix gave {r}")
+        r = studio.run('set name to ask("Name?")\nsay "Hi {name}"\nsay 1 / 0\n')
+        if not r.get("ok"):
+            problems.append(f"run failed: {r}")
+        else:
+            studio.send_input(r["run"], "Mia")
+            out, deadline = {"done": False}, time.time() + 60
+            while not out["done"] and time.time() < deadline:
+                time.sleep(0.05)
+                out = studio.output(r["run"], 0)
+            text = "".join(t for _, t in out["chunks"])
+            errs = "".join(t for s, t in out["chunks"] if s == "err")
+            if "Hi Mia" not in text or "divide by zero" not in errs or text.index("Hi Mia") > text.index("Problem"):
+                problems.append(f"run output wrong: {out}")
+        saved = studio.save("say 1\n", name="My Game")
+        if not os.path.isfile(os.path.join(home, "My_Game.flx")) or saved["name"] != "My_Game.flx":
+            problems.append(f"save went wrong: {saved}")
+    return problems
 
 
 def main():
@@ -114,7 +142,7 @@ def main():
                     key, _, value = l[2:].partition(":")
                     header.setdefault(key.strip(), []).append(value.strip())
             shot = os.path.join(tmp, os.path.basename(path)[:-4] + ".bmp")
-            env = {"SDL_VIDEODRIVER": "offscreen", "SDL_AUDIODRIVER": "dummy", "FLAUX_FAST": "1",
+            env = {"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "FLAUX_FAST": "1",
                    "FLAUX_FRAMES": header.get("frames", ["1"])[0], "FLAUX_SCREENSHOT": shot,
                    "FLAUX_HOLD_KEYS": ",".join(header.get("hold", []))}
             code, out, err = build_and_run(path, "", tmp, env)
@@ -134,6 +162,14 @@ def main():
                 passed += 1
             else:
                 failures.append((name, detail))
+
+    # Flaux Studio's helper: checking, Apply fix, running with typed input, saving.
+    if pattern in "studio":
+        problems = studio_checks()
+        if problems:
+            failures.append(("studio", "\n".join(problems)))
+        else:
+            passed += 1
 
     # Every example and lesson (the README uses them) must still compile.
     for path in sorted(glob.glob(os.path.join(ROOT, "examples", "**", "*.flx"), recursive=True)):

@@ -64,6 +64,48 @@ class FlauxError(Exception):
             return [(self.line, text[:start] + self.fix + text[start + self.length:])]
         return None
 
+    def apply_fix(self, source):
+        """The whole program with this error's fix applied, or None if the
+        error doesn't come with a fix. Used by Flaux Studio's Apply fix button."""
+        lines = source.split("\n")
+        fixed = self.fixed_lines(lines)
+        if not fixed:
+            return None
+        out = list(lines)
+        offset = 0          # how many lines we've added so far
+        insert_at = None    # where the next "+" line goes (0-based, in `out`)
+        for i, (label, text) in enumerate(fixed):
+            if label == "...":
+                continue
+            if label == "+":
+                if insert_at is None:  # a "+" before any numbered line: add it above the next one
+                    upcoming = next((n for n, _ in fixed[i:] if isinstance(n, int)), len(lines) + 1)
+                    insert_at = upcoming - 1 + offset
+                out.insert(insert_at, text)
+                insert_at += 1
+                offset += 1
+            else:
+                index = label - 1 + offset
+                if 0 <= index < len(out):
+                    out[index] = text
+                insert_at = index + 1
+        return "\n".join(out)
+
+    def to_dict(self, filename, source):
+        """Everything about this error, for Flaux Studio."""
+        lines = source.splitlines()
+        fixed = self.fixed_lines(lines)
+        see = None
+        if self.see and 1 <= self.see[0] <= len(lines):
+            see = {"line": self.see[0], "words": self.see[1], "text": lines[self.see[0] - 1]}
+        return {
+            "message": self.message, "line": self.line, "col": self.col, "length": self.length,
+            "hint": self.hint, "example": self.example, "see": see,
+            "fixed": [[label, text] for label, text in fixed] if fixed else None,
+            "fixed_source": self.apply_fix(source),
+            "text": self.render(filename, source),
+        }
+
     def render(self, filename, source, color=False):
         def paint(code, text):
             return f"{code}{text}{RESET}" if color else text

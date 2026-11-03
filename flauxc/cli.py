@@ -20,17 +20,35 @@ from .compiler import compile_source
 from .errors import FlauxError
 
 CFLAGS = ["-O2", "-std=gnu11", "-fwrapv", "-w"]
+WINDOWS = os.name == "nt"
+EXE = ".exe" if WINDOWS else ""
+
+# When Flaux is installed with FlauxSetup.exe, the C compiler and SDL2 come
+# with it, in folders next to the flauxc folder.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BUNDLED_CC = os.path.join(ROOT, "toolchain", "bin", "gcc" + EXE)
+BUNDLED_SDL = os.path.join(ROOT, "sdl2")
+
+
+class CliError(Exception):
+    """A problem to tell the user about (and then stop)."""
 
 
 def fail(msg, code=1):
-    print(msg, file=sys.stderr)
-    sys.exit(code)
+    raise CliError(msg)
 
 
 def find_c_compiler():
-    for cand in (os.environ.get("FLAUX_CC"), "cc", "gcc", "clang"):
-        if cand and shutil.which(cand):
+    if os.environ.get("FLAUX_CC"):
+        return os.environ["FLAUX_CC"]
+    if os.path.isfile(BUNDLED_CC):
+        return BUNDLED_CC
+    for cand in ("cc", "gcc", "clang"):
+        if shutil.which(cand):
             return cand
+    if WINDOWS:
+        fail("Flaux needs a C compiler to make programs, and I couldn't find one.\n"
+             "The easiest fix is to reinstall Flaux with FlauxSetup.exe, which includes one.")
     fail("Flaux needs a C compiler (gcc or clang) to make programs, and I couldn't find one.\n"
          "On Ubuntu/Debian: sudo apt install gcc\n"
          "On macOS: xcode-select --install")
@@ -52,7 +70,7 @@ def to_c(path):
     source = read_source(path)
     name = os.path.basename(path)
     try:
-        return compile_source(source, name)
+        return compile_source(source, name, os.path.dirname(os.path.abspath(path)))
     except FlauxError as e:
         fail(e.render(name, source))
     except RecursionError:
@@ -70,6 +88,12 @@ Install it with one command, then try again:
 
 def sdl_flags():
     """Compiler and linker flags for SDL2, from sdl2-config or pkg-config."""
+    if os.path.isdir(BUNDLED_SDL):
+        return (["-I", os.path.join(BUNDLED_SDL, "include", "SDL2")],
+                ["-L", os.path.join(BUNDLED_SDL, "lib"), "-lSDL2"])
+    if WINDOWS:
+        fail("This program uses graphics, but the SDL2 library that Flaux uses for them is missing.\n"
+             "Reinstall Flaux with FlauxSetup.exe to put it back.")
     for tool in (["sdl2-config"], ["pkg-config", "sdl2"]):
         if not shutil.which(tool[0]):
             continue
@@ -87,11 +111,13 @@ def compile_c(c_code, out_path):
     cflags, libs = [], []
     if "#define FX_USES_GRAPHICS" in c_code:
         cflags, libs = sdl_flags()
+        cflags = cflags + ["-I", os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")]
     with tempfile.TemporaryDirectory() as tmp:
         c_path = os.path.join(tmp, "program.c")
         with open(c_path, "w", encoding="utf-8") as fh:
             fh.write(c_code)
-        result = subprocess.run([cc, *CFLAGS, *cflags, c_path, "-o", out_path, *libs, "-lm"],
+        extra = ["-Wl,--stack,16777216"] if WINDOWS else []  # 16 MB, like Linux, for deep recursion
+        result = subprocess.run([cc, *CFLAGS, *cflags, c_path, "-o", out_path, *libs, "-lm", *extra],
                                 capture_output=True, text=True)
     if result.returncode != 0:
         fd, keep = tempfile.mkstemp(prefix="flaux-bug-", suffix=".c")
@@ -100,18 +126,39 @@ def compile_c(c_code, out_path):
         errors = "\n".join(result.stderr.splitlines()[:30])
         fail("Flaux made C code that the C compiler didn't accept. This is a bug in Flaux, "
              f"not in your program.\nThe C code was saved to {keep}\n\n{errors}")
+    if libs and WINDOWS:
+        copy_sdl_dll(os.path.dirname(os.path.abspath(out_path)))
+
+
+def copy_sdl_dll(folder):
+    """Windows programs that use graphics need SDL2.dll next to them."""
+    dll = os.path.join(BUNDLED_SDL, "bin", "SDL2.dll")
+    target = os.path.join(folder, "SDL2.dll")
+    if os.path.isfile(dll) and not os.path.isfile(target):
+        shutil.copyfile(dll, target)
+
+
+def cache_dir():
+    if WINDOWS:
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "Flaux", "cache")
+    return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "flaux")
 
 
 def cached_build(c_code):
     """Build into a cache so running the same program again is instant."""
-    cache = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "flaux")
+    cache = cache_dir()
     os.makedirs(cache, exist_ok=True)
     digest = hashlib.sha256((c_code + " ".join(CFLAGS)).encode()).hexdigest()[:20]
-    exe = os.path.join(cache, f"prog-{digest}")
+    exe = os.path.join(cache, f"prog-{digest}{EXE}")
     if not os.path.exists(exe):
-        partial = f"{exe}.{os.getpid()}.tmp"
+        partial = os.path.join(cache, f"partial-{digest}-{os.getpid()}{EXE}")
         compile_c(c_code, partial)
-        os.replace(partial, exe)
+        try:
+            os.replace(partial, exe)
+        except OSError:  # another copy is running and finished first: use that one
+            if not os.path.exists(exe):
+                raise
     return exe
 
 
@@ -125,9 +172,14 @@ def cmd_run(args):
 
 
 def cmd_build(args):
-    out = args.output or os.path.splitext(os.path.basename(args.file))[0]
-    compile_c(to_c(args.file), out)
-    print(f"Made {out}. Run it with: ./{out}" if os.sep not in out else f"Made {out}.")
+    out = args.output or os.path.splitext(os.path.basename(args.file))[0] + EXE
+    c_code = to_c(args.file)
+    compile_c(c_code, out)
+    if WINDOWS:
+        extra = " Share it together with SDL2.dll, which is next to it." if "FX_USES_GRAPHICS" in c_code else ""
+        print(f"Made {out}. Double-click it to run it.{extra}")
+    else:
+        print(f"Made {out}. Run it with: ./{out}" if os.sep not in out else f"Made {out}.")
 
 
 def cmd_check(args):
@@ -142,6 +194,11 @@ def cmd_c(args):
             fh.write(code)
     else:
         sys.stdout.write(code)
+
+
+def cmd_studio(args):
+    from .studio import server
+    server.main(args.file, port=args.port, show=not args.no_window)
 
 
 def main(argv=None):
@@ -172,10 +229,20 @@ def main(argv=None):
 
     # Shortcut: `flaux game.flx` means `flaux run game.flx`.
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and not argv[0].startswith("-") and argv[0] not in ("run", "build", "check", "c"):
+    if argv and not argv[0].startswith("-") and argv[0] not in ("run", "build", "check", "c", "studio"):
         argv.insert(0, "run")
+    p = sub.add_parser("studio", help="open Flaux Studio, the beginner code editor")
+    p.add_argument("file", nargs="?")
+    p.add_argument("--port", type=int, default=0, help=argparse.SUPPRESS)
+    p.add_argument("--no-window", action="store_true", help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_studio)
+
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
         sys.exit(0)
-    args.func(args)
+    try:
+        args.func(args)
+    except CliError as e:
+        print(e, file=sys.stderr)
+        sys.exit(1)
