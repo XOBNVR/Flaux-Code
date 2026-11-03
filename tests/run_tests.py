@@ -9,7 +9,8 @@ tests/programs/NAME.flx   is run, and its output must match NAME.out exactly.
 examples/**/*.flx         must compile (they're used in the README).
 tests/graphics/NAME.flx   graphics programs, run without a real screen. Header
                           lines: `# frames: N` (stop after N frames), `# hold: keys`
-                          (pretend these keys are held), `# pixel: x y #rrggbb`
+                          (pretend these keys are held), `# mouse: x,y` (pretend
+                          the mouse is there in the real window), `# pixel: x y #rrggbb`
                           (that pixel of the last frame must be this colour), or
                           `# expect: ...` for programs that must fail.
                           Skipped if SDL2 isn't installed.
@@ -94,6 +95,13 @@ def studio_checks():
         saved = studio.save("say 1\n", name="My Game")
         if not os.path.isfile(os.path.join(home, "My_Game.flx")) or saved["name"] != "My_Game.flx":
             problems.append(f"save went wrong: {saved}")
+        # Export: a zip with the built program and a file that starts it
+        import zipfile
+        r = studio.export('say "hi"\n', None, show=False)
+        names = zipfile.ZipFile(r["file"]).namelist() if r.get("ok") else []
+        launcher = "game/Play game.bat" if os.name == "nt" else "game/play.sh"
+        if f"game/game{EXE}" not in names or launcher not in names:
+            problems.append(f"export went wrong: {r} {names}")
     return problems
 
 
@@ -144,7 +152,8 @@ def main():
             shot = os.path.join(tmp, os.path.basename(path)[:-4] + ".bmp")
             env = {"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "FLAUX_FAST": "1",
                    "FLAUX_FRAMES": header.get("frames", ["1"])[0], "FLAUX_SCREENSHOT": shot,
-                   "FLAUX_HOLD_KEYS": ",".join(header.get("hold", []))}
+                   "FLAUX_HOLD_KEYS": ",".join(header.get("hold", [])),
+                   "FLAUX_MOUSE": header.get("mouse", [""])[0]}
             code, out, err = build_and_run(path, "", tmp, env)
             if "expect" in header:
                 missing = [e for e in header["expect"] if e not in err]

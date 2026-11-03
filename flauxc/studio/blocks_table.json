@@ -71,6 +71,7 @@
     {"name": "text_width", "args": ["any", "num"], "label": "width of text %1 at size %2", "kind": "value", "category": "Drawing", "defaults": ["GAME OVER", "5"]},
     {"name": "text_width", "args": ["any"], "label": "width of text %1", "kind": "value", "category": "Drawing", "toolbox": false},
     {"name": "rgb", "args": ["num", "num", "num"], "label": "colour red %1 green %2 blue %3", "kind": "value", "category": "Drawing", "defaults": ["255", "136", "0"]},
+    {"name": "fullscreen", "args": [], "label": "make the window fill the screen", "kind": "statement", "category": "Drawing"},
     {"name": "screenshot", "args": ["text"], "label": "save a screenshot called %1", "kind": "statement", "category": "Drawing", "defaults": ["picture.bmp"], "toolbox": false},
 
     {"name": "key_down", "args": ["key"], "label": "key %1 is held down", "kind": "value", "category": "Keys & Mouse", "defaults": ["left"]},

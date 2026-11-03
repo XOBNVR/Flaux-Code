@@ -7,6 +7,15 @@
  *   FLAUX_FAST=1          don't wait between frames (run as fast as possible)
  *   FLAUX_SCREENSHOT=f    save the last frame to f (a .bmp file) when stopping
  *   FLAUX_HOLD_KEYS=a,b   pretend these keys are held down the whole time
+ *   FLAUX_MOUSE=x,y       pretend the mouse is at x, y in the real window
+ *                         (window pixels, before fullscreen scaling)
+ *
+ * Fullscreen: everything is drawn on a canvas texture the size of window(...).
+ * show() copies it to the real window, scaled to fit and letterboxed with black
+ * bars, so the program keeps its own coordinates whatever the window's size.
+ * F11 or Alt+Enter switch fullscreen on and off (they're kept for that, so the
+ * program doesn't see F11, or Enter while Alt is held), and fullscreen() asks
+ * for it. Mouse positions are turned back into canvas pixels.
  * =================================================================== */
 #define FX_USES_GRAPHICS 1
 #define SDL_MAIN_HANDLED
@@ -30,6 +39,9 @@
 static SDL_Window *fx_win;
 static SDL_Renderer *fx_ren;
 static SDL_Texture *fx_font_tex;
+static SDL_Texture *fx_canvas;     /* what the program draws on (NULL: draws on the window itself) */
+static SDL_Surface *fx_canvas_copy;/* the canvas, saved when fullscreen was last switched */
+static bool fx_full;               /* fullscreen now */
 static int fx_win_w, fx_win_h;
 static bool fx_dirty;              /* something drawn since the last show() */
 static uint8_t fx_keys_now[SDL_NUM_SCANCODES], fx_keys_prev[SDL_NUM_SCANCODES];
@@ -163,6 +175,132 @@ static bool fx_key_pressed(fx_text name, int line) {
     return false;
 }
 
+/* ------------------------------------------------------- fullscreen */
+
+/* Where a w-by-h picture goes in an out_w-by-out_h space: as big as fits,
+   same shape, in the middle (the rest is black bars). */
+static SDL_Rect fx_fit(int out_w, int out_h, int w, int h) {
+    SDL_Rect r = { 0, 0, out_w, out_h };
+    if (out_w <= 0 || out_h <= 0 || w <= 0 || h <= 0) return r;
+    if ((int64_t)out_w * h <= (int64_t)out_h * w) {      /* bars at the top and bottom */
+        r.h = (int)((int64_t)out_w * h / w);
+        r.y = (out_h - r.h) / 2;
+    } else {                                             /* bars at the sides */
+        r.w = (int)((int64_t)out_h * w / h);
+        r.x = (out_w - r.w) / 2;
+    }
+    if (r.w < 1) r.w = 1;
+    if (r.h < 1) r.h = 1;
+    return r;
+}
+
+/* The part of the real window the canvas is shown in, in renderer pixels. */
+static SDL_Rect fx_view(void) {
+    int ow = fx_win_w, oh = fx_win_h;
+    if (fx_ren) SDL_GetRendererOutputSize(fx_ren, &ow, &oh);
+    return fx_fit(ow, oh, fx_win_w, fx_win_h);
+}
+
+/* A mouse position in the real window -> canvas pixels, kept inside the
+   canvas (so the black bars give the nearest edge, never a position off it). */
+static void fx_window_to_canvas(int wx, int wy, int *cx, int *cy) {
+    int ww = fx_win_w, wh = fx_win_h, ow = fx_win_w, oh = fx_win_h;
+    if (fx_win) SDL_GetWindowSize(fx_win, &ww, &wh);
+    if (fx_ren) SDL_GetRendererOutputSize(fx_ren, &ow, &oh);
+    double px = ww > 0 ? (double)wx * ow / ww : wx, py = wh > 0 ? (double)wy * oh / wh : wy;
+    SDL_Rect v = fx_fit(ow, oh, fx_win_w, fx_win_h);
+    int x = (int)floor((px - v.x) * fx_win_w / v.w), y = (int)floor((py - v.y) * fx_win_h / v.h);
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > fx_win_w - 1) x = fx_win_w - 1;
+    if (y > fx_win_h - 1) y = fx_win_h - 1;
+    *cx = x;
+    *cy = y;
+}
+
+/* Where the mouse is, in canvas pixels. Gives the mouse buttons. */
+static Uint32 fx_read_mouse(void) {
+    int wx = 0, wy = 0;
+    Uint32 buttons = SDL_GetMouseState(&wx, &wy);
+    const char *fake = getenv("FLAUX_MOUSE"); /* for tests */
+    if (fake && *fake) sscanf(fake, "%d,%d", &wx, &wy);
+    fx_window_to_canvas(wx, wy, &fx_mouse_xv, &fx_mouse_yv);
+    return buttons;
+}
+
+/* Put the canvas on the screen. */
+static void fx_present(void) {
+    if (!fx_canvas) { SDL_RenderPresent(fx_ren); return; }
+    SDL_Rect v = fx_view();
+#if SDL_VERSION_ATLEAST(2, 0, 12)
+    /* a whole number of times bigger: sharp pixels; otherwise smooth, so pixels don't come out uneven */
+    bool whole = v.w % fx_win_w == 0 && v.h % fx_win_h == 0;
+    SDL_SetTextureScaleMode(fx_canvas, whole ? SDL_ScaleModeNearest : SDL_ScaleModeLinear);
+#endif
+    Uint8 r, g, b, a;
+    SDL_GetRenderDrawColor(fx_ren, &r, &g, &b, &a);
+    SDL_SetRenderTarget(fx_ren, NULL);
+    SDL_SetRenderDrawColor(fx_ren, 0, 0, 0, 255);
+    SDL_RenderClear(fx_ren);
+    SDL_RenderCopy(fx_ren, fx_canvas, NULL, &v);
+    SDL_RenderPresent(fx_ren);
+    SDL_SetRenderTarget(fx_ren, fx_canvas);
+    SDL_SetRenderDrawColor(fx_ren, r, g, b, a);
+}
+
+/* Put back the canvas saved at the last switch (some computers lose it then). */
+static void fx_restore_canvas(void) {
+    if (!fx_canvas || !fx_canvas_copy) return;
+    SDL_Texture *t = SDL_CreateTextureFromSurface(fx_ren, fx_canvas_copy);
+    if (!t) return;
+    SDL_SetTextureBlendMode(t, SDL_BLENDMODE_NONE);
+    SDL_SetRenderTarget(fx_ren, fx_canvas);
+    SDL_RenderCopy(fx_ren, t, NULL, NULL);
+    SDL_DestroyTexture(t);
+}
+
+static void fx_set_fullscreen(bool on) {
+    if (!fx_win || on == fx_full) return;
+    if (fx_canvas) {
+        if (!fx_canvas_copy)
+            fx_canvas_copy = SDL_CreateRGBSurfaceWithFormat(0, fx_win_w, fx_win_h, 32, SDL_PIXELFORMAT_ARGB8888);
+        if (fx_canvas_copy && SDL_RenderReadPixels(fx_ren, NULL, SDL_PIXELFORMAT_ARGB8888,
+                                                   fx_canvas_copy->pixels, fx_canvas_copy->pitch) != 0) {
+            SDL_FreeSurface(fx_canvas_copy);
+            fx_canvas_copy = NULL;
+        }
+    } else if (on) {
+        SDL_RenderSetLogicalSize(fx_ren, fx_win_w, fx_win_h); /* no canvas: let SDL scale the drawing */
+    }
+    if (SDL_SetWindowFullscreen(fx_win, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) != 0) return;
+    fx_full = on;
+    if (!on) SDL_SetWindowSize(fx_win, fx_win_w, fx_win_h);
+    fx_restore_canvas();
+    fx_present();
+    SDL_PumpEvents();
+    fx_read_mouse();    /* the same spot on the screen is somewhere else on the canvas now */
+}
+
+/* Handle one event from the window. Gives true when the window was closed. */
+static bool fx_handle_event(const SDL_Event *ev) {
+    if (ev->type == SDL_QUIT) return true;
+    if (ev->type == SDL_KEYDOWN && !ev->key.repeat &&
+        (ev->key.keysym.scancode == SDL_SCANCODE_F11 ||
+         ((ev->key.keysym.scancode == SDL_SCANCODE_RETURN || ev->key.keysym.scancode == SDL_SCANCODE_KP_ENTER) &&
+          (ev->key.keysym.mod & KMOD_ALT))))
+        fx_set_fullscreen(!fx_full);
+    if (ev->type == SDL_RENDER_TARGETS_RESET) { fx_restore_canvas(); fx_present(); }
+    if (ev->type == SDL_WINDOWEVENT &&
+        (ev->window.event == SDL_WINDOWEVENT_EXPOSED || ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED))
+        fx_present();
+    return false;
+}
+
+static void fx_g_fullscreen(int line) {
+    fx_need_window(line);
+    fx_set_fullscreen(true);
+}
+
 static void fx_read_input(void) {
     memcpy(fx_keys_prev, fx_keys_now, sizeof fx_keys_now);
     int count = 0;
@@ -179,9 +317,12 @@ static void fx_read_input(void) {
             for (int i = 0; i < n; i++) fx_keys_now[sc[i]] = 1;
         }
     }
+    /* F11 and Alt+Enter switch fullscreen (see fx_handle_event), so the program doesn't get them */
+    fx_keys_now[SDL_SCANCODE_F11] = 0;
+    if (fx_keys_now[SDL_SCANCODE_LALT] || fx_keys_now[SDL_SCANCODE_RALT])
+        fx_keys_now[SDL_SCANCODE_RETURN] = fx_keys_now[SDL_SCANCODE_KP_ENTER] = 0;
     fx_mouse_prev = fx_mouse_now;
-    Uint32 buttons = SDL_GetMouseState(&fx_mouse_xv, &fx_mouse_yv);
-    fx_mouse_now = (buttons & SDL_BUTTON_LMASK) != 0;
+    fx_mouse_now = (fx_read_mouse() & SDL_BUTTON_LMASK) != 0;
 }
 
 static int64_t fx_mouse_x(void) { return fx_mouse_xv; }
@@ -228,6 +369,14 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
     SDL_SetRenderDrawBlendMode(fx_ren, SDL_BLENDMODE_BLEND);
     fx_win_w = (int)w;
     fx_win_h = (int)h;
+    /* the canvas the program draws on (see "Fullscreen" at the top) */
+    if (SDL_RenderTargetSupported(fx_ren)) {
+        fx_canvas = SDL_CreateTexture(fx_ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, (int)w, (int)h);
+        if (fx_canvas && SDL_SetRenderTarget(fx_ren, fx_canvas) != 0) {
+            SDL_DestroyTexture(fx_canvas);
+            fx_canvas = NULL;
+        }
+    }
 
     /* the font, as white letters on a see-through background */
     SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, 95 * 6, 8, 32, SDL_PIXELFORMAT_RGBA8888);
@@ -250,6 +399,7 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
 
     SDL_SetRenderDrawColor(fx_ren, 0, 0, 0, 255);
     SDL_RenderClear(fx_ren);
+    if (getenv("FLAUX_FULLSCREEN") && *getenv("FLAUX_FULLSCREEN")) fx_set_fullscreen(true); /* for tests */
     SDL_PumpEvents();
     fx_read_input();
     fx_next_frame = SDL_GetPerformanceCounter();
@@ -280,7 +430,7 @@ static void fx_g_show(int line) {
     fx_frames++;
     bool last = fx_frame_limit >= 0 && fx_frames >= fx_frame_limit;
     if (last && fx_shot_path) fx_g_screenshot((fx_text){ fx_shot_path, (int64_t)strlen(fx_shot_path) }, line);
-    SDL_RenderPresent(fx_ren);
+    fx_present();
     fx_dirty = false;
     if (last) {
         fx_g_close();
@@ -295,7 +445,7 @@ static void fx_g_show(int line) {
     }
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
-        if (ev.type == SDL_QUIT) { /* the window's close button */
+        if (fx_handle_event(&ev)) { /* the window's close button */
             fx_g_close();
             exit(0);
         }
@@ -308,11 +458,10 @@ static void fx_g_show(int line) {
 static void fx_g_wait_events(void) {
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
-        if (ev.type == SDL_QUIT) {
+        if (fx_handle_event(&ev)) {
             fx_g_close();
             exit(0);
         }
-        if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_EXPOSED) SDL_RenderPresent(fx_ren);
     }
 }
 
@@ -327,12 +476,10 @@ static void fx_g_finish(void) {
         fx_g_close();
         return;
     }
-    if (fx_dirty) SDL_RenderPresent(fx_ren);
+    if (fx_dirty) fx_present();
     SDL_Event ev;
-    while (SDL_WaitEvent(&ev)) {
-        if (ev.type == SDL_QUIT) break;
-        if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_EXPOSED) SDL_RenderPresent(fx_ren);
-    }
+    while (SDL_WaitEvent(&ev))
+        if (fx_handle_event(&ev)) break;
     fx_g_close();
 }
 

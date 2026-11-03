@@ -401,6 +401,31 @@ from the **top-left corner**: `x` goes right, `y` goes **down**. So the
 top-left corner is `0, 0` and the bottom-right of an 800 by 600 window is
 `800, 600`.
 
+### Fullscreen
+
+Any game can be played on the whole screen. The picture is made bigger to
+fit, keeping its shape (with black bars at the sides or top and bottom if
+the screen is a different shape), and **your program doesn't change**: the
+window is still 800 by 600 to it, and `mouse_x()` and `mouse_y()` still give
+places in those pixels.
+
+- **Windows app** (and `flaux run`): press **F11** (or **Alt+Enter**) to switch
+  fullscreen on and off. These keys are kept for that, so `key_down("f11")`
+  is never true, and neither is `"enter"` while Alt is held.
+- **Flaux Studio on the web**: click **&#9974; Fullscreen** under the game (or
+  double-click the game's name). **Esc** leaves fullscreen, so in a browser
+  the game doesn't get Esc while it's fullscreen. Pressing Stop, or a problem
+  in the program, also leaves it.
+- **From the program**: `fullscreen()` (after `window(...)`) switches to
+  fullscreen. The Windows app does it straight away. Browsers only allow
+  fullscreen right after a click, so on the web the Fullscreen button lights
+  up and the next click on the game goes fullscreen.
+
+```
+window(800, 600, "My Game")
+fullscreen()
+```
+
 ### Drawing
 
 | Function | Draws |
@@ -414,6 +439,7 @@ top-left corner is `0, 0` and the bottom-right of an 800 by 600 window is
 | `write(value, x, y, colour, size)` | text (or any value); size 2 if left out |
 | `text_width(value, size)` | how many pixels wide `write` would make it |
 | `screenshot("file.bmp")` | saves what's drawn so far as a picture |
+| `fullscreen()` | makes the window fill the screen (see [Fullscreen](#fullscreen)) |
 
 The colour can always be left out (shapes and text are white by default).
 

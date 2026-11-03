@@ -1,0 +1,22 @@
+# frames: 3
+# hold: f11
+# mouse: 512,384
+# pixel: 10 10 #e8303a
+# pixel: 200 100 #ffe135
+# pixel: 300 150 #0f1b4c
+# pixel: 5 195 #0f1b4c
+# Going fullscreen keeps what was drawn, the program keeps its own
+# coordinates (the mouse is turned into canvas pixels), and F11 is kept
+# for switching fullscreen, so the program doesn't see it.
+# (With the test screen, the 400x200 window becomes 1024x768.)
+window(400, 200)
+clear("navy")
+rect(0, 0, 50, 50, "red")
+fullscreen()
+repeat 3 times
+    rect(mouse_x() - 2, mouse_y() - 2, 4, 4, "yellow")
+    if key_down("f11")
+        rect(0, 190, 10, 10, "white")
+    end
+    show()
+end

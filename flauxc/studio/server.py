@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import webbrowser
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -310,6 +311,68 @@ class Studio:
         for run in self.runs.values():
             run.stop()
 
+    # ------------------------------------------------------------ export
+
+    def export(self, content, path=None, show=True):
+        """A .zip that runs the program without Flaux Studio, saved in the
+        programs folder: the built program (plus SDL2.dll on Windows for
+        games), the pictures it names, and a file that starts it
+        ("Play <name>.bat" on Windows, play.sh elsewhere)."""
+        name = os.path.basename(path) if path else "untitled.flx"
+        try:
+            c_code = compile_source(content, name, self.program_dir(path))
+        except FlauxError as e:
+            return {"ok": False, "error": e.to_dict(name, content)}
+        try:
+            exe = cli.cached_build(c_code)
+        except cli.CliError as e:
+            return {"ok": False, "error": {"message": str(e), "line": None, "text": str(e)}}
+        base = re.sub(r"[^A-Za-z0-9 _-]+", "", os.path.splitext(name)[0]).strip()
+        base = "game" if not base or base == "untitled" else base
+        graphics = "FX_USES_GRAPHICS" in c_code
+        target = os.path.join(self.home, base + ".zip")
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
+            def add(arc, data=None, file=None, executable=False):
+                info = zipfile.ZipInfo(f"{base}/{arc}", time.localtime()[:6])
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.create_system = 3                          # Unix, so the file mode counts
+                info.external_attr = (0o100755 if executable else 0o100644) << 16
+                if file:
+                    with open(file, "rb") as fh:
+                        data = fh.read()
+                z.writestr(info, data)
+            program = base + cli.EXE
+            add(program, file=exe, executable=True)
+            if cli.WINDOWS and graphics:
+                dll = os.path.join(cli.BUNDLED_SDL, "bin", "SDL2.dll")
+                if os.path.isfile(dll):
+                    add("SDL2.dll", file=dll)
+            pictures = set(re.findall(r'"([^"\n]+\.(?:png|jpe?g|bmp|gif))"', content, re.I))
+            for pic in sorted(pictures):
+                for folder in (self.program_dir(path), os.getcwd()):
+                    file = os.path.join(folder, pic)
+                    if os.path.isfile(file) and not os.path.isabs(pic) and ".." not in pic.replace("\\", "/").split("/"):
+                        add(pic.replace("\\", "/"), file=file)
+                        break
+            if cli.WINDOWS:
+                # a game keeps its window open; a program that only says things needs `pause` to be read
+                wait = "if errorlevel 1 pause" if graphics else "pause"
+                add(f"Play {base}.bat", f'@echo off\r\ncd /d "%~dp0"\r\n"{program}"\r\n{wait}\r\n')
+            else:
+                add("play.sh", f'#!/bin/sh\ncd "$(dirname "$0")"\n./"{program}"\n', executable=True)
+            how = f'double-click "Play {base}.bat"' if cli.WINDOWS else "run play.sh"
+            add("README.txt", (f"{base}\n{'=' * len(base)}\n\nMade with Flaux (https://github.com/XOBNVR/Flaux-Code).\n\n"
+                               f"To play, {how}.\n" +
+                               ("Keep SDL2.dll next to the program.\n" if cli.WINDOWS and graphics else "") +
+                               ("F11 (or Alt+Enter) switches fullscreen.\n" if graphics else "")
+                               ).replace("\n", "\r\n" if cli.WINDOWS else "\n"))
+        if show:
+            try:
+                self.show_folder()
+            except OSError:
+                pass
+        return {"ok": True, "name": base + ".zip", "file": target, "native": True}
+
     def blocks(self, content):
         """The program as blocks, for the block editor."""
         try:
@@ -429,6 +492,8 @@ def make_handler(studio):
                 return studio.show_folder(d.get("path"))
             if path == "/api/blocks":
                 return studio.blocks(d.get("content", ""))
+            if path == "/api/export":
+                return studio.export(d.get("content", ""), d.get("path"))
             if path == "/api/blockinfo":
                 return blocks.info()
             return None

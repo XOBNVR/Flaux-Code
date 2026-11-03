@@ -85,6 +85,8 @@ A few things are different in the browser:
   (in **Open**) to keep a copy on your computer, and **Open a .flx file from
   this computer** to bring one in.
 - **Games appear above the output.** Click the game so it gets the keys.
+  Click **&#9974; Fullscreen** under the game to play on the whole screen
+  (**Esc** leaves).
 - **Pictures:** click **Pictures** to add your own picture files.
 - **Speed:** programs run as JavaScript, which is fine for learning and
   games but much slower than the Windows app for heavy number-crunching.
@@ -108,6 +110,13 @@ Flaux Studio is where you write and run your programs. Open it from the
   bits of code you can add to your program with one click.
 - **Open** shows your programs, the lessons and the games.
   **Save** keeps your program in your **Documents\Flaux** folder.
+- **&#11015; Export** makes a `.zip` of your program that runs without Flaux
+  Studio, to share or keep. Unzip it and double-click the **Play** file
+  inside. In the Windows app the zip (in your **Documents\Flaux** folder)
+  holds your real program (`.exe`, plus `SDL2.dll` and its pictures for a
+  game); on the website it downloads a zip with your program as one web page,
+  `game.html`, that opens in the web browser (it works from your computer,
+  and you can put it on any website too).
 - **&#127769; Night** switches to dark colours. **A&minus;** and **A+**
   change the text size.
 
@@ -574,6 +583,12 @@ end
 
 Run it, and the arrow keys move the ball. Close the window to stop.
 
+**Fullscreen:** press **F11** in a game's window to fill the whole screen
+(press it again to go back). In Flaux Studio on the web, click
+**&#9974; Fullscreen** under the game. Your game doesn't need to change: it's
+made bigger to fit, and the mouse still gives places in your window's own
+pixels. To start a game fullscreen, put `fullscreen()` after `window(...)`.
+
 **Drawing:**
 
 | Write | Draws |
@@ -743,7 +758,7 @@ Built-in helpers: `ask`, `random`, `length`, `contains`, `text`, `number`,
 Graphics: `window`, `clear`, `rect`, `circle`, `triangle`, `line`, `dot`,
 `write`, `show`, `key_down`, `key_pressed`, `mouse_x`, `mouse_y`,
 `mouse_down`, `mouse_clicked`, `beep`, `text_width`, `screenshot`, `image`,
-`image_width`, `image_height`.
+`image_width`, `image_height`, `fullscreen`.
 Every one is explained in the [full guide](docs/LANGUAGE.md).
 
 ---
@@ -891,7 +906,7 @@ your .flx file → lexer → parser → type checker → C code → gcc/clang �
 | [`flauxc/cli.py`](flauxc/cli.py) | the `flaux` command |
 | [`flauxc/studio/`](flauxc/studio/) | Flaux Studio: a tiny local web server and the editor page |
 | [`flauxc/jsgen.py`](flauxc/jsgen.py) | the second backend: turns Flaux into JavaScript for the web version |
-| [`flauxc/web/`](flauxc/web/) | Flaux Studio on the web: the JavaScript runtime (`fx.js`), the page's helper (`web.js`), Python's side (`web_api.py`) and the site builder (`build.py`) |
+| [`flauxc/web/`](flauxc/web/) | Flaux Studio on the web: the JavaScript runtime (`fx.js`), the page's helper (`web.js`), Python's side (`web_api.py`), the page an exported program becomes (`player.html`) and the site builder (`build.py`) |
 | [`flauxc/studio/blocks.py`](flauxc/studio/blocks.py), [`blocks.js`](flauxc/studio/blocks.js) | the block editor: code to blocks, and blocks to code (built on [Blockly](https://developers.google.com/blockly)) |
 | [`installer/`](installer/) | the Windows installer (Inno Setup), `flaux.exe`, and its build scripts |
 | [`assets/`](assets/) | the Flaux icon, and the script that makes every size of it |

@@ -73,7 +73,7 @@ def build(out, pyodide):
         fh.write(page())
     for name in ("blocks.js", "icon.png"):
         shutil.copyfile(os.path.join(STUDIO, name), os.path.join(out, name))
-    for name in ("fx.js", "web.js"):
+    for name in ("fx.js", "web.js", "player.html"):
         shutil.copyfile(os.path.join(HERE, name), os.path.join(out, name))
     shutil.copytree(os.path.join(STUDIO, "blockly"), os.path.join(out, "blockly"), dirs_exist_ok=True)
     with open(os.path.join(out, "flaux-files.json"), "w", encoding="utf-8") as fh:

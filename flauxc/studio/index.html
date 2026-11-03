@@ -55,6 +55,8 @@ header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; backg
 #filename { color: var(--muted); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
              min-width: 0; flex: 0 1 auto; }
 header button, .brand { white-space: nowrap; flex: none; }
+/* not much room: the logo without its name */
+@media (max-width: 1440px) { .brand-name { display: none; } .brand { margin-right: 2px; } }
 #filename b { color: var(--text); }
 .spacer { flex: 1; }
 .run { background: var(--run); border-color: var(--run); color: #fff; font-weight: 700; padding: 8px 22px;
@@ -179,16 +181,28 @@ html.web .native-only { display: none !important; }
 #game-canvas { max-width: 100%; max-height: 52vh; image-rendering: pixelated; background: #000; border-radius: 6px;
                outline: none; box-shadow: 0 2px 10px var(--shadow); }
 #game-canvas:focus { box-shadow: 0 0 0 3px var(--accent-2); }
+#game-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+#btn-fullscreen { font-size: 13px; padding: 4px 10px; }
+#btn-fullscreen.wants { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-2); }
+/* fullscreen: the canvas as big as fits, the same shape, with black bars (web.js sets its size) */
+#game-screen { display: flex; justify-content: center; max-width: 100%; }
+#game-screen:fullscreen, #game-screen.fake-full { background: #000; align-items: center; width: 100vw; height: 100vh; }
+#game-screen.fake-full { position: fixed; inset: 0; z-index: 1000; }
+#game-screen:fullscreen #game-canvas, #game-screen.fake-full #game-canvas {
+  max-width: none; max-height: none; border-radius: 0; box-shadow: none; }
+#game-exit { display: none; position: absolute; top: 10px; right: 10px; z-index: 1; opacity: .75; }
+#game-screen.fake-full #game-exit { display: inline-block; }
 a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
             padding: 7px 12px; white-space: nowrap; align-items: center; }
 </style>
 </head>
 <body>
 <header>
-  <div class="brand"><img class="logo" src="icon.png" alt="">Flaux Studio</div>
+  <div class="brand"><img class="logo" src="icon.png" alt="Flaux Studio"><span class="brand-name">Flaux Studio</span></div>
   <button id="btn-new" title="New program (Ctrl+N)">New</button>
   <button id="btn-open" title="Open a program (Ctrl+O)">Open</button>
   <button id="btn-save" title="Save (Ctrl+S)">Save</button>
+  <button id="btn-export" title="Make a .zip of your program that runs without Flaux Studio (double-click the .bat inside)">&#11015; Export</button>
   <div class="mode" role="group" aria-label="Write with code or blocks">
     <button id="mode-code" class="active" title="Write your program as text">&#9998; Code</button>
     <button id="mode-blocks" title="Build your program from blocks">&#9638; Blocks</button>
@@ -246,8 +260,14 @@ a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--l
     </nav>
     <div id="output-panel" class="panel">
       <div id="game" hidden>
-        <canvas id="game-canvas" tabindex="0" width="800" height="600"></canvas>
-        <div id="game-title"></div>
+        <div id="game-screen">
+          <canvas id="game-canvas" tabindex="0" width="800" height="600"></canvas>
+          <button id="game-exit" title="Leave fullscreen">&#10005;</button>
+        </div>
+        <div id="game-bar">
+          <div id="game-title" title="Double-click to switch fullscreen"></div>
+          <button id="btn-fullscreen" title="Play the game on the whole screen (Esc leaves)">&#9974; Fullscreen</button>
+        </div>
       </div>
       <pre id="console"></pre>
       <form id="input-row" hidden>
@@ -314,7 +334,7 @@ const KEYWORDS = new Set(("set to add subtract from say if then else end repeat 
 const TIME_UNITS = new Set("second seconds minute minutes hour hours day days".split(" "));   // after `wait`
 const BUILTINS = new Set(("sqrt sin cos tan log abs floor ceil round min max random text number whole ask " +
   "is_number clock length contains uppercase lowercase distance rgb window show clear rect circle line " +
-  "triangle dot write key_down key_pressed mouse_x mouse_y mouse_down mouse_clicked beep screenshot " +
+  "triangle dot write key_down key_pressed mouse_x mouse_y mouse_down mouse_clicked beep screenshot fullscreen " +
   "text_width image image_width image_height").split(" "));
 const BLOCK_START = /^\s*(if|else|repeat|function)\b/;
 
@@ -714,6 +734,28 @@ function finish(exit) {
   status(exit === 0 ? "Finished" : "Stopped", exit === 0 ? "good" : "bad");
 }
 
+// Export: a .zip that runs the program without Flaux Studio. The web version
+// makes a web page (game.html) and downloads the zip; the desktop version
+// builds the real program and saves the zip in your programs folder.
+async function exportProgram() {
+  if (state.mode === "blocks" && refreshFromBlocks().problems.length) return;
+  status("Making the export...");
+  let r;
+  try { r = await api("/api/export", { content: code.value, path: state.path }); }
+  catch (err) { return status("Export didn't work: " + err.message, "bad"); }
+  if (!r.ok) {
+    if (r.error) showProblem(r.error, true);
+    return status(r.error ? "Fix the problem in your program first, then export it." : (r.message || "Export didn't work."), "bad");
+  }
+  if (r.native) {
+    print(`\nExported ${r.name}, saved in your programs folder:\n  ${r.file}\n` +
+          "Unzip it anywhere and double-click the Play file inside to run your program.\n", "note");
+    status(`Exported ${r.name}`, "good");
+  } else {
+    status(`Downloaded ${r.name}. Unzip it and double-click the Play file (or game.html) to play.`, "good");
+  }
+}
+
 async function stop() {
   if (!state.run) return;
   const id = state.run;
@@ -992,6 +1034,7 @@ $("btn-stop").addEventListener("click", stop);
 $("btn-new").addEventListener("click", newFile);
 $("btn-open").addEventListener("click", showOpen);
 $("btn-save").addEventListener("click", () => save());
+$("btn-export").addEventListener("click", exportProgram);
 
 document.addEventListener("keydown", (e) => {
   const ctrl = e.ctrlKey || e.metaKey;
