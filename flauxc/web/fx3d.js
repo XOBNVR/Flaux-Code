@@ -203,8 +203,10 @@
   // ------------------------------------------------------------- install
   function install(fx, b, io, h, glsl, shaders) {
     const fail = fx.fail;
-    let gl = null, win = null, W = 0, H = 0, dirty = false, frames = 0, startTime = 0;
-    let samples = 0, msaaFbo, sceneFbo, sceneTex, shadowFbo, shadowTex, instVbo, flatVao, flatVbo, emptyVao;
+    // W, H: the program's window(w, h) size. CW, CH: how many pixels it's drawn at (more in
+    // fullscreen and on sharp screens: the page asks with win.resize, like for 2D in fx.js).
+    let gl = null, win = null, W = 0, H = 0, CW = 0, CH = 0, dirty = false, frames = 0, startTime = 0;
+    let samples = 0, msaaFbo, msaaBufs = [], sceneFbo, sceneTex, shadowFbo, shadowTex, instVbo, flatVao, flatVbo, emptyVao;
     let whiteTex, fontTex, sampPixel, sampSmooth, sampBlocky, sampShadow, sampScene;
     let sceneProg, shadowProg, skyProg, flatProg;
     const surfaceProgs = [], effectProgs = [], meshes = [];
@@ -567,13 +569,14 @@
     let shownEffect = -1, shownVals = new Float32Array(8), shownTime = 0;
     function present() {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, W, H);
+      gl.viewport(0, 0, CW, CH);
       if (shownEffect >= 0) {
         const p = effectProgram(shownEffect);
         gl.disable(gl.DEPTH_TEST);
         gl.disable(gl.BLEND);
         gl.useProgram(p);
         gl.uniform2f(gl.getUniformLocation(p, "u_size"), W, H);
+        gl.uniform4f(gl.getUniformLocation(p, "u_view"), 0, 0, CW, CH);   // (effects see the program's pixels)
         gl.uniform1f(gl.getUniformLocation(p, "u_time"), shownTime);
         gl.uniform1fv(gl.getUniformLocation(p, "u_vars"), shownVals);
         gl.activeTexture(gl.TEXTURE0);
@@ -584,9 +587,63 @@
       } else {
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, sceneFbo);
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-        gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+        gl.blitFramebuffer(0, 0, CW, CH, 0, 0, CW, CH, gl.COLOR_BUFFER_BIT, gl.NEAREST);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       }
+    }
+    // The pictures each frame is drawn into, CW by CH: smooth-edged (multisampled), then plain.
+    function fbo(colorTex, colorRb, depthRb, depthTex) {
+      const f = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      if (colorTex) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, colorTex, 0);
+      if (colorRb) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, colorRb);
+      if (depthRb) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthRb);
+      if (depthTex) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthTex, 0);
+      return f;
+    }
+    function makeTargets(w, h) {
+      const makeMsaa = (n) => {
+        const c = gl.createRenderbuffer();
+        gl.bindRenderbuffer(gl.RENDERBUFFER, c);
+        gl.renderbufferStorageMultisample(gl.RENDERBUFFER, n, gl.RGBA8, w, h);
+        const d = gl.createRenderbuffer();
+        gl.bindRenderbuffer(gl.RENDERBUFFER, d);
+        gl.renderbufferStorageMultisample(gl.RENDERBUFFER, n, gl.DEPTH_COMPONENT24, w, h);
+        msaaBufs = [c, d];
+        return fbo(null, c, d, null);
+      };
+      msaaFbo = makeMsaa(samples);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        samples = 0;     // no smooth edges here
+        gl.deleteFramebuffer(msaaFbo); msaaBufs.forEach((b) => gl.deleteRenderbuffer(b));
+        msaaFbo = makeMsaa(0);
+      }
+      sceneTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      sceneFbo = fbo(sceneTex, null, null, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      CW = w; CH = h;
+    }
+    // The page shows the game bigger or smaller (fullscreen, a sharp screen): draw at that many
+    // pixels from now on. The last frame is kept, scaled, so a finished picture still shows.
+    function resize(width, height) {
+      const most = Math.min(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE), gl.getParameter(gl.MAX_TEXTURE_SIZE));
+      width = Math.max(1, Math.min(most, Math.round(width)));
+      height = Math.max(1, Math.min(most, Math.round(height)));
+      if (width === CW && height === CH) return;
+      const old = { fbo: sceneFbo, tex: sceneTex, msaa: msaaFbo, bufs: msaaBufs, w: CW, h: CH };
+      makeTargets(width, height);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, old.fbo);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, sceneFbo);
+      gl.blitFramebuffer(0, 0, old.w, old.h, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(old.fbo); gl.deleteTexture(old.tex);
+      gl.deleteFramebuffer(old.msaa); old.bufs.forEach((b) => gl.deleteRenderbuffer(b));
+      win.screen.width = width; win.screen.height = height;
+      present();
     }
     function renderFrame() {
       resolveBatches();
@@ -594,12 +651,12 @@
       uploadInstances();
       shadowPass(camEye, camTarget);
       gl.bindFramebuffer(gl.FRAMEBUFFER, msaaFbo);
-      gl.viewport(0, 0, W, H);
+      gl.viewport(0, 0, CW, CH);
       drawWorld(view, proj, camEye);
       drawFlat();
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, msaaFbo);
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, sceneFbo);
-      gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      gl.blitFramebuffer(0, 0, CW, CH, 0, 0, CW, CH, gl.COLOR_BUFFER_BIT, gl.NEAREST);
       shownEffect = effectId;
       shownVals = effectVals.slice();
       shownTime = seconds();
@@ -742,33 +799,9 @@
         gl.samplerParameteri(sampShadow, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
         gl.samplerParameteri(sampShadow, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
         sampScene = sampler(gl.LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE);
-        const fbo = (colorTex, colorRb, depthRb, depthTex) => {
-          const f = gl.createFramebuffer();
-          gl.bindFramebuffer(gl.FRAMEBUFFER, f);
-          if (colorTex) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, colorTex, 0);
-          if (colorRb) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, colorRb);
-          if (depthRb) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthRb);
-          if (depthTex) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depthTex, 0);
-          return f;
-        };
-        const makeMsaa = (n) => {
-          const c = gl.createRenderbuffer();
-          gl.bindRenderbuffer(gl.RENDERBUFFER, c);
-          gl.renderbufferStorageMultisample(gl.RENDERBUFFER, n, gl.RGBA8, W, H);
-          const d = gl.createRenderbuffer();
-          gl.bindRenderbuffer(gl.RENDERBUFFER, d);
-          gl.renderbufferStorageMultisample(gl.RENDERBUFFER, n, gl.DEPTH_COMPONENT24, W, H);
-          return fbo(null, c, d, null);
-        };
         samples = Math.min(4, gl.getParameter(gl.MAX_SAMPLES) || 0);
-        msaaFbo = makeMsaa(samples);
-        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) { samples = 0; msaaFbo = makeMsaa(0); }
-        sceneTex = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, sceneTex);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        sceneFbo = fbo(sceneTex, null, null, null);
+        makeTargets(W, H);
+        win.resize = resize;
         shadowTex = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, shadowTex);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, SHADOW_SIZE, SHADOW_SIZE, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
@@ -879,6 +912,11 @@
       image_width: async ([name], line) => { needWindow(line); if (texture(name, line) === undefined) await waitForLoading(); return texture(name, line).w; },
       image_height: async ([name], line) => { needWindow(line); if (texture(name, line) === undefined) await waitForLoading(); return texture(name, line).h; },
       screenshot: ([name], line) => { needWindow(line); if (io.screenshot) io.screenshot(fx.str(name), win.screen); },
+      // (the same as fx.js's, but this window is the 3D one)
+      fullscreen: (_, line) => { needWindow(line); if (io.fullscreen) io.fullscreen(); },
+      lock_mouse: (_, line) => { needWindow(line); if (io.lockMouse) io.lockMouse(true); },
+      unlock_mouse: () => { if (win && io.lockMouse) io.lockMouse(false); },
+      mouse_locked: () => !!(win && io.mouseLocked && io.mouseLocked()),
       fps: () => Math.round(fpsValue),
       seconds: () => seconds(),
       // 3D

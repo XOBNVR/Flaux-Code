@@ -1,0 +1,3 @@
+# expect: You can't wait for a negative amount of time.
+# expect: wait 2s
+wait -2s

@@ -4,13 +4,50 @@
  *
  * Programs that use 3D or shaders get the OpenGL runtime (gl.h) instead of
  * the 2D drawing part at the end of this file. Everything else here (colours,
- * keys, the mouse, game controllers, sound and reading pictures) is shared.
+ * keys, the mouse and mouse look, game controllers, window events, `wait`,
+ * sound and reading pictures) is shared. Fullscreen and sharp screens work
+ * the same way for both (as below), but each draws its own way: the 2D part
+ * here with a canvas texture, gl.h at the size the picture is shown at.
  *
  * For automated tests, these environment variables help:
  *   FLAUX_FRAMES=N        stop after N frames
  *   FLAUX_FAST=1          don't wait between frames (run as fast as possible)
  *   FLAUX_SCREENSHOT=f    save the last frame to f (a .bmp file) when stopping
  *   FLAUX_HOLD_KEYS=a,b   pretend these keys are held down the whole time
+ *   FLAUX_MOUSE=x,y       pretend the mouse is at x, y in the real window
+ *                         (window pixels, before fullscreen scaling)
+ *   FLAUX_MOUSE_MOVE=dx,dy pretend the mouse moves this far every frame
+ *                         (screen pixels: what mouse_moved_x/y() give)
+ *   FLAUX_SCREEN=WxH      pretend the screen is W by H pixels: going fullscreen
+ *                         makes the window that big (the test screen is 1024x768)
+ *   FLAUX_SCREENSHOT_FULL=f  also save the last frame at the canvas's real size
+ *   FLAUX_NO_GEOMETRY=1   draw triangles in rows of pixels, as without SDL_RenderGeometry
+ *
+ * Fullscreen: everything is drawn on a canvas texture, which show() copies to
+ * the real window, letterboxed with black bars, so the program keeps its own
+ * coordinates whatever the window's size. The canvas has as many pixels as it's
+ * shown at (fx_cw by fx_ch): the size of window(...) in a normal window, more in
+ * fullscreen or on a sharp (HiDPI) screen. Then everything is drawn at that full
+ * resolution, fx_sx by fx_sy canvas pixels per program pixel: rects, dots, text
+ * and pictures on whole program pixels (sharp and blocky, edges on whole canvas
+ * pixels), triangles with SDL_RenderGeometry (SDL 2.0.18 and newer; otherwise
+ * rows of canvas pixels), circles and lines in rows of canvas pixels. In a
+ * normal window everything is drawn exactly as it always was. Switching
+ * fullscreen makes a new canvas and copies the old picture onto it, scaled.
+ * F11 or Alt+Enter switch fullscreen on and off (they're kept for that, so the
+ * program doesn't see F11, or Enter while Alt is held), and fullscreen() asks
+ * for it. Mouse positions are turned back into the program's pixels, and
+ * screenshot() saves the program's pixels (each the colour at its middle).
+ *
+ * Mouse look: lock_mouse() hides the pointer and uses SDL's relative mouse
+ * mode, so the mouse can move forever without stopping at the screen's edge.
+ * mouse_moved_x/y() add up every SDL_MOUSEMOTION's xrel/yrel between frames,
+ * locked or not, in window coordinates as SDL gives them (screen pixels). They
+ * are NOT scaled like mouse_x/y(): the same hand movement gives the same
+ * numbers in a window and fullscreen, so a game's turn speed feels the same.
+ * Esc lets go of the mouse (the
+ * program still sees Esc), and while the program wants it locked, a click on
+ * the window locks it again; unlock_mouse() lets go for good.
  * =================================================================== */
 #define FX_USES_GRAPHICS 1
 #define SDL_MAIN_HANDLED
@@ -34,11 +71,20 @@
 static SDL_Window *fx_win;
 static SDL_Renderer *fx_ren;
 static SDL_Texture *fx_font_tex;
+static SDL_Texture *fx_canvas;     /* what the program draws on (NULL: draws on the window itself) */
+static SDL_Surface *fx_canvas_copy;/* the canvas, saved when fullscreen was last switched */
+static bool fx_full;               /* fullscreen now */
+static int fx_cw, fx_ch;           /* the canvas's real size in pixels (see "Fullscreen" at the top) */
+static double fx_sx = 1, fx_sy = 1;/* canvas pixels per program pixel: 1 in a normal window */
+static bool fx_geometry = true;    /* SDL_RenderGeometry works (until it says it doesn't) */
 static int fx_win_w, fx_win_h;
 static bool fx_dirty;              /* something drawn since the last show() */
 static uint8_t fx_keys_now[SDL_NUM_SCANCODES], fx_keys_prev[SDL_NUM_SCANCODES];
 static bool fx_mouse_now, fx_mouse_prev;
 static int fx_mouse_xv, fx_mouse_yv;
+static double fx_move_x, fx_move_y;        /* mouse movement since the last frame, screen pixels */
+static int64_t fx_moved_xv, fx_moved_yv;   /* ... as the program sees it this frame */
+static bool fx_lock_wanted;                /* lock_mouse() was called (and not unlock_mouse()) */
 static uint64_t fx_next_frame;
 static int64_t fx_frames, fx_frame_limit = -1;
 static const char *fx_shot_path;
@@ -130,6 +176,21 @@ static int fx_px(double v) { /* a position on screen, rounded to the nearest pix
     if (v > 1e6) return 1000000;
     if (v < -1e6) return -1000000;
     return (int)lround(v);
+}
+
+/* Drawing at more than one canvas pixel per program pixel (fullscreen, a sharp screen). */
+static bool fx_hires(void) { return fx_cw != fx_win_w || fx_ch != fx_win_h; }
+
+/* The edge of whole program pixel x (or y) on the canvas. */
+static int fx_cx(int x) { return (int)lround(x * fx_sx); }
+static int fx_cy(int y) { return (int)lround(y * fx_sy); }
+
+/* Whole program pixels [x0, x1) by [y0, y1), with edges on whole canvas pixels: sharp, and
+   boxes side by side meet exactly. In a normal window it's just that rectangle. */
+static SDL_Rect fx_box(int x0, int y0, int x1, int y1) {
+    int a = fx_cx(x0), b = fx_cy(y0);
+    SDL_Rect r = { a, b, fx_cx(x1) - a, fx_cy(y1) - b };
+    return r;
 }
 
 /* ------------------------------------------------------------- keys */
@@ -278,6 +339,103 @@ static int fx_stick_side(fx_text side, int line) {
 }
 static double fx_stick_x(fx_text side, int line) { return fx_stick[fx_stick_side(side, line)][0]; }
 static double fx_stick_y(fx_text side, int line) { return fx_stick[fx_stick_side(side, line)][1]; }
+/* ------------------------------------------------------- fullscreen */
+
+/* (See "Fullscreen" at the top.) fx_out_w by fx_out_h: how many pixels the real window has
+   (more than its size on a sharp screen), measured by fx_measure() at each show(). */
+static int fx_out_w, fx_out_h;
+
+/* Where a w-by-h picture goes in an out_w-by-out_h space: as big as fits,
+   same shape, in the middle (the rest is black bars). */
+static SDL_Rect fx_fit(int out_w, int out_h, int w, int h) {
+    SDL_Rect r = { 0, 0, out_w, out_h };
+    if (out_w <= 0 || out_h <= 0 || w <= 0 || h <= 0) return r;
+    if ((int64_t)out_w * h <= (int64_t)out_h * w) {      /* bars at the top and bottom */
+        r.h = (int)((int64_t)out_w * h / w);
+        r.y = (out_h - r.h) / 2;
+    } else {                                             /* bars at the sides */
+        r.w = (int)((int64_t)out_h * w / h);
+        r.x = (out_w - r.w) / 2;
+    }
+    if (r.w < 1) r.w = 1;
+    if (r.h < 1) r.h = 1;
+    return r;
+}
+
+/* A mouse position in the real window -> canvas pixels, kept inside the
+   canvas (so the black bars give the nearest edge, never a position off it). */
+static void fx_window_to_canvas(int wx, int wy, int *cx, int *cy) {
+    int ww = fx_win_w, wh = fx_win_h, ow = fx_out_w, oh = fx_out_h;
+    if (fx_win) SDL_GetWindowSize(fx_win, &ww, &wh);
+    double px = ww > 0 ? (double)wx * ow / ww : wx, py = wh > 0 ? (double)wy * oh / wh : wy;
+    SDL_Rect v = fx_fit(ow, oh, fx_win_w, fx_win_h);
+    int x = (int)floor((px - v.x) * fx_win_w / v.w), y = (int)floor((py - v.y) * fx_win_h / v.h);
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > fx_win_w - 1) x = fx_win_w - 1;
+    if (y > fx_win_h - 1) y = fx_win_h - 1;
+    *cx = x;
+    *cy = y;
+}
+
+/* Where the mouse is, in canvas pixels. Gives the mouse buttons. */
+static Uint32 fx_read_mouse(void) {
+    int wx = 0, wy = 0;
+    Uint32 buttons = SDL_GetMouseState(&wx, &wy);
+    const char *fake = getenv("FLAUX_MOUSE"); /* for tests */
+    if (fake && *fake) sscanf(fake, "%d,%d", &wx, &wy);
+    fx_window_to_canvas(wx, wy, &fx_mouse_xv, &fx_mouse_yv);
+    return buttons;
+}
+
+/* Each way of drawing (2D here, 3D in gl.h) has its own: */
+static void fx_set_fullscreen(bool on);   /* switch fullscreen on or off */
+static void fx_redisplay(void);           /* show the last frame again (the window changed) */
+static void fx_targets_reset(void);       /* the graphics card lost what was drawn */
+
+/* ------------------------------------------------------- mouse look */
+
+static void fx_set_mouse_lock(bool on) {
+    if (!fx_win || on == (bool)SDL_GetRelativeMouseMode()) return;
+    SDL_SetRelativeMouseMode(on ? SDL_TRUE : SDL_FALSE);   /* fails quietly if this computer can't */
+}
+
+static void fx_g_lock_mouse(bool on, int line) {
+    if (on) fx_need_window(line);
+    fx_lock_wanted = on;
+    fx_set_mouse_lock(on);
+}
+
+static bool fx_mouse_locked(void) { return fx_win && SDL_GetRelativeMouseMode(); }
+
+/* Handle one event from the window. Gives true when the window was closed. */
+static bool fx_handle_event(const SDL_Event *ev) {
+    if (ev->type == SDL_QUIT) return true;
+    if (ev->type == SDL_MOUSEMOTION) {      /* as SDL gives it: not scaled to the canvas */
+        fx_move_x += ev->motion.xrel;
+        fx_move_y += ev->motion.yrel;
+    }
+    /* Esc lets go of a locked mouse; a click locks it again while the program wants that */
+    if (ev->type == SDL_KEYDOWN && !ev->key.repeat && ev->key.keysym.scancode == SDL_SCANCODE_ESCAPE)
+        fx_set_mouse_lock(false);
+    if (ev->type == SDL_MOUSEBUTTONDOWN && fx_lock_wanted) fx_set_mouse_lock(true);
+    if (ev->type == SDL_KEYDOWN && !ev->key.repeat &&
+        (ev->key.keysym.scancode == SDL_SCANCODE_F11 ||
+         ((ev->key.keysym.scancode == SDL_SCANCODE_RETURN || ev->key.keysym.scancode == SDL_SCANCODE_KP_ENTER) &&
+          (ev->key.keysym.mod & KMOD_ALT))))
+        fx_set_fullscreen(!fx_full);
+    if (ev->type == SDL_RENDER_TARGETS_RESET) fx_targets_reset();
+    if (ev->type == SDL_WINDOWEVENT &&
+        (ev->window.event == SDL_WINDOWEVENT_EXPOSED || ev->window.event == SDL_WINDOWEVENT_SIZE_CHANGED))
+        fx_redisplay();   /* (and the picture gets as many pixels as the window has now) */
+    if (ev->type == SDL_CONTROLLERDEVICEADDED) fx_pad_connect(ev->cdevice.which);
+    return false;
+}
+
+static void fx_g_fullscreen(int line) {
+    fx_need_window(line);
+    fx_set_fullscreen(true);
+}
 
 static void fx_read_input(void) {
     memcpy(fx_keys_prev, fx_keys_now, sizeof fx_keys_now);
@@ -295,9 +453,24 @@ static void fx_read_input(void) {
             for (int i = 0; i < n; i++) fx_keys_now[sc[i]] = 1;
         }
     }
+    /* F11 and Alt+Enter switch fullscreen (see fx_handle_event), so the program doesn't get them */
+    fx_keys_now[SDL_SCANCODE_F11] = 0;
+    if (fx_keys_now[SDL_SCANCODE_LALT] || fx_keys_now[SDL_SCANCODE_RALT])
+        fx_keys_now[SDL_SCANCODE_RETURN] = fx_keys_now[SDL_SCANCODE_KP_ENTER] = 0;
     fx_mouse_prev = fx_mouse_now;
-    Uint32 buttons = SDL_GetMouseState(&fx_mouse_xv, &fx_mouse_yv);
-    fx_mouse_now = (buttons & SDL_BUTTON_LMASK) != 0;
+    fx_mouse_now = (fx_read_mouse() & SDL_BUTTON_LMASK) != 0;
+    /* mouse movement: whole pixels this frame, the rest is kept for the next one */
+    const char *move = getenv("FLAUX_MOUSE_MOVE"); /* for tests */
+    if (move && *move) {
+        double dx = 0, dy = 0;
+        sscanf(move, "%lf,%lf", &dx, &dy);
+        fx_move_x += dx;
+        fx_move_y += dy;
+    }
+    fx_moved_xv = (int64_t)fx_move_x;
+    fx_moved_yv = (int64_t)fx_move_y;
+    fx_move_x -= (double)fx_moved_xv;
+    fx_move_y -= (double)fx_moved_yv;
     fx_read_pads();
 }
 
@@ -305,8 +478,12 @@ static int64_t fx_mouse_x(void) { return fx_mouse_xv; }
 static int64_t fx_mouse_y(void) { return fx_mouse_yv; }
 static bool fx_mouse_down(void) { return fx_mouse_now; }
 static bool fx_mouse_clicked(void) { return fx_mouse_now && !fx_mouse_prev; }
+static int64_t fx_mouse_moved_x(void) { return fx_moved_xv; }
+static int64_t fx_mouse_moved_y(void) { return fx_moved_yv; }
 
 /* ----------------------------------------------------------- window */
+
+static void fx_g_wait_events(void);
 
 /* Everything before the window itself: checks, and starting SDL. */
 static void fx_start_window(int64_t w, int64_t h, int line) {
@@ -337,14 +514,16 @@ static void fx_start_window(int64_t w, int64_t h, int line) {
 /* The window itself, with the Flaux logo as its icon. */
 static void fx_make_window(int64_t w, int64_t h, fx_text title, Uint32 flags, int line) {
     char *name = (char *)fx_text_make(title.p, title.n).p;
+    /* ALLOW_HIGHDPI: on sharp screens (like a Mac's) the window has more pixels than its size,
+       and the canvas gets them all (see "Fullscreen" at the top) */
     fx_win = SDL_CreateWindow(name, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                              (int)w, (int)h, SDL_WINDOW_SHOWN | flags);
+                              (int)w, (int)h, SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI | flags);
     if (!fx_win) fx_fail(line, NULL, "Flaux couldn't open a window: %s", SDL_GetError());
     SDL_Surface *icon = SDL_CreateRGBSurfaceWithFormatFrom((void *)fx_icon, FX_ICON_SIZE, FX_ICON_SIZE, 32,
                                                            FX_ICON_SIZE * 4, SDL_PIXELFORMAT_RGBA32);
     if (icon) { SDL_SetWindowIcon(fx_win, icon); SDL_FreeSurface(icon); }
-    fx_win_w = (int)w;
-    fx_win_h = (int)h;
+    fx_win_w = fx_cw = fx_out_w = (int)w;
+    fx_win_h = fx_ch = fx_out_h = (int)h;
     const char *frames = getenv("FLAUX_FRAMES");
     if (frames && *frames) fx_frame_limit = atoll(frames);
     fx_shot_path = getenv("FLAUX_SCREENSHOT");
@@ -352,6 +531,7 @@ static void fx_make_window(int64_t w, int64_t h, fx_text title, Uint32 flags, in
     fx_start_time = SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
     for (int i = 0; i < SDL_NumJoysticks(); i++)
         if (SDL_IsGameController(i)) fx_pad_connect(i);
+    fx_wait_events = fx_g_wait_events;   /* (see `wait` in runtime.h) */
 }
 
 /* Seconds since the window opened. In tests (FLAUX_FAST) it counts frames
@@ -398,13 +578,24 @@ static void fx_next_frame_wait(void) {
     }
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
-        if (ev.type == SDL_QUIT) { /* the window's close button */
+        if (fx_handle_event(&ev)) { /* the window's close button */
             fx_g_close();
             exit(0);
         }
-        if (ev.type == SDL_CONTROLLERDEVICEADDED) fx_pad_connect(ev.cdevice.which);
     }
     fx_read_input();
+}
+
+/* While the program waits (`wait 2s`): handle the window's events, so it
+ * doesn't go "Not responding" and its close button still ends the program. */
+static void fx_g_wait_events(void) {
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+        if (fx_handle_event(&ev)) {
+            fx_g_close();
+            exit(0);
+        }
+    }
 }
 
 /* ------------------------------------------------------------ pictures */
@@ -506,6 +697,137 @@ static void fx_use_color(fx_text color, int line) {
     fx_dirty = true;
 }
 
+/* ------------------------------------------- fullscreen and sharp screens */
+
+/* How many pixels the real window has (more than its size on a sharp screen), measured at
+   each show(). (Some renderers give the canvas's size while drawing on it, so not then.) */
+static void fx_measure(void) {
+    if (!fx_ren) return;
+    SDL_Texture *target = SDL_GetRenderTarget(fx_ren);
+    if (target) SDL_SetRenderTarget(fx_ren, NULL);
+    if (SDL_GetRendererOutputSize(fx_ren, &fx_out_w, &fx_out_h) != 0 || fx_out_w < 1 || fx_out_h < 1) {
+        fx_out_w = fx_win_w;
+        fx_out_h = fx_win_h;
+    }
+    if (target) SDL_SetRenderTarget(fx_ren, target);
+}
+
+/* The part of the real window the canvas is shown in, in renderer pixels. */
+static SDL_Rect fx_view(void) {
+    return fx_fit(fx_out_w, fx_out_h, fx_win_w, fx_win_h);
+}
+
+static void fx_sharp(SDL_Texture *t, bool sharp) { /* how a texture is scaled: sharp pixels, or smooth */
+#if SDL_VERSION_ATLEAST(2, 0, 12)
+    SDL_SetTextureScaleMode(t, sharp ? SDL_ScaleModeNearest : SDL_ScaleModeLinear);
+#else
+    (void)t; (void)sharp;
+#endif
+}
+
+/* Give the canvas as many pixels as it's shown at (fullscreen, a sharp screen), but never fewer
+   than the program's own window(...) size, keeping what's drawn on it (scaled). */
+static void fx_fit_canvas(void) {
+    if (!fx_canvas) return;
+    SDL_Rect v = fx_view();
+    int cw = v.w, ch = v.h;
+    SDL_RendererInfo info;
+    if (cw < fx_win_w || ch < fx_win_h ||
+        (SDL_GetRendererInfo(fx_ren, &info) == 0 && info.max_texture_width > 0 && info.max_texture_height > 0 &&
+         (cw > info.max_texture_width || ch > info.max_texture_height))) {
+        cw = fx_win_w;
+        ch = fx_win_h;
+    }
+    if (cw == fx_cw && ch == fx_ch) return;
+    SDL_Texture *t = SDL_CreateTexture(fx_ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, cw, ch);
+    if (!t) return;                     /* (not enough memory: keep drawing on the one there is) */
+    if (SDL_SetRenderTarget(fx_ren, t) != 0) {
+        SDL_DestroyTexture(t);
+        SDL_SetRenderTarget(fx_ren, fx_canvas);
+        return;
+    }
+    Uint8 r, g, b, a;
+    SDL_GetRenderDrawColor(fx_ren, &r, &g, &b, &a);
+    SDL_SetRenderDrawColor(fx_ren, 0, 0, 0, 255);
+    SDL_RenderClear(fx_ren);
+    /* the picture so far: sharp if it's a whole number of times bigger, otherwise smooth */
+    fx_sharp(fx_canvas, cw % fx_cw == 0 && ch % fx_ch == 0);
+    SDL_SetTextureBlendMode(fx_canvas, SDL_BLENDMODE_NONE);
+    SDL_RenderCopy(fx_ren, fx_canvas, NULL, NULL);
+    SDL_DestroyTexture(fx_canvas);
+    SDL_SetRenderDrawColor(fx_ren, r, g, b, a);
+    fx_canvas = t;
+    fx_cw = cw;
+    fx_ch = ch;
+    fx_sx = (double)cw / fx_win_w;
+    fx_sy = (double)ch / fx_win_h;
+}
+
+/* Put the canvas on the screen. */
+static void fx_present(void) {
+    fx_measure();
+    if (!fx_canvas) { SDL_RenderPresent(fx_ren); return; }
+    fx_fit_canvas();      /* (the window may have changed: moved to a sharper screen, say) */
+    SDL_Rect v = fx_view();
+    /* pixel for pixel (or a whole number of times bigger): sharp; otherwise smooth, so pixels don't come out uneven */
+    fx_sharp(fx_canvas, v.w % fx_cw == 0 && v.h % fx_ch == 0);
+    Uint8 r, g, b, a;
+    SDL_GetRenderDrawColor(fx_ren, &r, &g, &b, &a);
+    SDL_SetRenderTarget(fx_ren, NULL);
+    SDL_SetRenderDrawColor(fx_ren, 0, 0, 0, 255);
+    SDL_RenderClear(fx_ren);
+    SDL_RenderCopy(fx_ren, fx_canvas, NULL, &v);
+    SDL_RenderPresent(fx_ren);
+    SDL_SetRenderTarget(fx_ren, fx_canvas);
+    SDL_SetRenderDrawColor(fx_ren, r, g, b, a);
+}
+
+/* Put back the canvas saved at the last switch (some computers lose it then). */
+static void fx_restore_canvas(void) {
+    if (!fx_canvas || !fx_canvas_copy) return;
+    SDL_Texture *t = SDL_CreateTextureFromSurface(fx_ren, fx_canvas_copy);
+    if (!t) return;
+    SDL_SetTextureBlendMode(t, SDL_BLENDMODE_NONE);
+    SDL_SetRenderTarget(fx_ren, fx_canvas);
+    SDL_RenderCopy(fx_ren, t, NULL, NULL);
+    SDL_DestroyTexture(t);
+}
+
+static void fx_set_fullscreen(bool on) {
+    if (!fx_win || on == fx_full) return;
+    if (fx_canvas) {
+        if (fx_canvas_copy && (fx_canvas_copy->w != fx_cw || fx_canvas_copy->h != fx_ch)) {
+            SDL_FreeSurface(fx_canvas_copy);
+            fx_canvas_copy = NULL;
+        }
+        if (!fx_canvas_copy)
+            fx_canvas_copy = SDL_CreateRGBSurfaceWithFormat(0, fx_cw, fx_ch, 32, SDL_PIXELFORMAT_ARGB8888);
+        if (fx_canvas_copy && SDL_RenderReadPixels(fx_ren, NULL, SDL_PIXELFORMAT_ARGB8888,
+                                                   fx_canvas_copy->pixels, fx_canvas_copy->pitch) != 0) {
+            SDL_FreeSurface(fx_canvas_copy);
+            fx_canvas_copy = NULL;
+        }
+    } else if (on) {
+        SDL_RenderSetLogicalSize(fx_ren, fx_win_w, fx_win_h); /* no canvas: let SDL scale the drawing */
+    }
+    int sw = 0, sh = 0;
+    const char *screen = getenv("FLAUX_SCREEN"); /* for tests: a pretend screen of that size */
+    if (screen && sscanf(screen, "%dx%d", &sw, &sh) == 2 && sw > 0 && sh > 0)
+        SDL_SetWindowSize(fx_win, on ? sw : fx_win_w, on ? sh : fx_win_h);
+    else if (SDL_SetWindowFullscreen(fx_win, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) != 0)
+        return;
+    fx_full = on;
+    if (!on) SDL_SetWindowSize(fx_win, fx_win_w, fx_win_h);
+    fx_restore_canvas();
+    fx_present();         /* (this also gives the canvas the screen's resolution) */
+    SDL_PumpEvents();
+    fx_read_mouse();    /* the same spot on the screen is somewhere else on the canvas now */
+}
+
+
+static void fx_redisplay(void) { fx_present(); }
+static void fx_targets_reset(void) { fx_restore_canvas(); fx_present(); }
+
 static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
     fx_start_window(w, h, line);
     fx_make_window(w, h, title, 0, line);
@@ -513,6 +835,15 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
     if (!fx_ren) fx_ren = SDL_CreateRenderer(fx_win, -1, SDL_RENDERER_SOFTWARE);
     if (!fx_ren) fx_fail(line, NULL, "Flaux couldn't draw in the window: %s", SDL_GetError());
     SDL_SetRenderDrawBlendMode(fx_ren, SDL_BLENDMODE_BLEND);
+    /* the canvas the program draws on (see "Fullscreen" at the top) */
+    if (SDL_RenderTargetSupported(fx_ren)) {
+        fx_canvas = SDL_CreateTexture(fx_ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, (int)w, (int)h);
+        if (fx_canvas && SDL_SetRenderTarget(fx_ren, fx_canvas) != 0) {
+            SDL_DestroyTexture(fx_canvas);
+            fx_canvas = NULL;
+        }
+    }
+    if (!fx_canvas) SDL_RenderSetLogicalSize(fx_ren, fx_win_w, fx_win_h); /* (a sharp screen: SDL scales it) */
 
     /* the font, as white letters on a see-through background */
     SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, 95 * 6, 8, 32, SDL_PIXELFORMAT_RGBA8888);
@@ -528,21 +859,59 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
         SDL_FreeSurface(s);
     }
 
+    if (getenv("FLAUX_NO_GEOMETRY") && *getenv("FLAUX_NO_GEOMETRY")) fx_geometry = false;
+
     SDL_SetRenderDrawColor(fx_ren, 0, 0, 0, 255);
     SDL_RenderClear(fx_ren);
+    fx_measure();
+    fx_fit_canvas();      /* a sharp screen: more pixels */
+    if (getenv("FLAUX_FULLSCREEN") && *getenv("FLAUX_FULLSCREEN")) fx_set_fullscreen(true); /* for tests */
     SDL_PumpEvents();
     fx_read_input();
     fx_next_frame = SDL_GetPerformanceCounter();
 }
 
+/* Save what's drawn as a .bmp picture, in the program's own pixels (each one the colour at its
+   middle on the canvas), or at the canvas's real size if `full`. */
+static bool fx_save_bmp(const char *path, bool full) {
+    int cw = fx_canvas ? fx_cw : fx_win_w, ch = fx_canvas ? fx_ch : fx_win_h;
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, cw, ch, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!s || SDL_RenderReadPixels(fx_ren, NULL, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) != 0) {
+        if (s) SDL_FreeSurface(s);
+        return false;
+    }
+    if (!full && (cw != fx_win_w || ch != fx_win_h)) {
+        SDL_Surface *small = SDL_CreateRGBSurfaceWithFormat(0, fx_win_w, fx_win_h, 32, SDL_PIXELFORMAT_ARGB8888);
+        if (!small) { SDL_FreeSurface(s); return false; }
+        for (int y = 0; y < fx_win_h; y++) {
+            int from_y = (int)((y + 0.5) * fx_sy);
+            const Uint32 *src = (const Uint32 *)((const Uint8 *)s->pixels + (size_t)(from_y < ch ? from_y : ch - 1) * s->pitch);
+            Uint32 *dst = (Uint32 *)((Uint8 *)small->pixels + (size_t)y * small->pitch);
+            for (int x = 0; x < fx_win_w; x++) {
+                int from_x = (int)((x + 0.5) * fx_sx);
+                dst[x] = src[from_x < cw ? from_x : cw - 1];
+            }
+        }
+        SDL_FreeSurface(s);
+        s = small;
+    }
+    bool ok = SDL_SaveBMP(s, path) == 0;
+    SDL_FreeSurface(s);
+    return ok;
+}
+
 static void fx_g_screenshot(fx_text path, int line) {
     fx_need_window(line);
-    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, fx_win_w, fx_win_h, 32, SDL_PIXELFORMAT_ARGB8888);
-    if (!s || SDL_RenderReadPixels(fx_ren, NULL, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) != 0 ||
-        SDL_SaveBMP(s, fx_text_make(path.p, path.n).p) != 0)
+    if (!fx_save_bmp(fx_text_make(path.p, path.n).p, false))
         fx_fail(line, "Check the file name, and that you're allowed to save files in that folder.",
                 "Flaux couldn't save the screenshot: %s", SDL_GetError());
-    SDL_FreeSurface(s);
+}
+
+/* For tests: the screenshots asked for with FLAUX_SCREENSHOT and FLAUX_SCREENSHOT_FULL. */
+static void fx_test_shots(int line) {
+    if (fx_shot_path) fx_g_screenshot((fx_text){ fx_shot_path, (int64_t)strlen(fx_shot_path) }, line);
+    const char *full = getenv("FLAUX_SCREENSHOT_FULL");
+    if (full && *full) fx_save_bmp(full, true);
 }
 
 /* Show what was drawn, then wait so the game runs at 60 frames a second. */
@@ -550,8 +919,8 @@ static void fx_g_show(int line) {
     fx_need_window(line);
     fx_frames++;
     bool last = fx_frame_limit >= 0 && fx_frames >= fx_frame_limit;
-    if (last && fx_shot_path) fx_g_screenshot((fx_text){ fx_shot_path, (int64_t)strlen(fx_shot_path) }, line);
-    SDL_RenderPresent(fx_ren);
+    if (last) fx_test_shots(line);
+    fx_present();
     fx_dirty = false;
     if (last) {
         fx_g_close();
@@ -567,16 +936,14 @@ static void fx_g_finish(void) {
         return;
     }
     if (fx_frame_limit >= 0) { /* test mode */
-        if (fx_shot_path) fx_g_screenshot((fx_text){ fx_shot_path, (int64_t)strlen(fx_shot_path) }, 0);
+        fx_test_shots(0);
         fx_g_close();
         return;
     }
-    if (fx_dirty) SDL_RenderPresent(fx_ren);
+    if (fx_dirty) fx_present();
     SDL_Event ev;
-    while (SDL_WaitEvent(&ev)) {
-        if (ev.type == SDL_QUIT) break;
-        if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_EXPOSED) SDL_RenderPresent(fx_ren);
-    }
+    while (SDL_WaitEvent(&ev))
+        if (fx_handle_event(&ev)) break;
     fx_g_close();
 }
 
@@ -593,8 +960,27 @@ static void fx_g_rect(double x, double y, double w, double h, fx_text color, int
     fx_use_color(color, line);
     if (w < 0) { x += w; w = -w; }
     if (h < 0) { y += h; h = -h; }
-    SDL_Rect r = { fx_px(x), fx_px(y), fx_px(x + w) - fx_px(x), fx_px(y + h) - fx_px(y) };
+    SDL_Rect r = fx_box(fx_px(x), fx_px(y), fx_px(x + w), fx_px(y + h));
     SDL_RenderFillRect(fx_ren, &r);
+}
+
+/* A filled ellipse in canvas pixels (centre and radii not rounded): in each row, the pixels whose
+   middles are inside. For drawing at more than one canvas pixel per program pixel. */
+static void fx_fill_ellipse(double cx, double cy, double rx, double ry) {
+    if (rx <= 0 || ry <= 0) return;
+    double top = ceil(cy - ry - 0.5), bottom = floor(cy + ry - 0.5);
+    if (top < 0) top = 0;
+    if (bottom > fx_ch - 1) bottom = fx_ch - 1;
+    if (top > bottom) return;            /* (off the canvas) */
+    for (int y = (int)top; y <= (int)bottom; y++) {
+        double t = (y + 0.5 - cy) / ry, half = 1 - t * t;
+        if (half < 0) continue;
+        half = rx * sqrt(half);
+        double xs = ceil(cx - half - 0.5), xe = floor(cx + half - 0.5);
+        if (xs < 0) xs = 0;
+        if (xe > fx_cw - 1) xe = fx_cw - 1;
+        if (xe >= xs) SDL_RenderDrawLine(fx_ren, (int)xs, y, (int)xe, y);
+    }
 }
 
 static void fx_g_circle(double cx, double cy, double radius, fx_text color, int line) {
@@ -602,6 +988,10 @@ static void fx_g_circle(double cx, double cy, double radius, fx_text color, int 
     fx_use_color(color, line);
     if (radius <= 0) return;
     if (radius > 20000) radius = 20000;
+    if (fx_hires()) { /* the pixels within `radius` of the middle of pixel (cx, cy), like below */
+        fx_fill_ellipse((cx + 0.5) * fx_sx, (cy + 0.5) * fx_sy, (radius + 0.5) * fx_sx, (radius + 0.5) * fx_sy);
+        return;
+    }
     int top = (int)ceil(cy - radius), bottom = (int)floor(cy + radius);
     if (top < -1) top = -1;
     if (bottom > fx_win_h) bottom = fx_win_h;
@@ -612,26 +1002,55 @@ static void fx_g_circle(double cx, double cy, double radius, fx_text color, int 
     }
 }
 
-/* Fill a triangle one row of pixels at a time. */
-static void fx_fill_triangle(double x1, double y1, double x2, double y2, double x3, double y3) {
+/* Fill a triangle one row of pixels at a time (the pixels whose middles are inside), on a
+   surface `width` by `height` pixels. */
+static void fx_fill_rows(double x1, double y1, double x2, double y2, double x3, double y3, int width, int height) {
     double t;
 #define FX_SWAP(a, b) (t = a, a = b, b = t)
     if (y1 > y2) { FX_SWAP(x1, x2); FX_SWAP(y1, y2); }
     if (y1 > y3) { FX_SWAP(x1, x3); FX_SWAP(y1, y3); }
     if (y2 > y3) { FX_SWAP(x2, x3); FX_SWAP(y2, y3); }
 #undef FX_SWAP
-    int top = (int)ceil(y1 - 0.5), bottom = (int)floor(y3 - 0.5);
+    double top = ceil(y1 - 0.5), bottom = floor(y3 - 0.5);
     if (top < 0) top = 0;
-    if (bottom > fx_win_h - 1) bottom = fx_win_h - 1;
-    for (int y = top; y <= bottom; y++) {
+    if (bottom > height - 1) bottom = height - 1;
+    if (top > bottom) return;            /* (off the canvas) */
+    for (int y = (int)top; y <= (int)bottom; y++) {
         double yc = y + 0.5;
         double xa = y3 == y1 ? x1 : x1 + (x3 - x1) * (yc - y1) / (y3 - y1);
         double xb = yc < y2 ? (y2 == y1 ? x1 : x1 + (x2 - x1) * (yc - y1) / (y2 - y1))
                             : (y3 == y2 ? x2 : x2 + (x3 - x2) * (yc - y2) / (y3 - y2));
         if (xa > xb) { double s = xa; xa = xb; xb = s; }
+        if (xb < -1 || xa > width + 1) continue;     /* (this row is off the canvas) */
+        if (xa < -1) xa = -1;
+        if (xb > width + 1) xb = width + 1;
         int xs = (int)ceil(xa - 0.5), xe = (int)floor(xb - 0.5);
         if (xe >= xs) SDL_RenderDrawLine(fx_ren, xs, y, xe, y);
     }
+}
+
+/* A filled triangle in program pixels: exactly the pixels whose middles are inside. Drawing at
+   more canvas pixels than that, it's one SDL_RenderGeometry triangle at the canvas's resolution
+   (sharp and quick), or rows of canvas pixels where SDL can't do that. */
+static void fx_fill_triangle(double x1, double y1, double x2, double y2, double x3, double y3) {
+    if (!fx_hires()) { fx_fill_rows(x1, y1, x2, y2, x3, y3, fx_win_w, fx_win_h); return; }
+    x1 *= fx_sx; x2 *= fx_sx; x3 *= fx_sx;
+    y1 *= fx_sy; y2 *= fx_sy; y3 *= fx_sy;
+#if SDL_VERSION_ATLEAST(2, 0, 18)
+    /* (far off the canvas, rows of pixels work it out exactly) */
+    if (fx_geometry && fabs(x1) < 1e6 && fabs(x2) < 1e6 && fabs(x3) < 1e6 &&
+        fabs(y1) < 1e6 && fabs(y2) < 1e6 && fabs(y3) < 1e6) {
+        Uint8 r, g, b, a;
+        SDL_GetRenderDrawColor(fx_ren, &r, &g, &b, &a);
+        SDL_Color c = { r, g, b, a };
+        SDL_Vertex v[3] = { { { (float)x1, (float)y1 }, c, { 0, 0 } },
+                            { { (float)x2, (float)y2 }, c, { 0, 0 } },
+                            { { (float)x3, (float)y3 }, c, { 0, 0 } } };
+        if (SDL_RenderGeometry(fx_ren, NULL, v, 3, NULL, 0) == 0) return;
+        fx_geometry = false;    /* this computer can't: rows of pixels from now on */
+    }
+#endif
+    fx_fill_rows(x1, y1, x2, y2, x3, y3, fx_cw, fx_ch);
 }
 
 static void fx_g_triangle(double x1, double y1, double x2, double y2, double x3, double y3,
@@ -641,9 +1060,30 @@ static void fx_g_triangle(double x1, double y1, double x2, double y2, double x3,
     fx_fill_triangle(x1, y1, x2, y2, x3, y3);
 }
 
+/* For drawing at more canvas pixels than program pixels: a line through the middles of the program
+   pixels at its ends, `half` program pixels each side, as two triangles. `ends` makes it that
+   much longer at both ends too (so a thin line covers the pixels at its ends, like in a normal window). */
+static void fx_line_quad(double x1, double y1, double x2, double y2, double half, bool ends) {
+    double dx = x2 - x1, dy = y2 - y1, len = sqrt(dx * dx + dy * dy);
+    double ux = len > 0 ? dx / len : 1, uy = len > 0 ? dy / len : 0;   /* along the line */
+    double nx = -uy * half, ny = ux * half, ex = ends ? ux * half : 0, ey = ends ? uy * half : 0;
+    x1 += 0.5 - ex; y1 += 0.5 - ey;
+    x2 += 0.5 + ex; y2 += 0.5 + ey;
+    fx_fill_triangle(x1 + nx, y1 + ny, x1 - nx, y1 - ny, x2 - nx, y2 - ny);
+    fx_fill_triangle(x1 + nx, y1 + ny, x2 - nx, y2 - ny, x2 + nx, y2 + ny);
+}
+
 static void fx_g_line(double x1, double y1, double x2, double y2, fx_text color, double thickness, int line) {
     fx_need_window(line);
     fx_use_color(color, line);
+    if (fx_hires()) {     /* at the canvas's resolution: a thin line is one program pixel wide */
+        if (thickness <= 1.5) { fx_line_quad(x1, y1, x2, y2, 0.5, true); return; }
+        double r = thickness / 2 < 20000 ? thickness / 2 : 20000;
+        fx_line_quad(x1, y1, x2, y2, r, false);      /* with round ends */
+        fx_fill_ellipse((x1 + 0.5) * fx_sx, (y1 + 0.5) * fx_sy, r * fx_sx, r * fx_sy);
+        fx_fill_ellipse((x2 + 0.5) * fx_sx, (y2 + 0.5) * fx_sy, r * fx_sx, r * fx_sy);
+        return;
+    }
     if (thickness <= 1.5) {
         SDL_RenderDrawLine(fx_ren, fx_px(x1), fx_px(y1), fx_px(x2), fx_px(y2));
         return;
@@ -662,6 +1102,11 @@ static void fx_g_line(double x1, double y1, double x2, double y2, fx_text color,
 static void fx_g_dot(double x, double y, fx_text color, int line) {
     fx_need_window(line);
     fx_use_color(color, line);
+    if (fx_hires()) {
+        SDL_Rect r = fx_box(fx_px(x), fx_px(y), fx_px(x) + 1, fx_px(y) + 1);
+        SDL_RenderFillRect(fx_ren, &r);
+        return;
+    }
     SDL_RenderDrawPoint(fx_ren, fx_px(x), fx_px(y));
 }
 
@@ -680,7 +1125,8 @@ static void fx_g_write(fx_text t, double x, double y, fx_text color, int64_t siz
         if (ch >= 0x80 && ch < 0xC0) continue;     /* rest of a non-English letter */
         if (ch < 32 || ch > 126) ch = '?';
         SDL_Rect src = { (ch - 32) * 6, 0, 5, 7 };
-        SDL_Rect dst = { px + col * 6 * s, py + row * 9 * s, 5 * s, 7 * s };
+        int left = px + col * 6 * s, top = py + row * 9 * s;
+        SDL_Rect dst = fx_box(left, top, left + 5 * s, top + 7 * s);
         SDL_RenderCopy(fx_ren, fx_font_tex, &src, &dst);
         col++;
     }
@@ -734,7 +1180,7 @@ static void fx_g_image(fx_text name, double x, double y, double w, double h, dou
     int flip = SDL_FLIP_NONE;
     if (dw < 0) { dw = -dw; flip |= SDL_FLIP_HORIZONTAL; }  /* a negative width flips it */
     if (dh < 0) { dh = -dh; flip |= SDL_FLIP_VERTICAL; }
-    SDL_Rect dst = { fx_px(x), fx_px(y), fx_px(x + dw) - fx_px(x), fx_px(y + dh) - fx_px(y) };
+    SDL_Rect dst = fx_box(fx_px(x), fx_px(y), fx_px(x + dw), fx_px(y + dh));
     if (angle == 0 && flip == SDL_FLIP_NONE) SDL_RenderCopy(fx_ren, im->tex, NULL, &dst);
     else SDL_RenderCopyEx(fx_ren, im->tex, NULL, &dst, angle, NULL, (SDL_RendererFlip)flip);
 }

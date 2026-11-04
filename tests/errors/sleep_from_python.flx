@@ -1,0 +1,3 @@
+# expect: Flaux doesn't use `sleep`. The Flaux word for this is `wait`.
+# expect: wait 2s
+sleep(2)

@@ -238,6 +238,9 @@ class ToBlocks:
         return self.block("flx_repeat_each", {"VAR": self.var(s.var.name)},
                           {"LIST": self.val(s.iterable), "DO": self.chain(s.body, s.line, s.end_line)})
 
+    def s_Wait(self, s):
+        return self.block("flx_wait", {"UNIT": s.unit}, {"VALUE": self.val(s.amount)})
+
     def s_Stop(self, s):
         return self.block("flx_stop")
 

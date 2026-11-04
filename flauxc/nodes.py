@@ -110,6 +110,10 @@ class RepeatEach(Node):
     fields = ("var", "iterable", "body")
 
 
+class Wait(Node):
+    fields = ("amount", "unit")  # wait 2s / wait delay seconds; unit is "s", "m", "h" or "d"
+
+
 class Stop(Node):
     fields = ()
 

@@ -72,6 +72,7 @@
     {"name": "text_width", "args": ["any", "num"], "label": "width of text %1 at size %2", "kind": "value", "category": "Drawing", "defaults": ["GAME OVER", "5"]},
     {"name": "text_width", "args": ["any"], "label": "width of text %1", "kind": "value", "category": "Drawing", "toolbox": false},
     {"name": "rgb", "args": ["num", "num", "num"], "label": "colour red %1 green %2 blue %3", "kind": "value", "category": "Drawing", "defaults": ["255", "136", "0"]},
+    {"name": "fullscreen", "args": [], "label": "make the window fill the screen", "kind": "statement", "category": "Drawing"},
     {"name": "screenshot", "args": ["text"], "label": "save a screenshot called %1", "kind": "statement", "category": "Drawing", "defaults": ["picture.bmp"], "toolbox": false},
 
     {"name": "camera", "args": ["num", "num", "num", "num", "num", "num"], "label": "camera at x %1 y %2 z %3 looking at x %4 y %5 z %6", "kind": "statement", "category": "3D", "defaults": ["0", "5", "10", "0", "0", "0"]},
@@ -117,6 +118,11 @@
     {"name": "mouse_y", "args": [], "label": "mouse y", "kind": "value", "category": "Keys & Mouse"},
     {"name": "mouse_down", "args": [], "label": "mouse button is held down", "kind": "value", "category": "Keys & Mouse"},
     {"name": "mouse_clicked", "args": [], "label": "mouse was just clicked", "kind": "value", "category": "Keys & Mouse"},
+    {"name": "mouse_moved_x", "args": [], "label": "how far the mouse moved left-right", "kind": "value", "category": "Keys & Mouse"},
+    {"name": "mouse_moved_y", "args": [], "label": "how far the mouse moved up-down", "kind": "value", "category": "Keys & Mouse"},
+    {"name": "lock_mouse", "args": [], "label": "lock the mouse to look around", "kind": "statement", "category": "Keys & Mouse"},
+    {"name": "unlock_mouse", "args": [], "label": "unlock the mouse", "kind": "statement", "category": "Keys & Mouse"},
+    {"name": "mouse_locked", "args": [], "label": "mouse is locked", "kind": "value", "category": "Keys & Mouse"},
 
     {"name": "button_down", "args": ["text"], "label": "controller button %1 is held down", "kind": "value", "category": "Keys & Mouse", "defaults": ["a"]},
     {"name": "button_pressed", "args": ["text"], "label": "controller button %1 was just pressed", "kind": "value", "category": "Keys & Mouse", "defaults": ["start"]},

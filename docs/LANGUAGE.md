@@ -12,6 +12,7 @@ covers everything in Flaux 0.1.
 - [Making choices: if](#making-choices-if)
 - [Checks and comparisons](#checks-and-comparisons)
 - [Loops: repeat](#loops-repeat)
+- [Waiting](#waiting)
 - [Lists](#lists)
 - [Functions](#functions)
 - [Built-in functions](#built-in-functions)
@@ -228,6 +229,39 @@ Inside any `repeat`:
 - `stop` leaves the loop straight away.
 - `skip` jumps to the next time around.
 
+## Waiting
+
+`wait` pauses the program for a while. Glue a unit to the number: `s` for
+seconds, `m` for minutes, `h` for hours and `d` for days.
+
+```
+wait 1s      # one second
+wait 0.5s    # half a second
+wait 2m      # two minutes
+wait 1h      # an hour
+wait 1d      # a day
+```
+
+For a variable or a sum, write the unit as a word after it: `seconds`,
+`minutes`, `hours` or `days` (`second`, `minute`, `hour` and `day` work too):
+
+```
+set delay to 3
+wait delay seconds
+wait delay * 2 minutes
+wait 1 hour
+```
+
+`wait 5` on its own is a mistake, because Flaux can't tell if you mean 5
+seconds or 5 minutes. The time can be a decimal, and it can't be negative.
+
+Everything the program said before a `wait` is shown straight away. In a
+game, the window keeps working while the program waits, and closing it still
+ends the program. `wait` doesn't put the picture on screen: call `show()`
+first if you want to see what you drew. (For a game loop, use `show()`, which
+already waits for the next frame.) In Flaux Studio, the Stop button stops a
+wait straight away.
+
 ## Lists
 
 ```
@@ -367,6 +401,46 @@ from the **top-left corner**: `x` goes right, `y` goes **down**. So the
 top-left corner is `0, 0` and the bottom-right of an 800 by 600 window is
 `800, 600`.
 
+### Fullscreen
+
+Any game can be played on the whole screen. The picture is made bigger to
+fit, keeping its shape (with black bars at the sides or top and bottom if
+the screen is a different shape), and **your program doesn't change**: the
+window is still 800 by 600 to it, and `mouse_x()` and `mouse_y()` still give
+places in those pixels.
+
+In fullscreen (and on sharp screens) games are drawn at the screen's full
+resolution: your program still uses its `window(...)` coordinates, but every
+pixel of the screen gets drawn, so the game looks sharper.
+
+- Triangles, circles and lines get smooth, sharp edges instead of big blocky
+  steps, so a 3D game made of triangles looks much better.
+- Rectangles, dots, text and pictures stay on whole pixels of your window, so
+  letters and pixel art keep their blocky look.
+- [3D](#3d) is drawn with every pixel of the screen too, and a screen effect
+  (a [shader](#shaders)) still gets `x`, `y`, `width` and `height` in your
+  window's own pixels. (On a computer without a graphics card, where Flaux
+  draws 3D with the processor, 3D is drawn at your window's size and made
+  bigger, so games stay quick.)
+- `screenshot(...)` still saves a picture the size of your window.
+
+- **Windows app** (and `flaux run`): press **F11** (or **Alt+Enter**) to switch
+  fullscreen on and off. These keys are kept for that, so `key_down("f11")`
+  is never true, and neither is `"enter"` while Alt is held.
+- **Flaux Studio on the web**: click **&#9974; Fullscreen** under the game (or
+  double-click the game's name). **Esc** leaves fullscreen, so in a browser
+  the game doesn't get Esc while it's fullscreen. Pressing Stop, or a problem
+  in the program, also leaves it.
+- **From the program**: `fullscreen()` (after `window(...)`) switches to
+  fullscreen. The Windows app does it straight away. Browsers only allow
+  fullscreen right after a click, so on the web the Fullscreen button lights
+  up and the next click on the game goes fullscreen.
+
+```
+window(800, 600, "My Game")
+fullscreen()
+```
+
 ### Drawing
 
 | Function | Draws |
@@ -380,6 +454,7 @@ top-left corner is `0, 0` and the bottom-right of an 800 by 600 window is
 | `write(value, x, y, colour, size)` | text (or any value); size 2 if left out |
 | `text_width(value, size)` | how many pixels wide `write` would make it |
 | `screenshot("file.bmp")` | saves what's drawn so far as a picture |
+| `fullscreen()` | makes the window fill the screen (see [Fullscreen](#fullscreen)) |
 
 The colour can always be left out (shapes and text are white by default).
 
@@ -413,6 +488,9 @@ showing it until you close it.
 | `mouse_x()`, `mouse_y()` | where the mouse is in the window |
 | `mouse_down()` | true while the left mouse button is held |
 | `mouse_clicked()` | true only on the frame of a click |
+| `mouse_moved_x()`, `mouse_moved_y()` | how far the mouse moved since the last frame, in screen pixels (see [Mouse look](#mouse-look)) |
+| `lock_mouse()`, `unlock_mouse()` | hide the pointer and keep it in the window, and give it back |
+| `mouse_locked()` | true while the mouse is locked |
 
 Key names: `"a"` to `"z"`, `"0"` to `"9"`, `"left"`, `"right"`, `"up"`,
 `"down"`, `"space"`, `"enter"`, `"escape"`, `"tab"`, `"backspace"`,
@@ -423,7 +501,7 @@ Use `key_down` for smooth movement, and `key_pressed` for things that
 should happen once per press, like jumping or firing.
 
 On phones and tablets (in Flaux Studio on the web), a finger works like the
-mouse.
+mouse, and dragging it moves the mouse (for [mouse look](#mouse-look)).
 
 ### Game controllers
 
@@ -449,6 +527,54 @@ With no controller, every button is up and the sticks are 0.
 |---|---|
 | `seconds()` | seconds since the window opened (a decimal) |
 | `fps()` | how many frames a second are being drawn right now |
+
+### Mouse look
+
+In a 3D game you can turn by moving the mouse, like in first-person games.
+`lock_mouse()` (after `window(...)`) hides the pointer and keeps it in the
+window, so the mouse can move as far as you like without stopping at the edge
+of the screen. Then `mouse_moved_x()` and `mouse_moved_y()` say how far the
+mouse moved since the last frame, in screen pixels: right and down are more
+than 0, left and up are less than 0. They work when the mouse isn't locked too.
+
+Screen pixels are the same however big the game is shown (in a window,
+fullscreen, or in Flaux Studio), so the same hand movement always turns your
+view the same amount. (`mouse_x()` and `mouse_y()` are different: they give
+places in your window's own pixels, for pointing at things.) A turn speed of
+about `0.004` per pixel is a good start: with it, moving the mouse about 1600
+pixels turns all the way round, because `sin` and `cos` use radians.
+
+This one looks around a little [3D](#3d) world: `turn` is which way you face,
+`tilt` is how far up or down you look (kept between looking nearly straight
+up and nearly straight down).
+
+```
+window(800, 600, "Look around")
+lock_mouse()
+set turn to 0
+set tilt to 0
+repeat forever
+    set turn to turn + mouse_moved_x() * 0.004
+    set tilt to tilt - mouse_moved_y() * 0.004
+    set tilt to max(-1.4, min(1.4, tilt))
+    sky("skyblue", "white")
+    camera(0, 1.6, 0, sin(turn) * cos(tilt), 1.6 + sin(tilt), 0 - cos(turn) * cos(tilt))
+    plane(0, 0, 0, 40, 40, "green")
+    cube(0, 0.5, -5, 1, "red")
+    if not mouse_locked()
+        write("Click to look around", 10, 10)
+    end
+    show()
+end
+```
+
+- **Esc** gives the pointer back, so players can always get it out. While
+  your program wants the mouse locked (until `unlock_mouse()`), a click on the
+  game locks it again. The click still counts for `mouse_clicked()`.
+- On the web, browsers only lock the mouse after a click, so the game's name
+  says "click the game to look around" until then.
+- While the mouse is locked, `mouse_x()` and `mouse_y()` stay where they were.
+- The pointer comes back by itself when the program ends or is stopped.
 
 ### Pictures
 
@@ -717,7 +843,7 @@ compares with Rust, C++, C# and Python.
 These words have special meanings, so they can't be used as names:
 
 `add` `and` `else` `end` `false` `function` `if` `is` `mod` `not` `or`
-`repeat` `return` `say` `set` `skip` `stop` `subtract` `true`
+`repeat` `return` `say` `set` `skip` `stop` `subtract` `true` `wait`
 
 `shader` starts a shader when it begins a line on its own, like
 `shader glow` (it can still be used as a name elsewhere).

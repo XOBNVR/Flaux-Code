@@ -1,0 +1,3 @@
+# expect: not milliseconds
+# expect: wait 0.25s
+wait 250ms

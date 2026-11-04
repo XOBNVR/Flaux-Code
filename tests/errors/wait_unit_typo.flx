@@ -1,0 +1,3 @@
+# expect: Flaux doesn't know the time unit `secs`. Did you mean `seconds`?
+# expect: wait 3 seconds
+wait 3 secs

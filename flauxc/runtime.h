@@ -408,6 +408,48 @@ static double fx_t0;
 
 static double fx_clock(void) { return fx_now() - fx_t0; }
 
+/* ------------------------------------------------------------ wait */
+
+/* Set by graphics.h when a window opens: handles the window's events, so it
+ * keeps answering (and its close button still works) while the program waits. */
+static void (*fx_wait_events)(void) = 0;
+
+static void fx_sleep(double seconds) {
+    if (seconds <= 0) return;
+#ifdef _WIN32
+    Sleep((DWORD)(seconds * 1000.0 + 0.5));
+#else
+    struct timespec t;
+    t.tv_sec = (time_t)seconds;
+    t.tv_nsec = (long)((seconds - (double)t.tv_sec) * 1e9);
+    if (t.tv_nsec > 999999999L) t.tv_nsec = 999999999L;
+    while (nanosleep(&t, &t) != 0) {} /* woken early by a signal: sleep the rest */
+#endif
+}
+
+/* `wait 2s`: amount times the unit's seconds (s 1, m 60, h 3600, d 86400) */
+static void fx_wait(double amount, double unit, int line) {
+    if (amount != amount)
+        fx_fail(line, "Check the calculation before the unit. It must give a number, like `wait 1s`.",
+                "`wait` was given something that isn't a number.");
+    if (amount < 0)
+        fx_fail(line, "Waiting goes forwards only, so the time must be 0 or more. You could check it first:\n\n"
+                      "      if delay > 0\n"
+                      "          wait delay seconds\n"
+                      "      end",
+                "You can't wait for a negative amount of time.");
+    fflush(stdout); /* show everything said so far before waiting */
+    double end = fx_now() + amount * unit;
+    for (;;) {
+        if (fx_wait_events) fx_wait_events();
+        double left = end - fx_now();
+        if (left <= 0) break;
+        /* with a window open, wake up often to keep it answering */
+        double most = fx_wait_events ? 0.01 : 3600;
+        fx_sleep(left < most ? left : most);
+    }
+}
+
 /* ----------------------------------------------------------- start up */
 
 static const char fx_crash_msg[] =

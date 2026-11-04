@@ -1,0 +1,36 @@
+# frames: 2
+# screen: 1920x1080
+# mouse: 960,540
+# canvas: 1728x1080
+# pixel: 100 200 #ff0000
+# pixel: 500 200 #00ff00
+# pixel: 401 51 #000000
+# pixel: 320 200 #000000
+# full_pixel: 863 100 #ff0000
+# full_pixel: 864 100 #00ff00
+# full_pixel: 1082 137 #000000
+# full_pixel: 864 540 #000000
+# 3D in fullscreen is drawn at the screen's full resolution: on a 1920x1080
+# screen the 640x400 window is shown 1728x1080 (black bars at the sides), and
+# the 3D world, the 2D on top and the screen effect all have that many pixels.
+# The program keeps its own coordinates: the effect's x and width are in its
+# pixels (so it splits the picture at canvas pixel 864, the middle), and so
+# are the mouse (in the middle of the screen) and screenshots (`pixel:`).
+shader halves
+    if x < width / 2
+        return rgb(red, 0, 0)
+    end
+    return rgb(0, green, 0)
+end
+
+window(640, 400)
+fullscreen()
+repeat 2 times
+    sky("white", "white")
+    camera(0, 2, 6, 0, 0, 0)
+    cube(0, 0, 0, 2, "white")
+    rect(400, 50, 2, 2, "black")
+    rect(mouse_x() - 2, mouse_y() - 2, 4, 4, "black")
+    effect(halves)
+    show()
+end

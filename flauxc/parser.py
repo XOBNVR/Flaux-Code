@@ -27,8 +27,15 @@ from .errors import FlauxError
 # Words that always mean something special and can't be used as names.
 RESERVED = {
     "set", "add", "subtract", "say", "if", "else", "end", "repeat", "function",
-    "return", "and", "or", "not", "is", "true", "false", "mod", "stop", "skip",
+    "return", "and", "or", "not", "is", "true", "false", "mod", "stop", "skip", "wait",
 }
+
+# `wait` units: the word (or letter) after the amount, and the letter it means.
+UNIT_WORDS = {"s": "s", "second": "s", "seconds": "s", "m": "m", "minute": "m", "minutes": "m",
+              "h": "h", "hour": "h", "hours": "h", "d": "d", "day": "d", "days": "d"}
+UNIT_NAMES = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
+UNIT_SHORTHANDS = {"sec": "seconds", "secs": "seconds", "min": "minutes", "mins": "minutes",
+                   "hr": "hours", "hrs": "hours", "sek": "seconds"}
 
 COMPARE_OPS = {"=": "=", "==": "=", "!=": "!=", "<": "<", ">": ">", "<=": "<=", ">=": ">="}
 NEGATE = {"=": "!=", "!=": "=", "<": ">=", ">": "<=", "<=": ">", ">=": "<"}
@@ -44,6 +51,7 @@ OTHER_LANGUAGE_WORDS = {
     "while": "repeat while", "until": "repeat until", "for": "repeat with",
     "foreach": "repeat with", "loop": "repeat forever", "do": "repeat",
     "elif": "else if", "elsif": "else if", "elseif": "else if",
+    "sleep": "wait", "delay": "wait",
     "break": "stop", "continue": "skip", "next": "skip", "exit": "stop",
     "endif": "end", "fi": "end", "done": "end", "endwhile": "end", "endfor": "end", "wend": "end",
     "change": "add", "increase": "add", "decrease": "subtract", "minus": "subtract",
@@ -61,6 +69,8 @@ EXAMPLES = {
     "return": "function double(x)\n    return x * 2\nend",
     "shader": "shader stripes\n    if floor(x * 4) mod 2 = 0\n        return \"white\"\n    end\n    return \"red\"\nend\n\n"
               "cube(0, 0, 0, 1, stripes)",
+    "wait": "wait 1s            # one second\nwait 0.5s          # half a second\nwait 2m            # two minutes\n"
+            "wait delay seconds # a variable, then seconds, minutes, hours or days",
 }
 
 
@@ -80,6 +90,8 @@ class Parser:
         self.i = 0
         self.in_function = False
         self.depth = 0   # how many blocks deep we are
+        self.unit_ok = False      # True while reading the amount after `wait`
+        self.glued_unit = None    # the unit token glued to that amount (`2s`)
         self.lines = source.splitlines()
         self.own_functions = {tokens[i + 1].value for i in range(len(tokens) - 1)
                               if tokens[i].kind == "name" and tokens[i].value == "function"
@@ -418,6 +430,13 @@ class Parser:
             fix_line = indent + flaux
         elif first in ("add", "subtract"):
             fix_line = None
+        elif first == "wait":
+            inner = rest[1:-1].strip() if rest.startswith("(") and rest.endswith(")") else rest
+            if inner.replace(".", "", 1).isdigit():
+                if tok.value == "delay":  # delay(500) in Arduino and friends counts milliseconds
+                    fix_line = indent + f"wait {float(inner) / 1000:g}s"
+                else:
+                    fix_line = indent + f"wait {inner}s"
         example = None
         if first in EXAMPLES:
             example = EXAMPLES[first]
@@ -683,6 +702,87 @@ class Parser:
         self.end_of_line()
         return N.Return(value, **pos)
 
+    def stmt_wait(self):
+        """wait 2s, wait 0.5m, wait delay seconds, wait 3 minutes (also `wait for 2s`)."""
+        start = self.next()
+        if self.at_word("for"):
+            self.next()
+        if self.at_line_end():
+            raise self.error(start, "`wait` needs to know how long to wait.",
+                             hint="Put a number and a unit after it: s (seconds), m (minutes), h (hours) "
+                                  "or d (days).", example=EXAMPLES["wait"])
+        if self.at_word("until") or self.at_word("while"):
+            word = self.peek().value
+            raise self.error(self.peek(), f"`wait` waits for an amount of time, so it can't wait {word} something happens.",
+                             hint=f"To keep going {word} something happens, use `repeat {word}`:",
+                             example=f"repeat {word} key_pressed(\"space\")\n    show()\nend")
+        self.unit_ok, self.glued_unit = True, None
+        try:
+            amount = self.parse_expression()
+        finally:
+            self.unit_ok = False
+        glued, self.glued_unit = self.glued_unit, None
+        if glued is not None:
+            if not (isinstance(amount, N.Num) and amount.line == glued.line
+                    and amount.col + amount.length == glued.col):
+                line = self.line_text(start.line)
+                fix = None
+                if amount.line == start.line == glued.line:
+                    a, b = amount.col - 1, amount.col - 1 + amount.length
+                    g = glued.col - 1
+                    b = max(b, g + glued.length)
+                    text = (line[a:g] + line[g + glued.length:b]) if a <= g < b else line[a:b]
+                    fix = line[:start.col - 1] + f"wait ({text.strip()}) {UNIT_NAMES[glued.value]}" + line[b:]
+                raise self.error(glued, f"`{glued.value}` goes straight after a plain number, like `wait 2{glued.value}`.",
+                                 hint=f"For a sum, put brackets around it and write the whole word "
+                                      f"`{UNIT_NAMES[glued.value]}` after it:" if fix else None,
+                                 fix_line=fix, example=None if fix else EXAMPLES["wait"])
+            unit = glued.value
+        else:
+            unit = self.wait_unit(start, amount)
+        pos = self.span(start)
+        self.end_of_line()
+        return N.Wait(amount, unit, **pos)
+
+    def wait_unit(self, start, amount):
+        """The unit word after a `wait` amount: seconds, minutes, hours or days."""
+        tok = self.peek()
+        if tok.kind == "name" and tok.value in UNIT_WORDS:
+            self.next()
+            return UNIT_WORDS[tok.value]
+        line = self.line_text(start.line)
+        end = amount.col - 1 + amount.length if amount.line == start.line else len(line.rstrip())
+        before, after = line[:start.col - 1] + "wait ", line[end:]
+        text = self.text(amount) if amount.line == start.line else "..."
+        number = isinstance(amount, N.Num) and amount.value >= 0
+        if tok.kind == "name":
+            import difflib
+            word = tok.value.lower()
+            close = UNIT_SHORTHANDS.get(word) or UNIT_WORDS.get(word) and UNIT_NAMES[UNIT_WORDS[word]]
+            if not close:
+                found = difflib.get_close_matches(word, ["seconds", "minutes", "hours", "days"], n=1, cutoff=0.6)
+                close = found[0] if found else None
+            if close:
+                raise self.error(tok, f"Flaux doesn't know the time unit `{tok.value}`. Did you mean `{close}`?",
+                                 hint="Change the line to:", fix=close)
+            raise self.error(tok, f"Flaux doesn't know the time unit `{tok.value}`.",
+                             hint="After the amount, write seconds, minutes, hours or days:",
+                             example=EXAMPLES["wait"])
+        if not self.at_line_end():
+            raise self.error(tok, f"I expected a time unit here (seconds, minutes, hours or days), but found "
+                                  f"{describe_token(tok)}.", example=EXAMPLES["wait"])
+        if number:
+            text = text.strip("() ")
+            fix = before + text + "s" + after
+            hint = "Put s (seconds), m (minutes), h (hours) or d (days) straight after the number. Change the line to:"
+            msg = f"Say how long: `wait {text}s` waits {text} second{'' if amount.value == 1 else 's'}, `wait {text}m` waits {text} minute{'' if amount.value == 1 else 's'}."
+        else:
+            fix = before + text + " seconds" + after
+            hint = "Put seconds, minutes, hours or days after it. Change the line to:"
+            msg = "Say how long: is that seconds, minutes, hours or days?"
+        raise self.error(start, f"`wait` needs a unit. {msg}", hint=hint, fix_line=fix.rstrip(),
+                         length=max(1, end - start.col + 1))
+
     def stmt_function(self):
         raise self.error(self.peek(), "Functions can't go inside an `if`, a `repeat` or another function.",
                          hint="Move the whole function (from `function` down to its `end`) so it starts at "
@@ -897,14 +997,27 @@ class Parser:
             else:
                 return node
 
+    def time_unit(self, number):
+        """A unit glued to a number, like the s in `2s`. Only `wait` takes those."""
+        unit = self.next()
+        if self.unit_ok and self.glued_unit is None:
+            self.glued_unit = unit
+            return
+        n = number.length + unit.length
+        raise self.error(number, f"`{self.line_text(number.line)[number.col - 1:number.col - 1 + n]}` is an amount of "
+                                 f"time, which only goes after `wait`, like `wait 2{unit.value}`.",
+                         hint=f"For a number of {UNIT_NAMES[unit.value]}, leave out the `{unit.value}`:",
+                         fix=self.line_text(number.line)[number.col - 1:number.col - 1 + number.length], length=n)
+
     def parse_primary(self):
         tok = self.peek()
-        if tok.kind == "int":
+        if tok.kind in ("int", "float"):
             self.next()
-            return N.Num(tok.value, False, **self.pos(tok))
-        if tok.kind == "float":
-            self.next()
-            return N.Num(tok.value, True, **self.pos(tok))
+            if self.peek().kind == "unit":
+                self.time_unit(tok)
+            return N.Num(tok.value, tok.kind == "float", **self.pos(tok))
+        if tok.kind == "unit":  # can't happen: units only come straight after numbers
+            raise self.error(tok, f"I didn't expect `{tok.value}` here.")
         if tok.kind == "string":
             self.next()
             parts = []

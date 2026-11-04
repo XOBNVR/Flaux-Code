@@ -15,6 +15,14 @@
  *   4. the 2D drawing on top
  *   5. the screen effect (a shader written in Flaux), or a plain copy, to
  *      the window
+ *
+ * Fullscreen and sharp screens work as in 2D (see "Fullscreen" in
+ * graphics.h): the program keeps its window(...) size in pixels, and the
+ * picture is shown as big as fits, with black bars. Steps 1-4 are drawn at
+ * the size it's shown at (fx_cw by fx_ch: every pixel of the screen), so 3D
+ * is sharp in fullscreen too; 2D on top is still in the program's pixels.
+ * With Mesa (no good graphics card) it's drawn at the window(...) size and
+ * scaled up, to keep games fast.
  * =================================================================== */
 
 /* ------------------------------------------------- OpenGL, without headers */
@@ -93,6 +101,8 @@ typedef ptrdiff_t GLintptr;
 #define GL_VERSION 0x1F02
 #define GL_RENDERER 0x1F01
 #define GL_PACK_ALIGNMENT 0x0D05
+#define GL_MAX_TEXTURE_SIZE 0x0D33
+#define GL_MAX_RENDERBUFFER_SIZE 0x84E8
 #define GL_UNPACK_ALIGNMENT 0x0CF5
 
 #define FX_GL_FUNCTIONS(X) \
@@ -115,6 +125,7 @@ typedef ptrdiff_t GLintptr;
     X(void, DrawBuffer, (GLenum b)) \
     X(void, ReadBuffer, (GLenum b)) \
     X(void, GenTextures, (GLsizei n, GLuint *t)) \
+    X(void, DeleteTextures, (GLsizei n, const GLuint *t)) \
     X(void, BindTexture, (GLenum target, GLuint t)) \
     X(void, TexImage2D, (GLenum target, GLint level, GLint internal, GLsizei w, GLsizei h, GLint border, \
                          GLenum format, GLenum type, const void *pixels)) \
@@ -159,6 +170,9 @@ typedef ptrdiff_t GLintptr;
     X(void, Uniform4fv, (GLint l, GLsizei n, const GLfloat *v)) \
     X(void, UniformMatrix4fv, (GLint l, GLsizei n, GLboolean t, const GLfloat *v)) \
     X(void, GenFramebuffers, (GLsizei n, GLuint *f)) \
+    X(void, DeleteFramebuffers, (GLsizei n, const GLuint *f)) \
+    X(void, DeleteRenderbuffers, (GLsizei n, const GLuint *r)) \
+    X(void, Uniform4f, (GLint l, GLfloat a, GLfloat b, GLfloat c, GLfloat d)) \
     X(void, BindFramebuffer, (GLenum target, GLuint f)) \
     X(void, FramebufferTexture2D, (GLenum target, GLenum att, GLenum textarget, GLuint t, GLint level)) \
     X(void, FramebufferRenderbuffer, (GLenum target, GLenum att, GLenum rbt, GLuint rb)) \
@@ -278,6 +292,8 @@ static SDL_GLContext fx_gl;
 static int fx_samples;                 /* smooth edges: how many samples per pixel */
 static GLuint fx_msaa_fbo, fx_msaa_color, fx_msaa_depth;
 static GLuint fx_scene_fbo, fx_scene_tex;
+static bool fx_soft_gl;                 /* drawing with Mesa (the processor), not a graphics card */
+static GLint fx_max_size = 4096;        /* the biggest picture this graphics card can draw into */
 static GLuint fx_shadow_fbo, fx_shadow_tex;
 #define FX_SHADOW_SIZE 2048
 static GLuint fx_inst_vbo, fx_flat_vao, fx_flat_vbo, fx_empty_vao;
@@ -1314,23 +1330,100 @@ static GLuint fx_framebuffer(GLuint color_tex, GLuint color_rb, GLuint depth_rb,
 static void fx_save_picture(GLuint fbo, int w, int h, const char *path, int line);
 #endif
 
-/* The whole frame, into fx_scene_tex. */
-static void fx_render_frame(void) {
+/* ---------------------------------------- fullscreen and sharp screens */
+
+static void fx_gl_failed(int line, const char *why);
+static GLuint fx_framebuffer(GLuint color_tex, GLuint color_rb, GLuint depth_rb, GLuint depth_tex);
+
+/* How many pixels the window really has (more than its size on a sharp screen). */
+static void fx_measure(void) {
+    if (!fx_win) return;
+    SDL_GL_GetDrawableSize(fx_win, &fx_out_w, &fx_out_h);
+    if (fx_out_w < 1 || fx_out_h < 1) { fx_out_w = fx_win_w; fx_out_h = fx_win_h; }
+}
+
+/* Where the picture goes in the window, in OpenGL's pixels (counted from the bottom). */
+static SDL_Rect fx_shown_rect(void) {
+    SDL_Rect v = fx_fit(fx_out_w, fx_out_h, fx_win_w, fx_win_h);
+    v.y = fx_out_h - v.y - v.h;
+    return v;
+}
+
+/* The pictures each frame is drawn into, w by h pixels: smooth-edged (multisampled), then plain. */
+static void fx_make_targets(int w, int h, int line) {
+    glGenRenderbuffers(1, &fx_msaa_color);
+    glBindRenderbuffer(GL_RENDERBUFFER, fx_msaa_color);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, fx_samples, GL_RGBA8, w, h);
+    glGenRenderbuffers(1, &fx_msaa_depth);
+    glBindRenderbuffer(GL_RENDERBUFFER, fx_msaa_depth);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, fx_samples, GL_DEPTH_COMPONENT24, w, h);
+    fx_msaa_fbo = fx_framebuffer(0, fx_msaa_color, fx_msaa_depth, 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE && fx_samples > 0) {
+        fx_samples = 0;   /* no smooth edges on this computer */
+        glDeleteFramebuffers(1, &fx_msaa_fbo);
+        glDeleteRenderbuffers(1, &fx_msaa_color);
+        glDeleteRenderbuffers(1, &fx_msaa_depth);
+        fx_make_targets(w, h, line);
+        return;
+    }
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fx_gl_failed(line, "drawing off-screen didn't work");
+    glGenTextures(1, &fx_scene_tex);
+    glBindTexture(GL_TEXTURE_2D, fx_scene_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    fx_scene_fbo = fx_framebuffer(fx_scene_tex, 0, 0, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    fx_cw = w;
+    fx_ch = h;
+    fx_sx = (double)w / fx_win_w;
+    fx_sy = (double)h / fx_win_h;
+}
+
+/* Draw at as many pixels as the picture is shown at (fullscreen, a sharp screen), but never
+   fewer than the window(...) size, and not more with Mesa. Keeps the last frame, scaled. */
+static void fx_fit_targets(void) {
+    fx_measure();
+    SDL_Rect v = fx_shown_rect();
+    int w = v.w, h = v.h;
+    if (fx_soft_gl || w < fx_win_w || h < fx_win_h || w > fx_max_size || h > fx_max_size) {
+        w = fx_win_w;
+        h = fx_win_h;
+    }
+    if (w == fx_cw && h == fx_ch) return;
+    GLuint old_fbo = fx_scene_fbo, old_tex = fx_scene_tex, old_ms[3] = { fx_msaa_fbo, fx_msaa_color, fx_msaa_depth };
+    int old_w = fx_cw, old_h = fx_ch;
+    fx_make_targets(w, h, 0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, old_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fx_scene_fbo);
+    glBlitFramebuffer(0, 0, old_w, old_h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &old_fbo);
+    glDeleteTextures(1, &old_tex);
+    glDeleteFramebuffers(1, &old_ms[0]);
+    glDeleteRenderbuffers(2, &old_ms[1]);
+}
+
+/* The whole frame, into fx_scene_tex. `headset`: draw it in the VR headset too, if there is one. */
+static void fx_render_frame(bool headset) {
+    fx_fit_targets();
     float aspect = (float)fx_win_w / (float)fx_win_h;
     fx_view = fx_look_at(fx_cam_eye, fx_cam_target);
     fx_proj = fx_perspective(fx_cam_fov * (float)M_PI / 180, aspect, 0.1f, 1000.0f);
     fx_upload_instances();
     fx_shadow_pass(fx_cam_eye, fx_cam_target);
 #ifdef FX_USES_XR
-    fx_xr_frame();   /* draws both eyes in the headset, if there is one */
+    if (headset) fx_xr_frame();   /* draws both eyes in the headset */
+#else
+    (void)headset;
 #endif
     glBindFramebuffer(GL_FRAMEBUFFER, fx_msaa_fbo);
-    glViewport(0, 0, fx_win_w, fx_win_h);
+    glViewport(0, 0, fx_cw, fx_ch);
     fx_draw_world(fx_view, fx_proj, fx_cam_eye);
     fx_draw_flat();
     glBindFramebuffer(GL_READ_FRAMEBUFFER, fx_msaa_fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fx_scene_fbo);
-    glBlitFramebuffer(0, 0, fx_win_w, fx_win_h, 0, 0, fx_win_w, fx_win_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBlitFramebuffer(0, 0, fx_cw, fx_ch, 0, 0, fx_cw, fx_ch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 }
 
 static int fx_shown_effect = -1;
@@ -1339,14 +1432,23 @@ static double fx_shown_time;
 
 /* The finished picture to the window, through the screen effect if there is one. */
 static void fx_present(void) {
+    fx_fit_targets();     /* (the window may have changed: fullscreen, or a sharper screen) */
+    SDL_Rect v = fx_shown_rect();
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, fx_win_w, fx_win_h);
+    glViewport(0, 0, fx_out_w, fx_out_h);
+    if (v.w != fx_out_w || v.h != fx_out_h) {   /* black bars */
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+    glViewport(v.x, v.y, v.w, v.h);
     if (fx_shown_effect >= 0) {
         GLuint p = fx_effect_program(fx_shown_effect);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
         glUseProgram(p);
+        /* the effect sees the program's own pixels, whatever size it's shown at */
         glUniform2f(glGetUniformLocation(p, "u_size"), (float)fx_win_w, (float)fx_win_h);
+        glUniform4f(glGetUniformLocation(p, "u_view"), (float)v.x, (float)v.y, (float)v.w, (float)v.h);
         glUniform1f(glGetUniformLocation(p, "u_time"), (float)fx_shown_time);
         glUniform1fv(glGetUniformLocation(p, "u_vars"), 8, fx_shown_vals);
         glActiveTexture(GL_TEXTURE0);
@@ -1357,7 +1459,8 @@ static void fx_present(void) {
     } else {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, fx_scene_fbo);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        glBlitFramebuffer(0, 0, fx_win_w, fx_win_h, 0, 0, fx_win_w, fx_win_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBlitFramebuffer(0, 0, fx_cw, fx_ch, v.x, v.y, v.x + v.w, v.y + v.h, GL_COLOR_BUFFER_BIT,
+                          v.w == fx_cw && v.h == fx_ch ? GL_NEAREST : GL_LINEAR);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 }
@@ -1372,8 +1475,8 @@ static void fx_new_frame(void) {
     fx_dirty = false;
 }
 
-static void fx_draw_and_present(void) {
-    fx_render_frame();
+static void fx_draw_and_present(bool headset) {
+    fx_render_frame(headset);
     fx_shown_effect = fx_effect_id;
     memcpy(fx_shown_vals, fx_effect_vals, sizeof fx_shown_vals);
     fx_shown_time = fx_seconds();
@@ -1400,16 +1503,6 @@ static GLuint fx_framebuffer(GLuint color_tex, GLuint color_rb, GLuint depth_rb,
     return f;
 }
 
-static void fx_make_msaa(int samples) {
-    glGenRenderbuffers(1, &fx_msaa_color);
-    glBindRenderbuffer(GL_RENDERBUFFER, fx_msaa_color);
-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA8, fx_win_w, fx_win_h);
-    glGenRenderbuffers(1, &fx_msaa_depth);
-    glBindRenderbuffer(GL_RENDERBUFFER, fx_msaa_depth);
-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH_COMPONENT24, fx_win_w, fx_win_h);
-    fx_msaa_fbo = fx_framebuffer(0, fx_msaa_color, fx_msaa_depth, 0);
-}
-
 /* OpenGL 3.3 or newer? */
 static bool fx_gl_good_enough(void) {
     fxgl_GetString_t get = (fxgl_GetString_t)SDL_GL_GetProcAddress("glGetString");
@@ -1428,9 +1521,19 @@ static bool fx_gl_good_enough(void) {
 #endif
 static bool fx_software_gl(int64_t w, int64_t h, fx_text title, int line) {
 #ifdef _WIN32
-    const char *dir = getenv("FLAUX_SOFTWARE_GL_DIR");
-    if (!dir || !*dir) dir = FX_SOFTWARE_GL;
-    if (!dir[0]) return false;
+    /* where Mesa is: FLAUX_SOFTWARE_GL_DIR, Flaux's own copy, or (a game someone shared,
+       exported from Flaux Studio) a "mesa" folder next to the program */
+    char here[4096] = "", test[4200];
+    char *base = SDL_GetBasePath();
+    if (base) { snprintf(here, sizeof here, "%smesa", base); SDL_free(base); }
+    const char *dirs[3] = { getenv("FLAUX_SOFTWARE_GL_DIR"), FX_SOFTWARE_GL, here }, *dir = NULL;
+    for (int i = 0; i < 3 && !dir; i++) {
+        if (!dirs[i] || !dirs[i][0]) continue;
+        snprintf(test, sizeof test, "%s/opengl32.dll", dirs[i]);
+        SDL_RWops *f = SDL_RWFromFile(test, "rb");
+        if (f) { SDL_RWclose(f); dir = dirs[i]; }
+    }
+    if (!dir) return false;
     if (fx_gl) SDL_GL_DeleteContext(fx_gl);
     fx_gl = NULL;
     if (fx_win) SDL_DestroyWindow(fx_win);
@@ -1449,6 +1552,7 @@ static bool fx_software_gl(int64_t w, int64_t h, fx_text title, int line) {
     if (SDL_GL_LoadLibrary(path) != 0) return false;
     fx_make_window(w, h, title, SDL_WINDOW_OPENGL, line);
     fx_gl = SDL_GL_CreateContext(fx_win);
+    fx_soft_gl = true;
     return fx_gl != NULL && fx_gl_good_enough();
 #else
     (void)w; (void)h; (void)title; (void)line;
@@ -1550,21 +1654,13 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
     glSamplerParameteri(fx_samp_scene, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
     /* the pictures frames are drawn into */
-    GLint max_samples = 0;
+    GLint max_samples = 0, max_rb = 0, max_tex = 0;
     glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
     fx_samples = max_samples >= 4 ? 4 : max_samples;
-    fx_make_msaa(fx_samples);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        fx_samples = 0;   /* no smooth edges on this computer */
-        fx_make_msaa(0);
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) fx_gl_failed(line, "drawing off-screen didn't work");
-    }
-    glGenTextures(1, &fx_scene_tex);
-    glBindTexture(GL_TEXTURE_2D, fx_scene_tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, fx_win_w, fx_win_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    fx_scene_fbo = fx_framebuffer(fx_scene_tex, 0, 0, 0);
+    glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &max_rb);
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_tex);
+    if (max_rb > 0 && max_tex > 0) fx_max_size = max_rb < max_tex ? max_rb : max_tex;
+    fx_make_targets(fx_win_w, fx_win_h, line);
     glGenTextures(1, &fx_shadow_tex);
     glBindTexture(GL_TEXTURE_2D, fx_shadow_tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, FX_SHADOW_SIZE, FX_SHADOW_SIZE, 0, GL_DEPTH_COMPONENT,
@@ -1584,44 +1680,102 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
 #ifdef FX_USES_XR
     fx_xr_start();
 #endif
-    fx_draw_and_present();   /* a black window to start with */
+    fx_draw_and_present(false);   /* a black window to start with (sharp screens: more pixels) */
     SDL_GL_SwapWindow(fx_win);
+    if (getenv("FLAUX_FULLSCREEN") && *getenv("FLAUX_FULLSCREEN")) fx_set_fullscreen(true); /* for tests */
     SDL_PumpEvents();
     fx_read_input();
     fx_next_frame = SDL_GetPerformanceCounter();
 }
 
-/* Save what's in a framebuffer as a .bmp picture. */
-static void fx_save_picture(GLuint fbo, int w, int h, const char *path, int line) {
+/* Read w by h pixels at (x, y) of a framebuffer as an out_w by out_h picture (each pixel the
+   colour at the middle of its part, when they're not the same size). NULL if there's no memory. */
+static SDL_Surface *fx_read_picture_gl(GLuint fbo, int x, int y, int w, int h, int out_w, int out_h) {
     unsigned char *px = fx_alloc((size_t)w * (size_t)h * 4);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_RGBA32);
+    SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, out_w, out_h, 32, SDL_PIXELFORMAT_RGBA32);
     if (s) {
-        for (int y = 0; y < h; y++)   /* OpenGL counts rows from the bottom */
-            memcpy((uint8_t *)s->pixels + (size_t)y * (size_t)s->pitch, px + (size_t)(h - 1 - y) * (size_t)w * 4, (size_t)w * 4);
+        for (int oy = 0; oy < out_h; oy++) {   /* (OpenGL counts rows from the bottom) */
+            int from_y = out_h == h ? oy : (int)((oy + 0.5) * h / out_h);
+            const uint8_t *src = px + (size_t)(h - 1 - (from_y < h ? from_y : h - 1)) * (size_t)w * 4;
+            uint8_t *dst = (uint8_t *)s->pixels + (size_t)oy * (size_t)s->pitch;
+            if (out_w == w) { memcpy(dst, src, (size_t)w * 4); continue; }
+            for (int ox = 0; ox < out_w; ox++) {
+                int from_x = (int)((ox + 0.5) * w / out_w);
+                memcpy(dst + ox * 4, src + (from_x < w ? from_x : w - 1) * 4, 4);
+            }
+        }
     }
     free(px);
+    return s;
+}
+
+static void fx_save_surface(SDL_Surface *s, const char *path, int line) {
     if (!s || SDL_SaveBMP(s, path) != 0)
         fx_fail(line, "Check the file name, and that you're allowed to save files in that folder.",
                 "Flaux couldn't save the screenshot: %s", SDL_GetError());
     SDL_FreeSurface(s);
 }
 
+/* Save what's in a framebuffer as a .bmp picture. */
+static void fx_save_picture(GLuint fbo, int w, int h, const char *path, int line) {
+    fx_save_surface(fx_read_picture_gl(fbo, 0, 0, w, h, w, h), path, line);
+}
+
+/* Save what's in the window (without the black bars) as a .bmp picture: in the program's own
+   pixels, or at the size it's shown at if `full`. */
+static void fx_save_shown(const char *path, bool full, int line) {
+    SDL_Rect v = fx_shown_rect();
+    fx_save_surface(fx_read_picture_gl(0, v.x, v.y, v.w, v.h, full ? v.w : fx_win_w, full ? v.h : fx_win_h),
+                    path, line);
+}
+
+/* For tests: the screenshots asked for with FLAUX_SCREENSHOT and FLAUX_SCREENSHOT_FULL. */
+static void fx_test_shots(int line) {
+    if (fx_shot_path) fx_save_shown(fx_shot_path, false, line);
+    const char *full = getenv("FLAUX_SCREENSHOT_FULL");
+    if (full && *full) fx_save_shown(full, true, line);
+}
+
+/* screenshot("file.bmp"): what's been drawn so far this frame. */
 static void fx_g_screenshot(fx_text path, int line) {
     fx_need_window(line);
-    fx_save_picture(0, fx_win_w, fx_win_h, fx_text_make(path.p, path.n).p, line);
+    fx_draw_and_present(false);
+    fx_save_shown(fx_text_make(path.p, path.n).p, false, line);
+}
+
+static void fx_redisplay(void) {
+    if (!fx_gl) return;
+    fx_present();
+    SDL_GL_SwapWindow(fx_win);
+}
+static void fx_targets_reset(void) {}
+
+static void fx_set_fullscreen(bool on) {
+    if (!fx_win || on == fx_full) return;
+    int sw = 0, sh = 0;
+    const char *screen = getenv("FLAUX_SCREEN"); /* for tests: a pretend screen of that size */
+    if (screen && sscanf(screen, "%dx%d", &sw, &sh) == 2 && sw > 0 && sh > 0)
+        SDL_SetWindowSize(fx_win, on ? sw : fx_win_w, on ? sh : fx_win_h);
+    else if (SDL_SetWindowFullscreen(fx_win, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) != 0)
+        return;
+    fx_full = on;
+    if (!on) SDL_SetWindowSize(fx_win, fx_win_w, fx_win_h);
+    fx_redisplay();       /* (this also draws at the screen's resolution from now on) */
+    SDL_PumpEvents();
+    fx_read_mouse();      /* the same spot on the screen is somewhere else in the picture now */
 }
 
 /* Show what was drawn, then wait so the game runs at 60 frames a second. */
 static void fx_g_show(int line) {
     fx_need_window(line);
-    fx_draw_and_present();
+    fx_draw_and_present(true);
     fx_frames++;
     bool last = fx_frame_limit >= 0 && fx_frames >= fx_frame_limit;
-    if (last && fx_shot_path) fx_g_screenshot((fx_text){ fx_shot_path, (int64_t)strlen(fx_shot_path) }, line);
+    if (last) fx_test_shots(line);
     SDL_GL_SwapWindow(fx_win);
     fx_new_frame();
     if (last) {
@@ -1637,22 +1791,17 @@ static void fx_g_finish(void) {
         if (fx_audio) fx_g_close();
         return;
     }
-    if (fx_dirty) fx_draw_and_present();
+    if (fx_dirty) fx_draw_and_present(true);
     else fx_present();
     if (fx_frame_limit >= 0) { /* test mode */
-        if (fx_shot_path) fx_g_screenshot((fx_text){ fx_shot_path, (int64_t)strlen(fx_shot_path) }, 0);
+        fx_test_shots(0);
         fx_g_close();
         return;
     }
     SDL_GL_SwapWindow(fx_win);
     SDL_Event ev;
-    while (SDL_WaitEvent(&ev)) {
-        if (ev.type == SDL_QUIT) break;
-        if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_EXPOSED) {
-            fx_present();
-            SDL_GL_SwapWindow(fx_win);
-        }
-    }
+    while (SDL_WaitEvent(&ev))
+        if (fx_handle_event(&ev)) break;
     fx_g_close();
 }
 

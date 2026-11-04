@@ -1,0 +1,30 @@
+# frames: 2
+# screen: 1920x1080
+# mouse: 960,540
+# canvas: 1728x1080
+# pixel: 150 150 #ffe135
+# pixel: 250 250 #0f1b4c
+# pixel: 401 51 #e8303a
+# pixel: 320 200 #9be81e
+# full_pixel: 540 537 #ffe135
+# full_pixel: 542 539 #0f1b4c
+# full_pixel: 1084 139 #e8303a
+# full_pixel: 1085 139 #0f1b4c
+# again_with: FLAUX_NO_GEOMETRY=1
+# Fullscreen draws at the screen's full resolution. On a 1920x1080 screen the
+# 640x400 window is shown 1728x1080 (2.7 times bigger, black bars at the
+# sides), and the canvas has that many pixels: the triangle's slanted edge
+# goes through the middle of program pixel (200, 199), so part of it is yellow
+# and part navy. Rects stay on whole program pixels (the 2x2 one is 5 canvas
+# pixels wide), and the program keeps its own coordinates: screenshots
+# (`pixel:`) and the mouse (in the middle of the screen) are in its pixels.
+# It's checked again drawing triangles in rows of pixels (for SDL before 2.0.18).
+window(640, 400)
+fullscreen()
+repeat 2 times
+    clear("navy")
+    triangle(100, 100, 300, 100, 100, 300, "yellow")
+    rect(400, 50, 2, 2, "red")
+    rect(mouse_x() - 2, mouse_y() - 2, 4, 4, "lime")
+    show()
+end

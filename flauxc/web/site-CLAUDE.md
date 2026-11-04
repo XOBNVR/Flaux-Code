@@ -15,8 +15,9 @@ are **built from that repository**, so make lasting changes there and rebuild
 |---|---|
 | `index.html` | the page: Flaux Studio (editor, Blocks mode, output, lessons) |
 | `web.js` | the page's helper: loads Python, runs programs, keeps files in the browser |
-| `fx.js` | the runtime that compiled Flaux programs use (maths, text, 2D graphics, keys, controllers, sound) |
+| `fx.js` | the runtime that compiled Flaux programs use (maths, text, 2D graphics, keys, mouse, controllers, sound) |
 | `fx3d.js` | 3D, shaders and VR/AR: the same engine as the Windows app, drawn with WebGL 2 and WebXR |
+| `player.html` | the page an exported program becomes (**Export** button: `web.js` fills in `fx.js` (and `fx3d.js` plus the GPU code for 3D programs), the compiled program and its pictures, and zips it with a `Play <name>.bat`) |
 | `blocks.js`, `blockly/` | the block editor (built on Google's Blockly) |
 | `pyodide/` | Python for web pages (Pyodide 314.0.7). It runs Flaux's real compiler in the browser |
 | `flaux-files.json` | the Flaux compiler's Python source files, loaded into Pyodide |
@@ -33,10 +34,20 @@ are **built from that repository**, so make lasting changes there and rebuild
 2. Checking code, the "Apply fix" button and Blocks mode all use that real
    compiler, so the error messages are exactly the same as the desktop app's.
 3. To run a program, the compiler turns it into JavaScript, and it runs in
-   the page on `fx.js`. Games draw on a `<canvas>` above the output. 3D
-   programs and shaders draw with WebGL 2 (`fx3d.js`); the GPU code
-   (GLSL) comes from the compiler (`engine.glsl`, inside `flaux-files.json`).
-4. A 3D program gets **Enter VR** / **Enter AR** buttons above the game when
+   the page on `fx.js`. Games draw on a `<canvas>` above the output.
+   Its Fullscreen button puts that canvas on the whole screen (Fullscreen API),
+   scaled to fit with black bars; mouse positions are turned back into canvas pixels.
+   The canvas has as many pixels as it's shown at (times the screen's pixel ratio,
+   up to about 4K; `web.js` watches its size and calls the runtime's `win.resize`),
+   so games are drawn at the screen's full resolution while programs keep their
+   own `window(w, h)` coordinates.
+   `lock_mouse()` locks the pointer to the canvas (Pointer Lock API, after a click;
+   Esc lets go) and `mouse_moved_x/y()` add up `movementX/Y` between frames, in CSS
+   pixels as given (not scaled to the canvas, so turning feels the same in the panel
+   and fullscreen). On touch screens a finger is the mouse, and dragging it is mouse movement.
+   3D programs and shaders draw with WebGL 2 (`fx3d.js`), also at the full resolution;
+   the GPU code (GLSL) comes from the compiler (`engine.glsl`, inside `flaux-files.json`).
+4. A 3D program gets **Enter VR** / **Enter AR** buttons next to the game when
    the browser has WebXR and a headset (or an AR phone) is there.
 5. People's programs and pictures are kept in their own browser
    (`localStorage` keys `flaux-web-programs` and `flaux-web-pictures`).

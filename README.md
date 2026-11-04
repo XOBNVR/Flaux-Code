@@ -88,6 +88,8 @@ A few things are different in the browser:
   (in **Open**) to keep a copy on your computer, and **Open a .flx file from
   this computer** to bring one in.
 - **Games appear above the output.** Click the game so it gets the keys.
+  Click **&#9974; Fullscreen** under the game to play on the whole screen
+  (**Esc** leaves).
 - **Pictures:** click **Pictures** to add your own picture files.
 - **Speed:** programs run as JavaScript, which is fine for learning and
   games but much slower than the Windows app for heavy number-crunching.
@@ -111,6 +113,13 @@ Flaux Studio is where you write and run your programs. Open it from the
   bits of code you can add to your program with one click.
 - **Open** shows your programs, the lessons and the games.
   **Save** keeps your program in your **Documents\Flaux** folder.
+- **&#11015; Export** makes a `.zip` of your program that runs without Flaux
+  Studio, to share or keep. Unzip it and double-click the **Play** file
+  inside. In the Windows app the zip (in your **Documents\Flaux** folder)
+  holds your real program (`.exe`, plus `SDL2.dll` and its pictures for a
+  game); on the website it downloads a zip with your program as one web page,
+  `game.html`, that opens in the web browser (it works from your computer,
+  and you can put it on any website too).
 - **&#127769; Night** switches to dark colours. **A&minus;** and **A+**
   change the text size.
 
@@ -432,6 +441,17 @@ More kinds of repeat:
 
 Inside a repeat, `stop` jumps out of it, and `skip` jumps to the next turn.
 
+To watch a loop go slowly, `wait` pauses the program. Put `s` (seconds),
+`m` (minutes), `h` (hours) or `d` (days) after the number:
+
+```
+repeat with i from 3 to 1 by -1
+    say i
+    wait 1s
+end
+say "Lift off!"
+```
+
 ### Lesson 8: Lists
 
 A **list** holds lots of things in order.
@@ -566,6 +586,20 @@ end
 
 Run it, and the arrow keys move the ball. Close the window to stop.
 
+**Fullscreen:** press **F11** in a game's window to fill the whole screen
+(press it again to go back). In Flaux Studio on the web, click
+**&#9974; Fullscreen** under the game. Your game doesn't need to change: it's
+made bigger to fit, and the mouse still gives places in your window's own
+pixels. In fullscreen (and on sharp screens) games are drawn at the screen's
+full resolution, so triangles, circles and lines come out smooth and sharp,
+while your program still uses its `window(...)` coordinates. To start a game
+fullscreen, put `fullscreen()` after `window(...)`.
+
+**Mouse look:** for a 3D game, `lock_mouse()` hides the pointer and lets the
+mouse turn the view: `set turn to turn + mouse_moved_x() * 0.004`. Esc gives
+the pointer back, and a click on the game locks it again. See
+[Mouse look](docs/LANGUAGE.md#mouse-look).
+
 **Drawing:**
 
 | Write | Draws |
@@ -589,6 +623,9 @@ Run it, and the arrow keys move the ball. Close the window to stop.
 | `mouse_x()`, `mouse_y()` | where the mouse is |
 | `mouse_down()` | true while the mouse button is held |
 | `mouse_clicked()` | true only at the moment of a click |
+| `mouse_moved_x()`, `mouse_moved_y()` | how far the mouse moved since the last frame, in screen pixels (the same however big the game is shown) |
+| `lock_mouse()`, `unlock_mouse()` | hides the pointer so the mouse can turn a 3D view (Esc gives it back) |
+| `mouse_locked()` | true while the mouse is locked |
 | `beep(440, 0.2)` | plays a beep: pitch 440 for 0.2 seconds |
 
 **Colours:** `"black"`, `"white"`, `"gray"`, `"red"`, `"orange"`,
@@ -910,6 +947,7 @@ change the colours, add a second basket. That's the best way to learn.
 | make a function | `function name(input)` ... `end` |
 | give back an answer | `return answer` |
 | roll a dice | `random(1, 6)` |
+| pause for a while | `wait 1s`, `wait 0.5s`, `wait 2m`, `wait delay seconds` |
 | leave a note | `# anything after a hash is ignored` |
 | open a window | `window(800, 600, "My Game")` |
 | draw shapes | `rect(...)`, `circle(...)`, `triangle(...)`, `line(...)` |
@@ -929,8 +967,9 @@ Built-in helpers: `ask`, `random`, `length`, `contains`, `text`, `number`,
 Graphics: `window`, `clear`, `rect`, `circle`, `triangle`, `line`, `dot`,
 `write`, `show`, `key_down`, `key_pressed`, `mouse_x`, `mouse_y`,
 `mouse_down`, `mouse_clicked`, `beep`, `text_width`, `screenshot`, `image`,
-`image_width`, `image_height`, `fps`, `seconds`, `button_down`,
-`button_pressed`, `stick_x`, `stick_y`.
+`image_width`, `image_height`, `fps`, `seconds`, `fullscreen`,
+`mouse_moved_x`, `mouse_moved_y`, `lock_mouse`, `unlock_mouse`, `mouse_locked`,
+`button_down`, `button_pressed`, `stick_x`, `stick_y`.
 3D: `camera`, `sky`, `sun`, `light`, `fog`, `turn`, `cube`, `box`, `ball`,
 `cylinder`, `cone`, `plane`, `model`, `effect`, `in_vr`, `hand_x`,
 `hand_y`, `hand_z`.
@@ -1085,7 +1124,7 @@ your .flx file → lexer → parser → type checker → C code → gcc/clang �
 | [`flauxc/cli.py`](flauxc/cli.py) | the `flaux` command |
 | [`flauxc/studio/`](flauxc/studio/) | Flaux Studio: a tiny local web server and the editor page |
 | [`flauxc/jsgen.py`](flauxc/jsgen.py) | the second backend: turns Flaux into JavaScript for the web version |
-| [`flauxc/web/`](flauxc/web/) | Flaux Studio on the web: the JavaScript runtime (`fx.js`), the page's helper (`web.js`), Python's side (`web_api.py`) and the site builder (`build.py`) |
+| [`flauxc/web/`](flauxc/web/) | Flaux Studio on the web: the JavaScript runtime (`fx.js`), the page's helper (`web.js`), Python's side (`web_api.py`), the page an exported program becomes (`player.html`) and the site builder (`build.py`) |
 | [`flauxc/studio/blocks.py`](flauxc/studio/blocks.py), [`blocks.js`](flauxc/studio/blocks.js) | the block editor: code to blocks, and blocks to code (built on [Blockly](https://developers.google.com/blockly)) |
 | [`installer/`](installer/) | the Windows installer (Inno Setup), `flaux.exe`, and its build scripts |
 | [`assets/`](assets/) | the Flaux icon, and the script that makes every size of it |

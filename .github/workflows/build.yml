@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install gcc, SDL2 and Mesa (OpenGL without a graphics card, for the 3D tests)
-        run: sudo apt-get update && sudo apt-get install -y gcc libsdl2-dev libegl1 libegl-mesa0 libgl1-mesa-dri
+        run: sudo apt-get update && sudo apt-get install -y gcc libsdl2-dev libegl1 libegl-mesa0 libgl1-mesa-dri xvfb
       - name: Run all tests
         run: python3 tests/run_tests.py
       - name: Install a browser for the block editor test

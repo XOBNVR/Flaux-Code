@@ -1,0 +1,18 @@
+# frames: 4
+# mouse_move: 2.5,-1.5
+# near: 100 50 #a3a3a3
+# pixel: 40 50 #000000
+# Mouse look works in 3D too: mouse_moved_x() turns things in the world.
+# After 4 frames the mouse has moved 10 to the right, so the cube has
+# moved from the left to the middle.
+window(200, 100)
+lock_mouse()
+set moved to 0
+repeat with i from 1 to 4
+    set moved to moved + mouse_moved_x()
+    say "{mouse_moved_x()} {mouse_moved_y()}"
+    sky("black", "black")
+    camera(0, 0, 5, 0, 0, 0)
+    cube(moved * 0.2 - 2, 0, 0, 1, "white")
+    show()
+end

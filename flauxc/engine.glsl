@@ -182,7 +182,8 @@ void main() { o_color = texture(u_tex, v_uv) * v_color; }
 //@@ effect_fs
 out vec4 o_color;
 uniform sampler2D u_scene;
-uniform vec2 u_size;
+uniform vec2 u_size;      // the program's window(...) size
+uniform vec4 u_view;      // where the picture is shown in the window, in real pixels (x, y, w, h)
 uniform float u_time;
 uniform float u_vars[8];
 vec3 fx_at(float x, float y) { return texture(u_scene, vec2(x / u_size.x, 1.0 - y / u_size.y)).rgb * 255.0; }
@@ -193,8 +194,9 @@ float blue_at(float x, float y) { return fx_at(x, y).b; }
 //@@USER@@
 
 void main() {
-    float x = gl_FragCoord.x;
-    float y = u_size.y - gl_FragCoord.y;
+    // in the program's pixels, also in fullscreen and on sharp screens
+    float x = (gl_FragCoord.x - u_view.x) * u_size.x / u_view.z;
+    float y = u_size.y - (gl_FragCoord.y - u_view.y) * u_size.y / u_view.w;
     vec3 c = fx_at(x, y);
     o_color = vec4(clamp(fx_user_screen(x, y, u_size.x, u_size.y, u_time, c.r, c.g, c.b) / 255.0, 0.0, 1.0), 1.0);
 }

@@ -75,8 +75,14 @@ BUILTINS = {
     "mouse_y": "circle(mouse_x(), mouse_y(), 10, \"white\")",
     "mouse_down": "if mouse_down()\n    circle(mouse_x(), mouse_y(), 5, \"red\")\nend",
     "mouse_clicked": "if mouse_clicked()\n    add 1 to clicks\nend",
+    "mouse_moved_x": "set turn to turn + mouse_moved_x() * 0.004    # look left and right",
+    "mouse_moved_y": "set tilt to tilt + mouse_moved_y() * 0.004    # look up and down",
+    "lock_mouse": "window(800, 600)\nlock_mouse()    # hide the pointer: the mouse turns the view (Esc lets go)",
+    "unlock_mouse": "unlock_mouse()    # give the pointer back",
+    "mouse_locked": "if not mouse_locked()\n    write(\"Click to look around\", 10, 10)\nend",
     "beep": "beep(440, 0.2)    # pitch, seconds",
     "screenshot": "screenshot(\"picture.bmp\")",
+    "fullscreen": "window(800, 600)\nfullscreen()    # fill the screen (F11 switches back)",
     "image": "image(\"ship.png\", 100, 200)              # a picture at x, y\n"
              "image(\"ship.png\", 100, 200, 64, 64)      # ...64 by 64 pixels\n"
              "image(\"ship.png\", 100, 200, 64, 64, 90)  # ...turned 90 degrees",
@@ -132,7 +138,8 @@ MODEL_TYPES = (".obj",)
 GRAPHICS_BUILTINS = {"window", "show", "clear", "rect", "circle", "line", "triangle", "dot", "write", "key_down",
                      "key_pressed", "mouse_x", "mouse_y", "mouse_down", "mouse_clicked", "beep",
                      "screenshot", "text_width", "image", "image_width", "image_height", "fps", "seconds",
-                     "button_down", "button_pressed", "stick_x", "stick_y"} | THREE_D_BUILTINS
+                     "button_down", "button_pressed", "stick_x", "stick_y", "fullscreen",
+                     "mouse_moved_x", "mouse_moved_y", "lock_mouse", "unlock_mouse", "mouse_locked"} | THREE_D_BUILTINS
 
 PICTURE_TYPES = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
 
@@ -1146,6 +1153,26 @@ class Compiler:
         self.depth -= 1
         self.emit("}")
 
+    WAIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    WAIT_WORDS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
+
+    def s_Wait(self, s):
+        c, t = self.expr(s.amount)
+        if t == UNK:
+            return
+        if not is_num(t):
+            text = self.src(s.amount)
+            raise self.err(s.amount, f"`wait` needs a number of {self.WAIT_WORDS[s.unit]}, but this is {describe(t)}.",
+                           hint="If the text holds a number, turn it into a number first:" if t == TEXT else
+                                "Put a number here, like this:",
+                           fix=f"number({text})" if t == TEXT else None,
+                           example=None if t == TEXT else "wait 2s\nwait delay seconds")
+        if isinstance(s.amount, N.Num) and s.amount.value < 0:
+            raise self.err(s.amount, "You can't wait for a negative amount of time.",
+                           hint="Waiting goes forwards only. Use a number that's 0 or more:",
+                           fix=self.src(s.amount).lstrip("-").lstrip() or "1")
+        self.emit(f"fx_wait({self.conv(c, t, FLOAT)}, {self.WAIT_SECONDS[s.unit]}, {s.line});")
+
     def s_Stop(self, s):
         if self.loops == 0:
             hint = "`stop` ends the `repeat` it's inside."
@@ -1963,6 +1990,26 @@ class Compiler:
         self.arity(e, args, 0)
         return self.graphics_call("fx_mouse_clicked()", BOOL)
 
+    def b_mouse_moved_x(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call("fx_mouse_moved_x()", INT)
+
+    def b_mouse_moved_y(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call("fx_mouse_moved_y()", INT)
+
+    def b_lock_mouse(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call(f"fx_g_lock_mouse(true, {e.line})")
+
+    def b_unlock_mouse(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call(f"fx_g_lock_mouse(false, {e.line})")
+
+    def b_mouse_locked(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call("fx_mouse_locked()", BOOL)
+
     def b_beep(self, e, args):
         self.arity(e, args, 1, 2)
         nums = self.numbers(e, args)
@@ -2033,6 +2080,10 @@ class Compiler:
         if tt == UNK:
             return "", INT
         return self.graphics_call(f"fx_text_width({self.to_text(tc, tt)}, {size})", INT)
+
+    def b_fullscreen(self, e, args):
+        self.arity(e, args, 0)
+        return self.graphics_call(f"fx_g_fullscreen({e.line})")
 
     def b_screenshot(self, e, args):
         self.arity(e, args, 1)

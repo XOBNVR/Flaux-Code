@@ -7,12 +7,24 @@
  * the page (or to a test):
  *   io.write(stream, text)        stream is "out" or "err"
  *   io.ask(prompt) -> Promise     resolves with the typed answer
- *   io.openWindow(w, h, title)    -> { screen: canvas, back: canvas }
- *   io.keys (Set of key names)    io.mouse = { x, y, down }
+ *   io.openWindow(w, h, title)    -> { screen: canvas, back: canvas }, both w by h to start with.
+ *                                 The runtime adds win.resize(width, height) to that object: the
+ *                                 page calls it to draw at more pixels when the game is shown bigger
+ *                                 (fullscreen, a sharp screen). Programs keep their own w-by-h pixels.
+ *   io.keys (Set of key names)    io.mouse = { x, y, down, pressed }  (pressed: set on
+ *                                 mouse down, so a click quicker than a frame still counts)
+ *                                 io.mouse.mx, my: how far it moved since the last frame, in screen
+ *                                 (CSS) pixels as the browser gives them, not scaled to the canvas
+ *                                 (added up by the page, set back to 0 at each frame)
+ *   io.fullscreen()               (optional) asked for by fullscreen()
+ *   io.lockMouse(on)              (optional) lock_mouse() / unlock_mouse()
+ *   io.mouseLocked() -> bool      (optional) for mouse_locked()
  *   io.nextFrame() -> Promise     waits for the next frame (60 a second)
  *   io.cancelled() -> bool        true after Stop was pressed
  *   io.loadPicture(name) -> Promise<image or null>
  *   io.beep(pitch, seconds)       io.now() (milliseconds)
+ *   io.sleep(ms) -> Promise       (optional) waits, but finishes early when
+ *                                 Stop is pressed; used by `wait`
  */
 (function (root) {
   "use strict";
@@ -69,6 +81,22 @@
 
   const PAD_FIX = 'Controller buttons are "a", "b", "x", "y", "start", "back", "lb", "rb" (bumpers),\n' +
     '  "lt", "rt" (triggers), "l3", "r3" (pressing a stick) and "up", "down", "left", "right" (the D-pad).';
+
+  // Give the browser (or Node) a turn, without setTimeout's 4 ms minimum.
+  let channel = null;
+  const wakeUps = [];
+  function nextTask() {
+    if (typeof setImmediate === "function") return new Promise((resolve) => setImmediate(resolve));
+    if (typeof MessageChannel === "function") {
+      if (!channel) {
+        channel = new MessageChannel();
+        channel.port1.onmessage = () => { const resolve = wakeUps.shift(); if (resolve) resolve(); };
+      }
+      return new Promise((resolve) => { wakeUps.push(resolve); channel.port2.postMessage(0); });
+    }
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
   function squash(text) { return String(text).toLowerCase().replace(/[ _-]/g, ""); }
   function lround(x) { return x < 0 ? -Math.round(-x) : Math.round(x); }
   function px(v) { return v > 1e6 ? 1e6 : v < -1e6 ? -1e6 : lround(v); }
@@ -135,10 +163,38 @@
       if (a > b) fail(line, "Put the smaller number first, like random(0.0, 1.0).", "random(a, b) has the bigger number first.");
       return a + (b - a) * Math.random();
     };
+    // Loops call this every 1000 steps. About every 12 ms it gives the page a
+    // turn, so clicks (like Stop), drawing and the output panel keep working
+    // while a long loop runs.
+    let lastBreath = io.now();
     fx.breathe = async () => {
       fx.steps = 0;
       if (io.cancelled()) throw new FlauxCancelled();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (io.now() - lastBreath < 12) return;
+      await nextTask();
+      lastBreath = io.now();
+      if (io.cancelled()) throw new FlauxCancelled();
+    };
+
+    // `wait 2s`: amount times the unit's seconds. Stop works straight away,
+    // even in the middle of a long wait.
+    fx.wait = async (amount, unit, line) => {
+      if (Number.isNaN(amount))
+        fail(line, "Check the calculation before the unit. It must give a number, like `wait 1s`.",
+          "`wait` was given something that isn't a number.");
+      if (amount < 0)
+        fail(line, "Waiting goes forwards only, so the time must be 0 or more. You could check it first:\n\n" +
+          "      if delay > 0\n          wait delay seconds\n      end", "You can't wait for a negative amount of time.");
+      const end = io.now() + amount * unit * 1000;
+      for (;;) {
+        if (io.cancelled()) throw new FlauxCancelled();
+        const left = end - io.now();
+        if (left <= 0) break;
+        const ms = Math.min(left, io.sleep ? 60000 : 50);   // short naps if Stop can't wake us
+        await (io.sleep ? io.sleep(ms) : new Promise((resolve) => setTimeout(resolve, ms)));
+      }
+      fx.steps = 0;
+      lastBreath = io.now();
     };
 
     const numberText = /^\s*[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?\s*$/i;
@@ -175,7 +231,13 @@
 
     // ------------------------------------------------------------ graphics
     let colors = {}, font = [], win = null, back = null, ctx = null, W = 0, H = 0, dirty = false;
+    // Drawing happens at the canvas's real size: sx, sy canvas pixels per program pixel (1 to
+    // start with; more when the page shows the game bigger, see resize). Programs keep their own
+    // pixels: rects, dots and text land on whole program pixels (so they stay sharp and blocky),
+    // and shapes (triangles, circles, lines) are smooth paths at the full resolution.
+    let sx = 1, sy = 1, styled = null;
     let keysNow = new Set(), keysPrev = new Set(), mouseNow = false, mousePrev = false;
+    let moveX = 0, moveY = 0, movedX = 0, movedY = 0;       // mouse movement (see readInput)
     const pictures = new Map();
     fx.setupGraphics = (c, f) => { colors = c; font = f; };
 
@@ -194,30 +256,93 @@
       lastColour = c; lastStyle = style;
       return style;
     }
-    function use(c, line) { needWindow(line); ctx.fillStyle = colour(c === undefined ? "white" : c, line); dirty = true; }
-    function span(x1, x2, y) { if (x2 >= x1) ctx.fillRect(x1, y, x2 - x1 + 1, 1); }
+    function use(c, line) {
+      needWindow(line);
+      const style = colour(c === undefined ? "white" : c, line);
+      if (style !== styled) { ctx.fillStyle = ctx.strokeStyle = style; styled = style; }
+      dirty = true;
+    }
+    // Whole program pixels [x0, x1) by [y0, y1), with edges on whole canvas pixels: sharp, and
+    // boxes side by side meet exactly (rect, dot, the pixels of text).
+    function box(x0, y0, x1, y1) {
+      const a = Math.round(x0 * sx), b = Math.round(y0 * sy);
+      ctx.fillRect(a, b, Math.round(x1 * sx) - a, Math.round(y1 * sy) - b);
+    }
+    // A filled triangle, at the canvas's real resolution with smooth edges. It's made a little
+    // bigger (half a canvas pixel all round), so triangles side by side (like the two halves of a
+    // square in a 3D game) overlap a little: their soft edges would otherwise let a thin line of
+    // the background show between them.
     function fillTriangle(x1, y1, x2, y2, x3, y3) {
-      let t;
-      if (y1 > y2) { t = x1; x1 = x2; x2 = t; t = y1; y1 = y2; y2 = t; }
-      if (y1 > y3) { t = x1; x1 = x3; x3 = t; t = y1; y1 = y3; y3 = t; }
-      if (y2 > y3) { t = x2; x2 = x3; x3 = t; t = y2; y2 = y3; y3 = t; }
-      const top = Math.max(0, Math.ceil(y1 - 0.5)), bottom = Math.min(H - 1, Math.floor(y3 - 0.5));
-      for (let y = top; y <= bottom; y++) {
-        const yc = y + 0.5;
-        let xa = y3 === y1 ? x1 : x1 + (x3 - x1) * (yc - y1) / (y3 - y1);
-        let xb = yc < y2 ? (y2 === y1 ? x1 : x1 + (x2 - x1) * (yc - y1) / (y2 - y1))
-                         : (y3 === y2 ? x2 : x2 + (x3 - x2) * (yc - y2) / (y3 - y2));
-        if (xa > xb) { t = xa; xa = xb; xb = t; }
-        span(Math.ceil(xa - 0.5), Math.floor(xb - 0.5), y);
+      const ax = x1 * sx, ay = y1 * sy, bx = x2 * sx, by = y2 * sy, cx = x3 * sx, cy = y3 * sy;
+      const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+      if (!area) return;                      // flat: nothing to fill (like the desktop version)
+      ctx.beginPath();
+      if (isFinite(area)) {
+        // each side's outward direction (one way round the triangle or the other)
+        const s = area > 0 ? 1 : -1;
+        let l = Math.hypot(bx - ax, by - ay);
+        const ux = s * (by - ay) / l, uy = s * (ax - bx) / l;     // side a-b
+        l = Math.hypot(cx - bx, cy - by);
+        const vx = s * (cy - by) / l, vy = s * (bx - cx) / l;     // side b-c
+        l = Math.hypot(ax - cx, ay - cy);
+        const wx = s * (ay - cy) / l, wy = s * (cx - ax) / l;     // side c-a
+        corner(ax, ay, wx, wy, ux, uy, true);
+        corner(bx, by, ux, uy, vx, vy, false);
+        corner(cx, cy, vx, vy, wx, wy, false);
+      } else {                                // (enormous: just as it is)
+        ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(cx, cy);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    // A corner of a triangle moved out half a canvas pixel from both of its sides (n1, n2: their
+    // outward directions). A sharp corner would stick out a long way, so it's cut off instead.
+    function corner(x, y, n1x, n1y, n2x, n2y, first) {
+      const d = 1 + n1x * n2x + n1y * n2y;
+      if (d > 0.25) {                         // (wider than about 40 degrees)
+        const k = 0.5 / d;
+        if (first) ctx.moveTo(x + (n1x + n2x) * k, y + (n1y + n2y) * k);
+        else ctx.lineTo(x + (n1x + n2x) * k, y + (n1y + n2y) * k);
+      } else {
+        if (first) ctx.moveTo(x + n1x * 0.5, y + n1y * 0.5); else ctx.lineTo(x + n1x * 0.5, y + n1y * 0.5);
+        ctx.lineTo(x + n2x * 0.5, y + n2y * 0.5);
       }
     }
-    function fillCircle(cx, cy, r) {
-      if (r <= 0) return;
-      const top = Math.max(-1, Math.ceil(cy - r)), bottom = Math.min(H, Math.floor(cy + r));
-      for (let y = top; y <= bottom; y++) {
-        const dx = Math.sqrt(Math.max(0, r * r - (y - cy) * (y - cy)));
-        span(px(cx - dx), px(cx + dx), y);
+    function fillCircle(cx, cy, r) {          // centre and radius in program pixels (not rounded)
+      ctx.beginPath();
+      ctx.ellipse(cx * sx, cy * sy, r * sx, r * sy, 0, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+    // A line from the middle of one program pixel to the middle of another, `width` program pixels wide.
+    function strokeLine(x1, y1, x2, y2, width, cap) {
+      ctx.lineWidth = width * (sx + sy) / 2;
+      ctx.lineCap = cap;
+      ctx.beginPath();
+      ctx.moveTo((x1 + 0.5) * sx, (y1 + 0.5) * sy);
+      ctx.lineTo((x2 + 0.5) * sx, (y2 + 0.5) * sy);
+      ctx.stroke();
+    }
+    // After the canvas changes size (its drawing settings are reset then).
+    function fresh() {
+      sx = back.width / W; sy = back.height / H;
+      ctx.imageSmoothingEnabled = false;      // pictures keep sharp pixels, like the desktop version
+      styled = null;
+    }
+    // The page shows the game bigger or smaller (fullscreen, a sharp screen): draw at that many
+    // pixels from now on. What's drawn so far is kept, scaled, so a finished picture still shows.
+    function resize(width, height) {
+      width = Math.max(1, Math.round(width)); height = Math.max(1, Math.round(height));
+      if (!back || (width === back.width && height === back.height)) return;
+      for (const c of [back, win.screen]) {
+        const old = c.ownerDocument.createElement("canvas");
+        old.width = c.width; old.height = c.height;
+        old.getContext("2d").drawImage(c, 0, 0);
+        c.width = width; c.height = height;
+        const g = c.getContext("2d");
+        g.imageSmoothingEnabled = width % old.width !== 0 || height % old.height !== 0;  // whole times bigger: sharp
+        g.drawImage(old, 0, 0, width, height);
       }
+      fresh();
     }
     // game controllers (and VR controllers, through fx.extraPads), with the
     // same button names as the desktop app
@@ -268,7 +393,13 @@
     }
     function readInput() {
       keysPrev = keysNow; keysNow = new Set(io.keys);
-      mousePrev = mouseNow; mouseNow = !!io.mouse.down;
+      mousePrev = mouseNow; mouseNow = !!(io.mouse.down || io.mouse.pressed);
+      io.mouse.pressed = false;     // a click quicker than a frame still counts
+      // mouse movement: whole pixels this frame, the rest is kept for the next one (like graphics.h)
+      moveX += io.mouse.mx || 0; moveY += io.mouse.my || 0;
+      io.mouse.mx = io.mouse.my = 0;
+      movedX = Math.trunc(moveX); movedY = Math.trunc(moveY);
+      moveX -= movedX; moveY -= movedY;
       readPads();
     }
     function present() { win.screen.getContext("2d").drawImage(back, 0, 0); dirty = false; }
@@ -296,8 +427,9 @@
         win = io.openWindow(w, h, title === undefined ? "Flaux" : str(title), "2d");
         windowOpened = io.now();
         back = win.back; ctx = back.getContext("2d"); W = w; H = h;
-        ctx.imageSmoothingEnabled = false;
-        ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, w, h); present();
+        win.resize = resize;
+        fresh();
+        ctx.fillStyle = "#000000"; ctx.fillRect(0, 0, back.width, back.height); present();
         readInput(); keysPrev = new Set();
       },
       show: async (_, line) => {
@@ -308,39 +440,26 @@
         if (io.cancelled()) throw new FlauxCancelled();
         readInput();
       },
-      clear: ([c], line) => { use(c === undefined ? "black" : c, line); ctx.fillRect(0, 0, W, H); },
+      clear: ([c], line) => { use(c === undefined ? "black" : c, line); ctx.fillRect(0, 0, back.width, back.height); },
       rect: ([x, y, w, h, c], line) => {
         use(c, line);
         if (w < 0) { x += w; w = -w; }
         if (h < 0) { y += h; h = -h; }
-        ctx.fillRect(px(x), px(y), px(x + w) - px(x), px(y + h) - px(y));
+        box(px(x), px(y), px(x + w), px(y + h));
       },
-      circle: ([x, y, r, c], line) => { use(c, line); fillCircle(x, y, Math.min(r, 20000)); },
+      // a circle covers the pixels within `r` of the middle of pixel (x, y), like the desktop version
+      circle: ([x, y, r, c], line) => { use(c, line); if (r > 0) fillCircle(x + 0.5, y + 0.5, Math.min(r, 20000) + 0.5); },
       triangle: ([x1, y1, x2, y2, x3, y3, c], line) => { use(c, line); fillTriangle(x1, y1, x2, y2, x3, y3); },
-      dot: ([x, y, c], line) => { use(c, line); ctx.fillRect(px(x), px(y), 1, 1); },
+      dot: ([x, y, c], line) => { use(c, line); box(px(x), px(y), px(x) + 1, px(y) + 1); },
       line: ([x1, y1, x2, y2, c, thickness], line) => {
         use(c, line);
-        if (thickness === undefined || thickness <= 1.5) {      // a thin line, one pixel at a time
-          let ax = px(x1), ay = px(y1);
-          const bx = px(x2), by = px(y2), dx = Math.abs(bx - ax), dy = -Math.abs(by - ay);
-          const sx = ax < bx ? 1 : -1, sy = ay < by ? 1 : -1;
-          let err = dx + dy;
-          for (let n = 0; n < 100000; n++) {
-            ctx.fillRect(ax, ay, 1, 1);
-            if (ax === bx && ay === by) break;
-            const e2 = 2 * err;
-            if (e2 >= dy) { err += dy; ax += sx; }
-            if (e2 <= dx) { err += dx; ay += sy; }
-          }
-          return;
-        }
-        const dx = x2 - x1, dy = y2 - y1, len = Math.sqrt(dx * dx + dy * dy), r = thickness / 2;
-        if (len > 0) {
-          const nx = -dy / len * r, ny = dx / len * r;
-          fillTriangle(x1 + nx, y1 + ny, x1 - nx, y1 - ny, x2 + nx, y2 + ny);
-          fillTriangle(x1 - nx, y1 - ny, x2 + nx, y2 + ny, x2 - nx, y2 - ny);
-        }
-        fillCircle(x1, y1, r); fillCircle(x2, y2, r);
+        const thin = thickness === undefined || thickness <= 1.5;
+        if (!thin) thickness = Math.min(thickness, 40000);
+        if (x1 === x2 && y1 === y2) {           // just a dot (or a round blob)
+          if (thin) box(px(x1), px(y1), px(x1) + 1, px(y1) + 1);
+          else fillCircle(x1 + 0.5, y1 + 0.5, thickness / 2);
+        } else if (thin) strokeLine(x1, y1, x2, y2, 1, "square");     // one program pixel wide, ends included
+        else strokeLine(x1, y1, x2, y2, thickness, "round");          // a long rectangle with round ends
       },
       write: ([value, x, y, c, size], line) => {
         use(c, line);
@@ -353,8 +472,10 @@
           const glyph = font[code - 32];
           for (let gx = 0; gx < 5; gx++)
             for (let gy = 0; gy < 7; gy++)
-              if ((glyph[gx] >> gy) & 1)
-                ctx.fillRect(px(x) + col * 6 * s + gx * s, px(y) + row * 9 * s + gy * s, s, s);
+              if ((glyph[gx] >> gy) & 1) {
+                const left = px(x) + col * 6 * s + gx * s, top = px(y) + row * 9 * s + gy * s;
+                box(left, top, left + s, top + s);
+              }
           col++;
         }
       },
@@ -369,7 +490,9 @@
         let dw = w === undefined ? img.width : w, dh = h === undefined ? img.height : h;
         const flipX = dw < 0, flipY = dh < 0;
         dw = Math.abs(dw); dh = Math.abs(dh);
-        const left = px(x), topY = px(y), width = px(x + dw) - left, height = px(y + dh) - topY;
+        // on whole program pixels, with edges on whole canvas pixels like rect (pictures side by side meet)
+        const left = Math.round(px(x) * sx), topY = Math.round(px(y) * sy);
+        const width = Math.round(px(x + dw) * sx) - left, height = Math.round(px(y + dh) * sy) - topY;
         ctx.save();
         ctx.translate(left + width / 2, topY + height / 2);
         if (angle) ctx.rotate(angle * Math.PI / 180);
@@ -384,6 +507,11 @@
       mouse_x: () => Math.round(io.mouse.x), mouse_y: () => Math.round(io.mouse.y),
       mouse_down: () => mouseNow, mouse_clicked: () => mouseNow && !mousePrev,
       beep: ([pitch, seconds]) => io.beep(pitch, seconds === undefined ? 0.1 : seconds),
+      fullscreen: (_, line) => { needWindow(line); if (io.fullscreen) io.fullscreen(); },
+      mouse_moved_x: () => movedX, mouse_moved_y: () => movedY,
+      lock_mouse: (_, line) => { needWindow(line); if (io.lockMouse) io.lockMouse(true); },
+      unlock_mouse: () => { if (win && io.lockMouse) io.lockMouse(false); },
+      mouse_locked: () => !!(win && io.mouseLocked && io.mouseLocked()),
       screenshot: ([name], line) => { needWindow(line); if (io.screenshot) io.screenshot(str(name), back); },
       fps: () => Math.round(fpsValue),
       seconds: () => (io.fast ? frameCount / 60 : (io.now() - windowOpened) / 1000),

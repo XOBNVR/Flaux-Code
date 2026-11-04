@@ -90,7 +90,7 @@ class JsGen:
     def body(self, stmts, loop=False):
         self.depth += 1
         if loop:  # let the page breathe (and the Stop button work) in long loops
-            self.emit("if (++fx.steps > 20000) await fx.breathe();")
+            self.emit("if (++fx.steps > 1000) await fx.breathe();")
         self.block(stmts)
         self.depth -= 1
 
@@ -196,6 +196,10 @@ class JsGen:
         self.emit("}")
         self.depth -= 1
         self.emit("}")
+
+    def s_Wait(self, s):
+        seconds = {"s": 1, "m": 60, "h": 3600, "d": 86400}[s.unit]
+        self.emit(f"await fx.wait({self.ex(s.amount)}, {seconds}, {s.line});")
 
     def s_Stop(self, s):
         self.emit("break;")

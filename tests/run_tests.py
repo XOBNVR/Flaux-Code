@@ -10,9 +10,21 @@ examples/**/*.flx         must compile (they're used in the README).
 tests/graphics/NAME.flx   graphics programs, run without a real screen. Header
                           lines: `# frames: N` (stop after N frames), `# hold: keys`
                           (pretend these keys are held), `# buttons: a,b` (pretend
-                          these controller buttons are held), `# pixel: x y #rrggbb`
-                          (that pixel of the last frame must be this colour), or
-                          `# expect: ...` for programs that must fail.
+                          these controller buttons are held), `# mouse: x,y` (pretend
+                          the mouse is there in the real window), `# mouse_move: dx,dy`
+                          (pretend the mouse moves that far every frame), `# screen: WxH`
+                          (pretend the screen is that big, for fullscreen), `# pixel: x y #rrggbb`
+                          (that pixel of the last frame must be this colour), `# near: x y #rrggbb`
+                          (within a few shades: lit 3D), `# canvas: WxH`
+                          and `# full_pixel: x y #rrggbb` (the canvas's real size, and a pixel
+                          of it: fullscreen draws at the screen's resolution), `# again_with:
+                          NAME=value` (run it again with that set, same checks), or
+                          `# expect: ...` for programs that must fail. If NAME.out
+                          exists, what the program says must match it.
+                          3D tests with `# screen:` run on a pretend X screen (Xvfb) on
+                          Linux, since the "offscreen" driver can't make a 3D window
+                          bigger; they're skipped where that can't be done (Windows,
+                          or no Xvfb: GitHub's Linux computers have it).
                           Skipped if SDL2 isn't installed.
 tests/graphics3d/NAME.flx the same, for 3D and shaders (drawn with OpenGL, so they
                           need Mesa's software OpenGL on a computer without a
@@ -29,12 +41,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
-from flauxc.cli import BUNDLED_SDL, EXE, compile_c  # noqa: E402
+from flauxc.cli import BUNDLED_MESA, BUNDLED_SDL, EXE, compile_c  # noqa: E402
 from flauxc.compiler import compile_source  # noqa: E402
 from flauxc.errors import FlauxError  # noqa: E402
 
@@ -66,6 +79,65 @@ def near(got, want, within=24):
     a = [int(got[i:i + 2], 16) for i in (1, 3, 5)]
     b = [int(want[i:i + 2], 16) for i in (1, 3, 5)]
     return all(abs(x - y) <= within for x, y in zip(a, b))
+
+
+def start_xvfb():
+    """A pretend X screen (Xvfb) for 3D tests that change the window's size, or False."""
+    if os.name == "nt" or sys.platform == "darwin" or not shutil.which("Xvfb"):
+        return False
+    for n in range(91, 120):
+        if os.path.exists(f"/tmp/.X{n}-lock"):
+            continue
+        proc = subprocess.Popen(["Xvfb", f":{n}", "-screen", "0", "1920x1080x24", "-nolisten", "tcp"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(50):
+            if os.path.exists(f"/tmp/.X11-unix/X{n}") or proc.poll() is not None:
+                break
+            time.sleep(0.1)
+        if proc.poll() is None:
+            proc.display = f":{n}"
+            return proc
+    return False
+
+
+def bmp_size(path):
+    """The width and height of a .bmp picture."""
+    data = open(path, "rb").read()
+    return int.from_bytes(data[18:22], "little", signed=True), abs(int.from_bytes(data[22:26], "little", signed=True))
+
+
+def graphics_checks(path, header, code, out, err, shot, full_shot):
+    """What's wrong with a graphics test's run (see the top of this file)."""
+    problems = [] if code == 0 else [f"exit {code}: {err}"]
+    if os.path.exists(path[:-4] + ".out"):
+        expected = open(path[:-4] + ".out", encoding="utf-8").read()
+        if out != expected:
+            problems.append(f"--- expected\n{expected}--- got\n{out}")
+    for spec in header.get("pixel", []):
+        x, y, want = spec.split()
+        got = bmp_pixel(shot, int(x), int(y)) if code == 0 else "?"
+        if got != want.lower():
+            problems.append(f"pixel {x},{y} is {got}, expected {want}")
+    for spec in header.get("near", []):   # lit 3D: within a few shades
+        x, y, want = spec.split()
+        got = bmp_pixel(shot, int(x), int(y)) if code == 0 else "?"
+        if not near(got, want):
+            problems.append(f"pixel {x},{y} is {got}, expected about {want}")
+    for spec in header.get("full_near", []):
+        x, y, want = spec.split()
+        got = bmp_pixel(full_shot, int(x), int(y)) if code == 0 else "?"
+        if not near(got, want):
+            problems.append(f"canvas pixel {x},{y} is {got}, expected about {want}")
+    for spec in header.get("canvas", []):
+        got = "x".join(map(str, bmp_size(full_shot))) if code == 0 else "?"
+        if got != spec:
+            problems.append(f"the canvas is {got}, expected {spec}")
+    for spec in header.get("full_pixel", []):
+        x, y, want = spec.split()
+        got = bmp_pixel(full_shot, int(x), int(y)) if code == 0 else "?"
+        if got != want.lower():
+            problems.append(f"canvas pixel {x},{y} is {got}, expected {want}")
+    return problems
 
 
 def build_and_run(path, stdin, tmp, env=None):
@@ -108,6 +180,28 @@ def studio_checks():
         saved = studio.save("say 1\n", name="My Game")
         if not os.path.isfile(os.path.join(home, "My_Game.flx")) or saved["name"] != "My_Game.flx":
             problems.append(f"save went wrong: {saved}")
+        # Export: a zip with the built program and a file that starts it
+        import zipfile
+        r = studio.export('say "hi"\n', None, show=False)
+        names = zipfile.ZipFile(r["file"]).namelist() if r.get("ok") else []
+        launcher = "game/Play game.bat" if os.name == "nt" else "game/play.sh"
+        if f"game/game{EXE}" not in names or launcher not in names:
+            problems.append(f"export went wrong: {r} {names}")
+        # a 3D game takes its model, the model's .mtl and the picture that names along
+        # (and on Windows Mesa, for computers without a good graphics card)
+        if sdl_installed():
+            for f in ("house.obj", "house.mtl", "checker.png"):
+                shutil.copyfile(os.path.join(HERE, "graphics3d", f), os.path.join(home, f))
+            r = studio.export('window(300, 200)\nmodel("house.obj", 0, 0, 0, 2)\nshow()\n',
+                              os.path.join(home, "house_game.flx"), show=False)
+            names = zipfile.ZipFile(r["file"]).namelist() if r.get("ok") else []
+            want = [f"house_game/house_game{EXE}", "house_game/house.obj", "house_game/house.mtl"]
+            if "map_Kd" in open(os.path.join(home, "house.mtl")).read():
+                want.append("house_game/checker.png")
+            if os.name == "nt" and os.path.isdir(BUNDLED_MESA):
+                want.append("house_game/mesa/opengl32.dll")
+            if any(n not in names for n in want):
+                problems.append(f"3D export went wrong: {r} {names}, wanted {want}")
     return problems
 
 
@@ -152,6 +246,7 @@ def main():
         if three_d and os.environ.get("FLAUX_SKIP_3D"):
             print(f"(skipping {len(three_d)} 3D tests: FLAUX_SKIP_3D is set)")
             graphics = [p for p in graphics if p not in three_d]
+        xvfb = None   # the pretend X screen, started when a test needs it
         for path in graphics:
             name = os.path.relpath(path, HERE).replace(os.sep, "/")
             lines = open(path, encoding="utf-8").read().splitlines()
@@ -161,38 +256,48 @@ def main():
                     key, _, value = l[2:].partition(":")
                     header.setdefault(key.strip(), []).append(value.strip())
             shot = os.path.join(tmp, os.path.basename(path)[:-4] + ".bmp")
+            on_x = path in three_d and "screen" in header
+            if on_x and xvfb is None:
+                xvfb = start_xvfb()
+            if on_x and not xvfb:
+                print(f"(skipping {name}: 3D in fullscreen is tested on Linux with Xvfb)")
+                continue
             # 3D draws with OpenGL: on a test computer without a screen, SDL's
             # "offscreen" driver and Mesa's software graphics card do that
             # (on Windows, a real window: Flaux falls back to Mesa by itself
             # when there's no graphics card, like on GitHub's test computers)
             driver = ("windows" if os.name == "nt" else "offscreen") if path in three_d else "dummy"
+            full_shot = os.path.join(tmp, os.path.basename(path)[:-4] + "-full.bmp")
             env = {"SDL_VIDEODRIVER": driver,
                    "SDL_AUDIODRIVER": "dummy", "FLAUX_FAST": "1",
                    "FLAUX_FRAMES": header.get("frames", ["1"])[0], "FLAUX_SCREENSHOT": shot,
                    "FLAUX_HOLD_KEYS": ",".join(header.get("hold", [])),
-                   "FLAUX_HOLD_BUTTONS": ",".join(header.get("buttons", []))}
+                   "FLAUX_HOLD_BUTTONS": ",".join(header.get("buttons", [])),
+                   "FLAUX_MOUSE": header.get("mouse", [""])[0],
+                   "FLAUX_MOUSE_MOVE": header.get("mouse_move", [""])[0],
+                   "FLAUX_SCREEN": header.get("screen", [""])[0], "FLAUX_SCREENSHOT_FULL": full_shot}
+            if on_x:
+                env.update({"SDL_VIDEODRIVER": "x11", "DISPLAY": xvfb.display})
             code, out, err = build_and_run(path, "", tmp, env)
             if "expect" in header:
                 missing = [e for e in header["expect"] if e not in err]
                 ok = code != 0 and not missing
                 detail = f"exit {code}, missing {missing}\n{err}"
             else:
-                problems = [] if code == 0 else [f"exit {code}: {err}"]
-                for spec in header.get("pixel", []):
-                    x, y, want = spec.split()
-                    got = bmp_pixel(shot, int(x), int(y)) if code == 0 else "?"
-                    if got != want.lower():
-                        problems.append(f"pixel {x},{y} is {got}, expected {want}")
-                for spec in header.get("near", []):   # lit 3D: within a few shades
-                    x, y, want = spec.split()
-                    got = bmp_pixel(shot, int(x), int(y)) if code == 0 else "?"
-                    if not near(got, want):
-                        problems.append(f"pixel {x},{y} is {got}, expected about {want}")
+                problems = graphics_checks(path, header, code, out, err, shot, full_shot)
+                # `# again_with: NAME=value`: the same checks again with that set (another way of drawing)
+                for extra in header.get("again_with", []):
+                    key, _, value = extra.partition("=")
+                    code, out, err = build_and_run(path, "", tmp, {**env, key.strip(): value.strip()})
+                    problems += [f"({extra}) {p}" for p in graphics_checks(path, header, code, out, err, shot, full_shot)]
                 ok, detail = not problems, "\n".join(problems)
             if ok:
                 passed += 1
             else:
                 failures.append((name, detail))
+        if xvfb:
+            xvfb.terminate()
+            xvfb.wait()
 
     # Flaux Studio's helper: checking, Apply fix, running with typed input, saving.
     if pattern in "studio":
