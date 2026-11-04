@@ -1,0 +1,573 @@
+# Surf: the Ocean, now in third person. You ride a detailed surfboard down an
+# endless swell. The sea is the very same shader as ocean.flx (every pixel marches
+# a ray into the waves); the board and surfer are drawn on top with a little 3D of
+# their own, and they rise, fall and tilt on the real waves, because the board reads
+# the water height from the same wave maths the shader uses.
+#
+#   Left / Right (or A / D): carve
+#   Space:                   hop
+#   W / S:                   paddle faster / slower
+#   1, 2, 3, 4:              morning, midday, sunset, night
+#   F11:                     fullscreen
+
+shader ocean
+    # ---- the ray for this pixel (x, y come from the top-left, like 2D)
+    set sx to (x - width / 2) / height * 2
+    set sy to (height / 2 - y) / height * 2
+    set dx to sx
+    set dy to sy - 0.12 + tilt
+    set dz to 1.7
+    set dl to sqrt(dx * dx + dy * dy + dz * dz)
+    set dx to dx / dl
+    set dy to dy / dl
+    set dz to dz / dl
+    # turn it left or right
+    set tx to dx * cos(turn) + dz * sin(turn)
+    set dz to dz * cos(turn) - dx * sin(turn)
+    set dx to tx
+    # where the camera is: a few steps above the water, sailing forward
+    set ox to sin(time * 0.15) * 2
+    set oy to 3.6
+    set oz to travel
+
+    # ---- the sun (and the sky's colours) for this time of day
+    set sunx to sin(turn_sun) * 0.9
+    set suny to sun_up
+    set sunz to cos(turn_sun) * 0.9
+    set sl to sqrt(sunx * sunx + suny * suny + sunz * sunz)
+    set sunx to sunx / sl
+    set suny to suny / sl
+    set sunz to sunz / sl
+    set top_r to 0.10 + 0.15 * day
+    set top_g to 0.18 + 0.32 * day
+    set top_b to 0.35 + 0.55 * day
+    set hor_r to 0.55 + 0.40 * warm + 0.20 * day
+    set hor_g to 0.50 + 0.10 * warm + 0.33 * day
+    set hor_b to 0.55 - 0.25 * warm + 0.42 * day
+    set sun_r to 1.0
+    set sun_g to 0.85 - 0.35 * warm
+    set sun_b to 0.60 - 0.45 * warm + 0.25 * day
+    if night > 0.5
+        set top_r to 0.01
+        set top_g to 0.02
+        set top_b to 0.06
+        set hor_r to 0.05
+        set hor_g to 0.08
+        set hor_b to 0.16
+        set sun_r to 0.75
+        set sun_g to 0.82
+        set sun_b to 1.0
+    end
+
+    # ---- walk along the ray until it reaches the water
+    set t to 0
+    set hit to false
+    set px to 0
+    set py to 0
+    set pz to 0
+    set h to 0
+    if dy < 0.02
+        set t to 0.5
+        repeat 90 times
+            set px to ox + dx * t
+            set py to oy + dy * t
+            set pz to oz + dz * t
+            set h to 0
+            set fx to px * 0.26
+            set fz to pz * 0.26
+            set amp to 0.6
+            set wt to time * 0.8
+            repeat 4 times
+                set a to sin(fx + sin(fz * 0.7 + wt) * 0.8 + wt)
+                set b to sin(fz * 1.1 - fx * 0.4 - wt * 0.9)
+                set w to 1 - abs(a * 0.7 + b * 0.3)
+                add w * w * amp to h
+                set nx to fx * 1.6 + fz * 1.2
+                set fz to fz * 1.6 - fx * 1.2
+                set fx to nx
+                set amp to amp * 0.3
+                set wt to wt * 1.3
+            end
+            set gap to py - h
+            if gap < 0.002 * t
+                set hit to true
+                stop
+            end
+            add max(gap * 0.7, 0.01 * t) to t
+            if t > 260
+                stop
+            end
+        end
+    end
+
+    # ---- the sky (for the rays that don't touch the water)
+    set up to max(dy, 0)
+    set mixing to sqrt(up)
+    set r to hor_r + (top_r - hor_r) * mixing
+    set g to hor_g + (top_g - hor_g) * mixing
+    set bl to hor_b + (top_b - hor_b) * mixing
+    set facing to max(dx * sunx + dy * suny + dz * sunz, 0)
+    set glow to facing ^ 8 * 0.35 + facing ^ 300 * 3
+    if night > 0.5
+        set glow to facing ^ 2000 * 4 + facing ^ 40 * 0.15
+        set star to sin(dx * 900) * sin(dy * 1300 + dz * 400) * sin(dz * 700 - dx * 300)
+        if star > 0.996 and dy > 0.05
+            add 0.8 to r
+            add 0.8 to g
+            add 0.9 to bl
+        end
+    end
+    add sun_r * glow to r
+    add sun_g * glow to g
+    add sun_b * glow to bl
+    if dy > 0.01
+        set cx to dx / dy * 3 + time * 0.05
+        set cz to dz / dy * 3
+        set cloud to sin(cx * 0.9 + sin(cz * 0.7)) * sin(cz * 0.8 + sin(cx * 0.6)) + sin(cx * 2.1 - cz * 1.7) * 0.3
+        set cloud to max(cloud - 0.35, 0) * min(dy * 4, 1) * (1 - night * 0.8)
+        set r to r + (0.95 + 0.05 * warm - r) * cloud
+        set g to g + (0.92 - 0.12 * warm - g) * cloud
+        set bl to bl + (0.95 - 0.30 * warm - bl) * cloud
+    end
+
+    if hit
+        set e to 0.01 + t * 0.0015
+        set hx to 0
+        set fx to (px + e) * 0.26
+        set fz to pz * 0.26
+        set amp to 0.6
+        set wt to time * 0.8
+        repeat 7 times
+            set a to sin(fx + sin(fz * 0.7 + wt) * 0.8 + wt)
+            set b to sin(fz * 1.1 - fx * 0.4 - wt * 0.9)
+            set w to 1 - abs(a * 0.7 + b * 0.3)
+            add w * w * amp to hx
+            set nx to fx * 1.6 + fz * 1.2
+            set fz to fz * 1.6 - fx * 1.2
+            set fx to nx
+            set amp to amp * 0.3
+            set wt to wt * 1.3
+        end
+        set hz to 0
+        set fx to px * 0.26
+        set fz to (pz + e) * 0.26
+        set amp to 0.6
+        set wt to time * 0.8
+        repeat 7 times
+            set a to sin(fx + sin(fz * 0.7 + wt) * 0.8 + wt)
+            set b to sin(fz * 1.1 - fx * 0.4 - wt * 0.9)
+            set w to 1 - abs(a * 0.7 + b * 0.3)
+            add w * w * amp to hz
+            set nx to fx * 1.6 + fz * 1.2
+            set fz to fz * 1.6 - fx * 1.2
+            set fx to nx
+            set amp to amp * 0.3
+            set wt to wt * 1.3
+        end
+        set h0 to 0
+        set fx to px * 0.26
+        set fz to pz * 0.26
+        set amp to 0.6
+        set wt to time * 0.8
+        repeat 7 times
+            set a to sin(fx + sin(fz * 0.7 + wt) * 0.8 + wt)
+            set b to sin(fz * 1.1 - fx * 0.4 - wt * 0.9)
+            set w to 1 - abs(a * 0.7 + b * 0.3)
+            add w * w * amp to h0
+            set nx to fx * 1.6 + fz * 1.2
+            set fz to fz * 1.6 - fx * 1.2
+            set fx to nx
+            set amp to amp * 0.3
+            set wt to wt * 1.3
+        end
+        set nx to h0 - hx
+        set ny to e
+        set nz to h0 - hz
+        set nl to sqrt(nx * nx + ny * ny + nz * nz)
+        set nx to nx / nl
+        set ny to ny / nl
+        set nz to nz / nl
+
+        set dn to dx * nx + dy * ny + dz * nz
+        set rx to dx - 2 * dn * nx
+        set ry to abs(dy - 2 * dn * ny)
+        set rz to dz - 2 * dn * nz
+        set rm to sqrt(ry)
+        set sky_r to hor_r + (top_r - hor_r) * rm
+        set sky_g to hor_g + (top_g - hor_g) * rm
+        set sky_b to hor_b + (top_b - hor_b) * rm
+        set rf to max(rx * sunx + ry * suny + rz * sunz, 0)
+        set glitter to rf ^ 120 * 6 + rf ^ 12 * 0.25
+        if night > 0.5
+            set glitter to rf ^ 400 * 3
+        end
+
+        set look to max(0 - dn, 0)
+        set fresnel to min(0.03 + 0.97 * (1 - look) ^ 5, 0.85)
+
+        set lit to max(nx * sunx + ny * suny + nz * sunz, 0)
+        set light to 0.25 + 0.75 * day + 0.2 * warm
+        if night > 0.5
+            set light to 0.12
+        end
+        set deep_r to (0.01 + 0.06 * lit) * light
+        set deep_g to (0.10 + 0.16 * lit) * light
+        set deep_b to (0.20 + 0.16 * lit) * light
+        set crest to max(h0 - 0.5, 0) * 0.5 * light
+        add 0.10 * crest to deep_r
+        add 0.55 * crest to deep_g
+        add 0.45 * crest to deep_b
+
+        set r to deep_r + (sky_r - deep_r) * fresnel + sun_r * glitter
+        set g to deep_g + (sky_g - deep_g) * fresnel + sun_g * glitter
+        set bl to deep_b + (sky_b - deep_b) * fresnel + sun_b * glitter
+
+        set foam to max(h0 - 0.68, 0) * 3 * max(ny - 0.6, 0) * light
+        set r to r + foam
+        set g to g + foam
+        set bl to bl + foam
+
+        set haze to 1 - 2.71828 ^ (0 - t * 0.0055)
+        set r to r + (hor_r - r) * haze
+        set g to g + (hor_g - g) * haze
+        set bl to bl + (hor_b - bl) * haze
+    end
+
+    # the board and surfer were drawn into the frame on a dark sentinel background
+    # (clear(rgb(4, 6, 9))); wherever something was drawn, keep it, over the sea
+    if red + green + blue > 36
+        return rgb(red, green, blue)
+    end
+
+    set r to r ^ 0.8
+    set g to g ^ 0.8
+    set bl to bl ^ 0.8
+    set edge to 1 - 0.25 * ((x / width - 0.5) ^ 2 + (y / height - 0.5) ^ 2) * 2
+    return rgb(min(255, r * 255 * edge), min(255, g * 255 * edge), min(255, bl * 255 * edge))
+end
+
+# ---- the same wave height as the shader, so the board rides the real water
+function wave(px, pz, t)
+    set h to 0
+    set fx to px * 0.26
+    set fz to pz * 0.26
+    set amp to 0.6
+    set wt to t * 0.8
+    repeat 6 times
+        set a to sin(fx + sin(fz * 0.7 + wt) * 0.8 + wt)
+        set b to sin(fz * 1.1 - fx * 0.4 - wt * 0.9)
+        set w to 1 - abs(a * 0.7 + b * 0.3)
+        add w * w * amp to h
+        set nx to fx * 1.6 + fz * 1.2
+        set fz to fz * 1.6 - fx * 1.2
+        set fx to nx
+        set amp to amp * 0.3
+        set wt to wt * 1.3
+    end
+    return h
+end
+
+# half-width of the board at length u (-1 tail .. +1 nose): rounded tail, pointed nose
+function board_rail(u)
+    set w to cos(u * 1.2)
+    if u > 0.5
+        set w to w * max(0, 1 - (u - 0.5) / 0.5)
+    end
+    return max(w, 0)
+end
+
+# a local point (lx right, ly up from the deck, lz forward to the nose) turned by the
+# board's yaw/roll/pitch, lifted by bob, then projected by the third-person camera.
+# Returns [screen_x, screen_y, pixels_per_step].
+function place(lx, ly, lz, cr, sr, cp, sp, cyw, syw, bob)
+    set x1 to lx * cyw + lz * syw
+    set z1 to lz * cyw - lx * syw
+    set y1 to ly
+    set x2 to x1 * cr - y1 * sr
+    set y2 to x1 * sr + y1 * cr
+    set y3 to y2 * cp - z1 * sp
+    set z3 to y2 * sp + z1 * cp
+    set yp to y3 + bob - 3.2
+    set zp to z3 + 5.2
+    set yc to yp * 0.9553 + zp * 0.2955
+    set zc to zp * 0.9553 - yp * 0.2955
+    set zc to max(zc, 0.4)
+    set ps to 600 / zc
+    return [480 + x2 * ps, 250 - yc * ps, ps]
+end
+
+function quad(a, b, c, d, colour)
+    triangle(a[1], a[2], b[1], b[2], c[1], c[2], colour)
+    triangle(a[1], a[2], c[1], c[2], d[1], d[2], colour)
+end
+
+function limb(a, b, r, colour)
+    line(a[1], a[2], b[1], b[2], colour, r * (a[3] + b[3]))
+    circle(a[1], a[2], r * a[3] * 0.6, colour)
+    circle(b[1], b[2], r * b[3] * 0.6, colour)
+end
+
+window(960, 540, "Surf   (Left/Right carve, Space hop, W/S speed, 1-4 time of day, F11 fullscreen)")
+
+set turn to 0.0
+set tilt to -0.16
+set travel to 0.0
+set sail to 6.0
+set mood to 3
+set turn_sun to 0.0
+set sun_up to 0.12
+set day to 0.0
+set warm to 1.0
+set night to 0.0
+set lean to 0.0
+set hop_y to 0.0
+set hop_v to 0.0
+set last to seconds()
+
+# a rough average water height, so the board stays centred and only the swell moves it
+set mean_h to 0.0
+repeat with i from 0 to 9
+    set mean_h to mean_h + wave(i * 3.3, i * 5.7, i * 0.9)
+end
+set mean_h to mean_h / 10
+
+repeat forever
+    set now to seconds()
+    set dt to min(now - last, 0.05)
+    set last to now
+    set t to now
+
+    # ---- steering: carve left and right
+    set want_lean to 0
+    if key_down("left") or key_down("a")
+        set want_lean to -1
+    end
+    if key_down("right") or key_down("d")
+        set want_lean to 1
+    end
+    set lean to lean + (want_lean * 0.5 - lean) * min(1, dt * 6)
+    set turn to turn + lean * dt * 0.7
+    if mouse_down()
+        set turn to turn + mouse_moved_x() * 0.004
+        set tilt to max(-0.35, min(0.1, tilt - mouse_moved_y() * 0.002))
+    end
+
+    # ---- paddling speed, and the forward sail
+    if key_down("w")
+        set sail to min(26, sail + dt * 8)
+    end
+    if key_down("s")
+        set sail to max(0, sail - dt * 10)
+    end
+    set travel to travel + sail * dt
+
+    # ---- a hop off the lip
+    if key_pressed("space") and hop_y <= 0.01
+        set hop_v to 4.5
+    end
+    set hop_v to hop_v - dt * 14
+    set hop_y to max(0, hop_y + hop_v * dt)
+
+    # ---- time of day (eased, exactly like ocean.flx)
+    repeat with k from 1 to 4
+        if key_pressed(text(k))
+            set mood to k
+        end
+    end
+    set want_up to 0.12
+    set want_day to 0.0
+    set want_warm to 1.0
+    set want_night to 0.0
+    if mood = 1
+        set want_up to 0.25
+        set want_day to 0.35
+        set want_warm to 0.55
+    else if mood = 2
+        set want_up to 0.9
+        set want_day to 1.0
+        set want_warm to 0.0
+    else if mood = 4
+        set want_up to 0.3
+        set want_night to 1.0
+        set want_warm to 0.0
+    end
+    set ease to min(1, dt * 2)
+    set sun_up to sun_up + (want_up - sun_up) * ease
+    set day to day + (want_day - day) * ease
+    set warm to warm + (want_warm - warm) * ease
+    set night to night + (want_night - night) * ease * 2
+    if mood = 4
+        set night to 1.0
+    else if night < 0.5
+        set night to 0.0
+    end
+
+    # ---- where the board sits, and how the water there lifts and tilts it
+    set bx to sin(t * 0.15) * 2
+    set bz to travel + 5.0
+    set here to wave(bx, bz, t)
+    set ahead to wave(bx, bz + 0.5, t)
+    set behind to wave(bx, bz - 0.5, t)
+    set right_h to wave(bx + 0.5, bz, t)
+    set left_h to wave(bx - 0.5, bz, t)
+    set bob to (here - mean_h) * 0.45 + hop_y
+    set pitch_w to max(-0.5, min(0.5, (ahead - behind) * 0.6))
+    set roll_w to max(-0.5, min(0.5, (right_h - left_h) * 0.6))
+
+    set roll to roll_w * 0.7 + lean * 0.9
+    set pitch to pitch_w - 0.05 - hop_v * 0.015
+    set yaw to lean * 0.5
+    set cr to cos(roll)
+    set sr to sin(roll)
+    set cp to cos(pitch)
+    set sp to sin(pitch)
+    set cyw to cos(yaw)
+    set syw to sin(yaw)
+
+    # how bright the surfer is, by the time of day
+    set litf to 0.45 + 0.55 * max(day, 0.35 * (1 - night))
+    if night > 0.5
+        set litf to 0.3
+    end
+
+    # the board and surfer are drawn onto a dark background; the ocean effect then
+    # paints the sea everywhere they are not (see the end of the shader)
+    clear(rgb(4, 6, 9))
+
+    # ---- the wake: a bright churn trailing from the tail, across the water
+    set tailp to place(0, -0.05, -1.25, cr, sr, cp, sp, cyw, syw, bob)
+    set spd to min(1, sail / 16)
+    set wake_col to rgb(255 * litf + 20, 255 * litf + 25, 255 * litf + 30)
+    repeat with i from 1 to 5
+        set f to i / 5
+        set ww to 30 + i * 22 + spd * 30
+        set wy to tailp[2] + i * 7
+        triangle(tailp[1], tailp[2], tailp[1] - ww, wy, tailp[1] + ww, wy, rgb((235 - i * 20) * litf, (240 - i * 18) * litf, (245 - i * 15) * litf))
+    end
+    repeat with i from 1 to 22
+        set a to i * 0.7 + t * 7
+        set sppd to 0.5 + spd
+        set dxp to sin(a * 1.7) * (14 + i * 3) * sppd
+        set dyp to 0 - abs(sin(a * 0.9)) * (10 + spd * 26) - (i mod 4) * 3
+        circle(tailp[1] + dxp, tailp[2] + dyp + i, 1.5 + (i mod 3), wake_col)
+    end
+
+    # ============================ the surfboard ============================
+    set halfL to 1.32
+    set halfW to 0.31
+    set thick to 0.07
+    set deck_r to 236
+    set deck_g to 90
+    set deck_b to 70                  # a sunset-orange deck (tinted by the light)
+    set prevL to tailp
+    set prevR to tailp
+    set prevHL to tailp
+    set prevHR to tailp
+    repeat with i from 0 to 16
+        set u to 1 - i / 8            # nose (+1, far) first, tail (-1, near) last
+        set w to board_rail(u) * halfW
+        set uz to u * halfL
+        set dl to place(0 - w, 0, uz, cr, sr, cp, sp, cyw, syw, bob)
+        set dr to place(w, 0, uz, cr, sr, cp, sp, cyw, syw, bob)
+        set hl to place(0 - w, 0 - thick, uz, cr, sr, cp, sp, cyw, syw, bob)
+        set hr to place(w, 0 - thick, uz, cr, sr, cp, sp, cyw, syw, bob)
+        if i > 0
+            set shade to 0.7 + 0.3 * (1 - u) / 2
+            quad(prevHL, prevHR, hr, hl, rgb(150 * litf, 155 * litf, 170 * litf))   # hull
+            quad(prevHL, prevL, dl, hl, rgb(190 * litf, 80 * litf, 60 * litf))       # left rail
+            quad(prevHR, prevR, dr, hr, rgb(190 * litf, 80 * litf, 60 * litf))       # right rail
+            quad(prevL, prevR, dr, dl, rgb(deck_r * litf * shade, deck_g * litf * shade, deck_b * litf * shade))
+        end
+        set prevL to dl
+        set prevR to dr
+        set prevHL to hl
+        set prevHR to hr
+    end
+    # the stringer (centre line), a traction pad near the tail, and a fin under it
+    set nose to place(0, 0.004, halfL, cr, sr, cp, sp, cyw, syw, bob)
+    set tailtop to place(0, 0.004, 0 - halfL, cr, sr, cp, sp, cyw, syw, bob)
+    line(nose[1], nose[2], tailtop[1], tailtop[2], rgb(250 * litf, 240 * litf, 225 * litf), max(1, nose[3] * 0.015))
+    set pa to place(0 - 0.18, 0.006, 0 - 0.35, cr, sr, cp, sp, cyw, syw, bob)
+    set pb to place(0.18, 0.006, 0 - 0.35, cr, sr, cp, sp, cyw, syw, bob)
+    set pc to place(0.2, 0.006, 0 - 0.95, cr, sr, cp, sp, cyw, syw, bob)
+    set pd to place(0 - 0.2, 0.006, 0 - 0.95, cr, sr, cp, sp, cyw, syw, bob)
+    quad(pa, pb, pc, pd, rgb(30 * litf, 32 * litf, 40 * litf))                 # grippy tail pad
+    set fa to place(0, 0 - thick, 0 - 0.9, cr, sr, cp, sp, cyw, syw, bob)
+    set fb to place(0, 0 - thick, 0 - 1.1, cr, sr, cp, sp, cyw, syw, bob)
+    set fc to place(0, 0 - thick - 0.3, 0 - 1.05, cr, sr, cp, sp, cyw, syw, bob)
+    triangle(fa[1], fa[2], fb[1], fb[2], fc[1], fc[2], rgb(40 * litf, 44 * litf, 55 * litf))
+
+    # ============================= the surfer ==============================
+    # a low, athletic stance that leans into the carve
+    set sway to sin(t * 2.2) * 0.05
+    set bob2 to bob
+    set crouch to 0.08 + abs(lean) * 0.1
+    # joints (x right, y up from deck, z forward)
+    set bfoot to place(0 - 0.16, 0.03, 0 - 0.42, cr, sr, cp, sp, cyw, syw, bob2)
+    set ffoot to place(0.15, 0.03, 0.34, cr, sr, cp, sp, cyw, syw, bob2)
+    set bknee to place(0 - 0.17, 0.3 - crouch, 0 - 0.26, cr, sr, cp, sp, cyw, syw, bob2)
+    set fknee to place(0.16, 0.32 - crouch, 0.24, cr, sr, cp, sp, cyw, syw, bob2)
+    set hipL to place(0 - 0.17 + lean * 0.1, 0.64 - crouch, 0 - 0.06, cr, sr, cp, sp, cyw, syw, bob2)
+    set hipR to place(0.15 + lean * 0.1, 0.64 - crouch, 0 - 0.02, cr, sr, cp, sp, cyw, syw, bob2)
+    set hipC to place(0 - 0.01 + lean * 0.1, 0.66 - crouch, 0 - 0.04, cr, sr, cp, sp, cyw, syw, bob2)
+    set shL to place(0 - 0.2 + lean * 0.14, 1.06 - crouch, 0 - 0.03, cr, sr, cp, sp, cyw, syw, bob2)
+    set shR to place(0.2 + lean * 0.14, 1.06 - crouch, 0 - 0.03, cr, sr, cp, sp, cyw, syw, bob2)
+    set neck to place(lean * 0.14, 1.1 - crouch, 0 - 0.02, cr, sr, cp, sp, cyw, syw, bob2)
+    set head to place(lean * 0.16, 1.32 - crouch, 0.02, cr, sr, cp, sp, cyw, syw, bob2)
+    set lelbow to place(0 - 0.42 + lean * 0.1, 0.96 - crouch + sway, 0.1, cr, sr, cp, sp, cyw, syw, bob2)
+    set relbow to place(0.42 + lean * 0.1, 0.94 - crouch - sway, 0 - 0.14, cr, sr, cp, sp, cyw, syw, bob2)
+    set lhand to place(0 - 0.56 + lean * 0.1, 0.86 - crouch + sway, 0.3, cr, sr, cp, sp, cyw, syw, bob2)
+    set rhand to place(0.54 + lean * 0.1, 0.84 - crouch - sway, 0 - 0.32, cr, sr, cp, sp, cyw, syw, bob2)
+
+    set skin_r to 222 * litf
+    set skin_g to 168 * litf
+    set skin_b to 120 * litf
+    set suit_r to 38 * litf
+    set suit_g to 44 * litf
+    set suit_b to 58 * litf
+    set short_r to 40 * litf
+    set short_g to 150 * litf
+    set short_b to 180 * litf
+    set skin to rgb(skin_r, skin_g, skin_b)
+    set suit to rgb(suit_r, suit_g, suit_b)
+
+    # legs (skin), then boardshorts over the hips
+    limb(ffoot, fknee, 0.07, skin)
+    limb(fknee, hipR, 0.08, skin)
+    limb(bfoot, bknee, 0.07, skin)
+    limb(bknee, hipL, 0.08, skin)
+    set waistL to place(0 - 0.18 + lean * 0.12, 0.82 - crouch, 0 - 0.04, cr, sr, cp, sp, cyw, syw, bob2)
+    set waistR to place(0.16 + lean * 0.12, 0.82 - crouch, 0 - 0.03, cr, sr, cp, sp, cyw, syw, bob2)
+    set thighL to place(0 - 0.19 + lean * 0.08, 0.46 - crouch * 0.5, 0 - 0.12, cr, sr, cp, sp, cyw, syw, bob2)
+    set thighR to place(0.17 + lean * 0.08, 0.46 - crouch * 0.5, 0.02, cr, sr, cp, sp, cyw, syw, bob2)
+    quad(thighL, thighR, waistR, waistL, rgb(short_r, short_g, short_b))        # boardshorts over the thighs
+    line((thighL[1] + thighR[1]) / 2, (thighL[2] + thighR[2]) / 2, (waistL[1] + waistR[1]) / 2, (waistL[2] + waistR[2]) / 2, rgb(20 * litf, 90 * litf, 120 * litf), max(1, waistL[3] * 0.02))
+    # the back (wetsuit top), with a bright stripe down the spine
+    quad(waistL, waistR, shR, shL, suit)
+    line(waistL[1], (waistL[2] + hipC[2]) / 2, neck[1], neck[2], rgb(60 * litf, 180 * litf, 210 * litf), max(1.5, neck[3] * 0.03))
+    circle((shL[1] + shR[1]) / 2, (waistR[2] + neck[2]) / 2, max(2, neck[3] * 0.16), suit)
+    # arms (skin), out for balance
+    limb(shL, lelbow, 0.065, skin)
+    limb(lelbow, lhand, 0.055, skin)
+    limb(shR, relbow, 0.065, skin)
+    limb(relbow, rhand, 0.055, skin)
+    # neck and head (hair at the back, a little face tone at the side)
+    limb(neck, head, 0.05, skin)
+    circle(head[1], head[2], head[3] * 0.14, rgb(70 * litf, 48 * litf, 34 * litf))
+    circle(head[1] - head[3] * 0.03, head[2] + head[3] * 0.02, head[3] * 0.1, rgb(90 * litf, 62 * litf, 42 * litf))
+
+    # ---- a few spray droplets kicked up around the surfer at speed
+    repeat with i from 1 to 10
+        set a to i * 1.3 + t * 9
+        if sin(a) > 0.3
+            circle(ffoot[1] + sin(a * 2.1) * 26 * (0.5 + spd), ffoot[2] - abs(cos(a)) * (18 + spd * 20), 1.5 + (i mod 2), wake_col)
+        end
+    end
+
+    # ---- the heads-up line
+    write("Left/Right carve   Space hop   W/S speed " + text(round(sail)) + "   1-4 time of day", 14, 12, rgb(255, 255, 255), 2)
+
+    # paint the sea everywhere the board and surfer are not
+    effect(ocean)
+    show()
+end

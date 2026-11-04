@@ -985,8 +985,11 @@ And in 3D:
 | **VR garden**: grow flowers with your hands in a VR headset | `./flaux examples/3d/vr_garden.flx` |
 | **Model viewer**: a rocket loaded from a 3D model file | `./flaux examples/3d/model_viewer.flx` |
 | **Ocean**: an endless sea drawn by one shader: waves, sky reflections, sun glitter and foam, at four times of day | `./flaux examples/3d/ocean.flx` |
+| **Surf**: the Ocean in third person &mdash; ride a detailed surfboard that leans and bobs on the real swell (carve, hop, four times of day) | `./flaux examples/3d/surf.flx` |
 
 ![Ocean: a sea at sunset, drawn by one shader written in Flaux](docs/images/ocean.png)
+
+![Surf: a third-person surfer carving down a swell in the Ocean shader](docs/images/surf.png)
 
 ![Blockhaven, a first-person block-building game made with Flaux](docs/images/blockhaven.png)
 
