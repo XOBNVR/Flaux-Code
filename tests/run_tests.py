@@ -339,6 +339,31 @@ def main():
         else:
             passed += 1
 
+    # The desktop app's Blocks mode: every example and test program goes into blocks
+    # (blocks.py) and back to code (studio/blockmodel.py), meaning exactly the same.
+    if pattern in "blocks":
+        from blocks_roundtrip import meaning
+        from flauxc.lexer import tokenize
+        from flauxc.parser import parse
+        from flauxc.studio import blocks as code_to_blocks, blockmodel
+        programs = sorted(glob.glob(os.path.join(ROOT, "examples", "**", "*.flx"), recursive=True)
+                          + glob.glob(os.path.join(HERE, "programs", "*.flx"))
+                          + [p for p in glob.glob(os.path.join(HERE, "graphics", "*.flx")) if os.path.exists(p[:-4] + ".out")])
+        wrong = []
+        for path in programs:
+            original = open(path, encoding="utf-8").read()
+            try:
+                made, _, problems = blockmodel.generate(blockmodel.from_workspace(code_to_blocks.to_blocks(original)))
+                compile_source(made, os.path.basename(path), os.path.dirname(path))
+                if problems or meaning(parse(tokenize(original), original)) != meaning(parse(tokenize(made), made)):
+                    wrong.append(f"{os.path.relpath(path, ROOT)} means something else as blocks:\n{made}")
+            except FlauxError as e:
+                wrong.append(f"{os.path.relpath(path, ROOT)}: line {e.line}: {e.message}")
+        if wrong:
+            failures.append(("blocks (desktop app)", "\n".join(wrong)))
+        else:
+            passed += 1
+
     # Every example and lesson (the README uses them) must still compile.
     for path in sorted(glob.glob(os.path.join(ROOT, "examples", "**", "*.flx"), recursive=True)):
         name = os.path.relpath(path, ROOT)

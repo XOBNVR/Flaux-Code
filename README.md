@@ -150,9 +150,8 @@ right-click it and choose **Run with Flaux**.
 
 ### Blocks or code
 
-In **Flaux Studio on the web** (the website version), click **&#9638; Blocks**
-at the top to build your program from blocks instead of typing it. (The
-Windows app is for typing code: Blocks mode is on the website.) Drag blocks out of the menus on the left (**Say & Ask**,
+Click **&#9638; Blocks** at the top to build your program from blocks
+instead of typing it, in the Windows app and on the website. Drag blocks out of the menus on the left (**Say & Ask**,
 **Variables**, **Control**, **Drawing** and more) and snap them together.
 
 ![Flaux Studio in Blocks mode, with the code the blocks make underneath](docs/images/blocks.png)
@@ -162,13 +161,15 @@ your blocks make, so you learn the language as you build. Click
 **&#9998; Code** to switch back at any time: it's the same program either way,
 saved as a normal `.flx` file, and every lesson and game opens as blocks too.
 
-- **Mistakes** put a &#9888; sign on the block, and **Apply fix** works here too.
+- **Mistakes** put a red outline on the block (a &#9888; sign on the website), and
+  **Apply fix** works here too.
 - **Variables:** click **Make a variable** in the Variables menu.
 - **Functions:** the Functions menu makes your own blocks.
 - **Notes:** your `# notes` become note blocks, and a **code** block (in the
   Notes menu) holds any line of Flaux you want to type yourself.
-- **Right-click** a block to copy it, add a comment, or delete it. Or drag
-  it to the bin.
+- **Right-click** a block to copy or delete it (and to add **else** to an
+  **if**, or items to a list). Or drag it back onto the menus (the bin, on
+  the website) to throw it away.
 
 ---
 

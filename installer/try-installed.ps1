@@ -83,6 +83,8 @@ Check ($report -and $report.problem -match "scroe") "Flaux Studio opens and find
 Check ($report -and $report.fixed_code -match "say score") "...Apply fix fixes it"
 Check ($report -and $report.output -match "^hi hi hi 10") "...Run runs it ($($report.output))"
 Check ($report -and $report.saved) "...and Save saves it"
+Check ($report -and $report.blocks_code -eq $report.fixed_code) "...shows it as blocks (Blocks mode)"
+Check ($report -and $report.blocks_dragged -match 'say "Hello!"') "...and a block dragged out of the menus goes into the program"
 Start-Sleep -Seconds 3
 $left = Get-Process python, pythonw -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$app\*" }
 Check (-not $left) "closing Flaux Studio leaves nothing running"

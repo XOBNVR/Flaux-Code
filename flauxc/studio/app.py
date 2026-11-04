@@ -2,8 +2,10 @@
 with Tk (the window toolkit that comes with Python; on Windows its buttons
 and dialogs are Windows' own). No web page, no web browser.
 
-It does what the web version (index.html) does, except Blocks:
+It does what the web version (index.html) does:
   - the code editor, with colours, line numbers and Tab to indent
+  - Blocks mode: build the program from blocks (block_editor.py, drawn
+    with Tk too), and switch between blocks and code at any time
   - mistakes underlined while you type, explained, with Apply fix
   - Run (F5) / Stop: what the program says appears on the right, and it can
     ask questions; games open in their own window
@@ -29,6 +31,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
 from .. import __version__
+from ..errors import FlauxError
 from .server import EXAMPLES, Studio
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -174,6 +177,8 @@ class StudioApp:
         self.highlight_after = None
         self.checking = 0          # (newer checks win)
         self.loading = False
+        self.mode = "code"         # or "blocks"
+        self.blocks_view = None
 
         root.title("Flaux Studio")
         root.minsize(760, 480)
@@ -256,6 +261,8 @@ class StudioApp:
         button("Save", self.save)
         button("Save as", self.save_as)
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=8)
+        self.mode_button = button("▦  Blocks", self.toggle_blocks)
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=8)
         self.run_button = button("▶  Run", self.run, style="Run.TButton")
         self.stop_button = button("■  Stop", self.stop)
         self.stop_button.state(["disabled"])
@@ -281,7 +288,9 @@ class StudioApp:
         # left: the editor, and the problem box under it
         left = ttk.Frame(panes)
         panes.add(left, weight=3)
-        editor = self.editor_frame = ttk.Frame(left)
+        self.main_area = ttk.Frame(left)          # the code, or the blocks
+        self.main_area.pack(fill="both", expand=True)
+        editor = self.editor_frame = ttk.Frame(self.main_area)
         editor.pack(fill="both", expand=True)
         self.gutter = tk.Canvas(editor, width=44, highlightthickness=0, bd=0)
         self.gutter.pack(side="left", fill="y")
@@ -419,6 +428,8 @@ class StudioApp:
         self.box_title.configure(background=t["box_bg"], foreground=t["text"])
         self.box_text.configure(background=t["box_bg"])
         self.night_button.configure(text="Day" if self.night else "Night")
+        if self.blocks_view:
+            self.blocks_view.set_theme(t)
         self.draw_gutter()
 
     def bind_keys(self):
@@ -563,6 +574,8 @@ class StudioApp:
         for f in (self.code_font, self.code_bold):
             f.configure(size=self.size)
         self.code.configure(tabs=(self.code_font.measure("    "),))
+        if self.blocks_view:
+            self.blocks_view.set_zoom(self.size)
         self.draw_gutter()
         return "break"
 
@@ -595,6 +608,13 @@ class StudioApp:
 
     def show_problem(self, error):
         self.problem = error
+        if self.mode == "blocks" and self.blocks_view:     # the problem's line: which block made it
+            block = None
+            if error and error.get("line"):
+                _, line_blocks, _ = self.blocks_view.code()
+                if 1 <= error["line"] <= len(line_blocks):
+                    block = line_blocks[error["line"] - 1]
+            self.blocks_view.show_problem(block)
         self.code.tag_remove("problem", "1.0", "end")
         if not error:
             self.box.pack_forget()
@@ -619,7 +639,7 @@ class StudioApp:
         self.box_text.delete("1.0", "end")
         for i, (text, tag) in enumerate(parts):
             self.box_text.insert("end", ("\n" if i else "") + text, tag or ())
-        self.box.pack(fill="x", side="bottom", padx=8, pady=8, before=self.editor_frame)
+        self.box.pack(fill="x", side="bottom", padx=8, pady=8, before=self.main_area)
         self.box_text.update_idletasks()
         try:
             lines = self.box_text.count("1.0", "end", "displaylines")
@@ -631,13 +651,14 @@ class StudioApp:
             self.fix_button.pack(side="left")
         else:
             self.fix_button.pack_forget()
-        self.box.pack(fill="x", side="bottom", padx=8, pady=8, before=self.editor_frame)
+        self.box.pack(fill="x", side="bottom", padx=8, pady=8, before=self.main_area)
         self.draw_gutter()
 
     def apply_fix(self):
         if self.problem and self.problem.get("fixed_source") is not None:
             line = self.problem.get("line") or 1
             self.set_code(self.problem["fixed_source"], keep_undo=True)
+            self.reload_blocks()
             self.dirty = True
             self.update_title()
             self.code.mark_set("insert", f"{line}.0 lineend")
@@ -757,6 +778,7 @@ class StudioApp:
             return
         self.path, self.example, self.dirty = None, False, False
         self.set_code("")
+        self.reload_blocks()
         self.update_title()
         self.code.focus_set()
         self.status("A new program. Press Save to give it a name.")
@@ -779,6 +801,7 @@ class StudioApp:
             return
         self.path, self.example, self.dirty = info["path"], info["example"], False
         self.set_code(info["content"])
+        self.reload_blocks()
         self.code.mark_set("insert", "1.0")
         self.code.see("1.0")
         self.update_title()
@@ -839,6 +862,58 @@ class StudioApp:
         self.say(f"\nExported {r['name']}, saved in your programs folder:\n  {r['file']}\n"
                  f"Unzip it anywhere and {how} to run your program.\n", "note")
         self.status(f"Exported {r['name']}", "good")
+
+    # --------------------------------------------------------- blocks
+
+    def toggle_blocks(self):
+        if self.mode == "code":
+            if self.to_blocks():
+                self.editor_frame.pack_forget()
+                self.blocks_view.pack(fill="both", expand=True)
+                self.mode = "blocks"
+                self.mode_button.configure(text="⌨  Code")
+                self.root.after(30, lambda: self.panes.sashpos(0, int(self.panes.winfo_width() * 0.74)))
+                self.status("Blocks: drag blocks out of the menus on the left. Right-click a block for more.")
+                self.schedule_check(10)
+        else:
+            self.blocks_view.pack_forget()
+            self.editor_frame.pack(fill="both", expand=True)
+            self.mode = "code"
+            self.mode_button.configure(text="▦  Blocks")
+            self.place_divider()
+            self.code.focus_set()
+
+    def to_blocks(self):
+        """Show the program as blocks. False if it can't be (a mistake that stops Flaux reading it)."""
+        from .block_editor import BlockEditor
+        from .blocks import to_blocks
+        try:
+            workspace = to_blocks(self.get_code())
+        except FlauxError as e:
+            self.show_problem(e.to_dict(os.path.basename(self.path or "untitled.flx"), self.get_code()))
+            self.status("Fix the problem first: then the program can be shown as blocks.", "bad")
+            return False
+        except RecursionError:
+            self.status("This program is nested too deeply to show as blocks.", "bad")
+            return False
+        if not self.blocks_view:
+            self.blocks_view = BlockEditor(self.main_area, self.blocks_changed, self.t)
+            self.blocks_view.set_zoom(self.size)
+        self.blocks_view.load(workspace)
+        return True
+
+    def reload_blocks(self):
+        """The code changed from outside the blocks (Open, New, Apply fix): show it as blocks again."""
+        if self.mode == "blocks" and not self.to_blocks():
+            self.toggle_blocks()       # (back to the code, where the problem is shown)
+
+    def blocks_changed(self):
+        code, _, _ = self.blocks_view.code()
+        if code != self.get_code():
+            self.set_code(code, keep_undo=True)
+            if not self.dirty:
+                self.dirty = True
+                self.update_title()
 
     # --------------------------------------------------------- learn
 
@@ -906,6 +981,20 @@ class StudioApp:
         self.style.configure("Status.TLabel", background=t["bg"],
                              foreground={"good": t["good"], "bad": t["bad"]}.get(kind, t["text"]))
 
+    def drag_with_mouse(self, src, sx, sy, dst, dx, dy):
+        """(For the self-test) press at (sx, sy) on `src`, move to (dx, dy) on `dst`, let go."""
+        def at(widget, x, y, kind, **more):
+            widget.event_generate(kind, x=int(x), y=int(y), rootx=int(widget.winfo_rootx() + x),
+                                  rooty=int(widget.winfo_rooty() + y), **more)
+            self.root.update()
+        at(src, sx, sy, "<ButtonPress-1>")
+        x0, y0 = src.winfo_rootx() + sx, src.winfo_rooty() + sy
+        x1, y1 = dst.winfo_rootx() + dx, dst.winfo_rooty() + dy
+        for k in range(1, 9):
+            rx, ry = x0 + (x1 - x0) * k / 8, y0 + (y1 - y0) * k / 8
+            at(src, rx - src.winfo_rootx(), ry - src.winfo_rooty(), "<B1-Motion>", state=0x100)
+        at(src, x1 - src.winfo_rootx(), y1 - src.winfo_rooty(), "<ButtonRelease-1>")
+
     def self_test(self):
         """FLAUX_STUDIO_TEST=<file>: use the Studio like a person would (a mistake, Apply fix, Run,
         Save), write what happened to <file> as JSON, and close. For the tests (tests/studio_app_test.py
@@ -943,10 +1032,37 @@ class StudioApp:
             self.studio.save(self.get_code(), path)
             self.path, self.example, self.dirty = path, False, False
             report["saved"] = os.path.isfile(path)
+            # Blocks mode: the same program as blocks, and a block added from the menus
+            from . import blockmodel
+            self.toggle_blocks()
+            report["blocks_mode"] = self.mode
+            report["blocks_code"] = self.get_code()
+            view = self.blocks_view
+            tail = view.tops[0]
+            while tail.next:
+                tail = tail.next
+            tail.next = blockmodel.Block("flx_say", inputs={"VALUE": blockmodel.text("made with blocks")})
+            view.changed()
+            report["blocks_added"] = self.get_code()
+            # and a block dragged out of the menus with the mouse, under the last block
+            view.cats.selection_clear(0, "end")
+            view.cats.selection_set(0)
+            view.pick_category()
+            self.root.update()
+            say = [t for t in view.palette_targets if t[4] == "template"][0]
+            tail = view.tops[0]
+            while tail.next:
+                tail = tail.next
+            box = view.box_of(tail)
+            self.drag_with_mouse(view.palette, say[0] + 10, say[1] + 12, view.board,
+                                 int(box[0] - view.board.canvasx(0)) + 12, int(box[3] - view.board.canvasy(0)) + 14)
+            report["blocks_dragged"] = self.get_code()
+            self.toggle_blocks()
             self.toggle_night()
             report["night"] = self.night
             with open(out, "w", encoding="utf-8") as fh:
                 json.dump(report, fh)
+            self.dirty = False         # (the test's changes aren't kept: no "Save the changes?")
             self.close()
 
         typed()

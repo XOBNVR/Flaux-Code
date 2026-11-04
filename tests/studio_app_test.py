@@ -55,6 +55,13 @@ def main():
         (got.get("output", "").startswith("hi hi hi 10") and "Finished" in got.get("output", ""),
          f"Run runs it ({got.get('output')!r})"),
         (got.get("saved"), "Save saves it"),
+        (got.get("blocks_mode") == "blocks" and got.get("blocks_code") == got.get("fixed_code"),
+         "Blocks mode shows the program as blocks (and the code stays the same)"),
+        (got.get("blocks_added", "").endswith('say "made with blocks"\n'),
+         f"a block added in Blocks mode is in the code ({got.get('blocks_added', '')[-40:]!r})"),
+        (got.get("blocks_dragged", "").endswith('say "made with blocks"\nsay "Hello!"\n'),
+         f"a block dragged out of the menus with the mouse snaps under the last one "
+         f"({got.get('blocks_dragged', '')[-40:]!r})"),
         (got.get("night") is True, "Night mode"),
     ]
     for ok, what in checks:
