@@ -760,7 +760,9 @@ async function exportProgram() {
   catch (err) { return status("Export didn't work: " + err.message, "bad"); }
   if (!r.ok) {
     if (r.error) showProblem(r.error, true);
-    return status(r.error ? "Fix the problem in your program first, then export it." : (r.message || "Export didn't work."), "bad");
+    else if (r.message) print("\n" + r.message + "\n", "err");    // (the whole story, for a bug report)
+    return status(r.error ? "Fix the problem in your program first, then export it."
+                          : (r.message || "Export didn't work.").split("\n")[0], "bad");
   }
   if (r.native) {
     print(`\nExported ${r.name}, saved in your programs folder:\n  ${r.file}\n` +
