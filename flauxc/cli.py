@@ -10,6 +10,7 @@
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -160,6 +161,51 @@ def copy_sdl_dll(folder):
     target = os.path.join(folder, "SDL2.dll")
     if os.path.isfile(dll) and not os.path.isfile(target):
         shutil.copyfile(dll, target)
+
+
+def _parse_otool(output):
+    """The non-system libraries in `otool -L` output: those not in /usr/lib or
+    /System (which every Mac has) and not an unresolved @rpath/@loader_path one."""
+    libs = []
+    for line in output.splitlines()[1:]:            # the first line is the program's own name
+        m = re.match(r"\s+(\S+)\s+\(", line)
+        if not m:
+            continue
+        path = m.group(1)
+        if path.startswith(("/usr/lib/", "/System/", "@")):
+            continue
+        libs.append(path)
+    return libs
+
+
+def macos_libraries(exe):
+    """The non-system dynamic libraries a Mac program links to (SDL2 and the
+    like), from `otool -L`."""
+    out = subprocess.run(["otool", "-L", exe], capture_output=True, text=True, check=True).stdout
+    return _parse_otool(out)
+
+
+def macos_selfcontain(exe, out_dir):
+    """Copy a built Mac program into out_dir together with the libraries it needs
+    (SDL2 and so on), so it runs on a Mac that doesn't have them installed. The
+    program is pointed at the copies next to it (@executable_path). Returns
+    (program_path, [library_paths]); raises if the Mac tools aren't there."""
+    program = os.path.join(out_dir, os.path.basename(exe))
+    shutil.copyfile(exe, program)
+    os.chmod(program, 0o755)
+    libs = []
+    for lib in macos_libraries(exe):
+        name = os.path.basename(lib)
+        dest = os.path.join(out_dir, name)
+        if not os.path.isfile(dest):
+            if not os.path.isfile(lib):
+                continue                              # (an @rpath lib we can't find: leave it)
+            shutil.copyfile(lib, dest)
+            os.chmod(dest, 0o644)
+            subprocess.run(["install_name_tool", "-id", f"@executable_path/{name}", dest], check=True)
+            libs.append(dest)
+        subprocess.run(["install_name_tool", "-change", lib, f"@executable_path/{name}", program], check=True)
+    return program, libs
 
 
 def cache_dir():

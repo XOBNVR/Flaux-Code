@@ -201,6 +201,39 @@ def studio_checks():
             ran = subprocess.run([exe], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
             if ran.returncode != 0 or ran.stdout != "hi\n":
                 problems.append(f"the exported program didn't run: exit {ran.returncode}, said {ran.stdout!r} {ran.stderr!r}")
+        # Mac export (not a .dmg): the otool reader keeps SDL2 and drops the system libraries,
+        from flauxc.cli import _parse_otool
+        otool = ("game:\n\t/opt/homebrew/opt/sdl2/lib/libSDL2-2.0.0.dylib (compatibility version 16.0.0)\n"
+                 "\t/System/Library/Frameworks/OpenGL.framework/OpenGL (compatibility version 1.0.0)\n"
+                 "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0)\n"
+                 "\t@rpath/other.dylib (compatibility version 1.0.0)\n")
+        if _parse_otool(otool) != ["/opt/homebrew/opt/sdl2/lib/libSDL2-2.0.0.dylib"]:
+            problems.append(f"the Mac library reader (otool) is wrong: {_parse_otool(otool)}")
+        # and on a Mac the zip gets a double-clickable play.command, with SDL2 bundled next to the
+        # program (install_name_tool); here we pretend to be a Mac and stand in for the Mac tools.
+        if sdl_installed():
+            from flauxc.studio import server as _server
+            from flauxc import cli as _cli
+            real_platform, real_fn = _server.sys.platform, _cli.macos_selfcontain
+
+            def fake_selfcontain(exe, out_dir):      # what macos_selfcontain does, without the Mac tools
+                prog = os.path.join(out_dir, os.path.basename(exe))
+                shutil.copyfile(exe, prog)
+                lib = os.path.join(out_dir, "libSDL2-2.0.0.dylib")
+                open(lib, "wb").write(b"fake dylib")
+                return prog, [lib]
+            try:
+                _server.sys.platform = "darwin"
+                _cli.macos_selfcontain = fake_selfcontain
+                rm = studio.export('window(200, 100)\nclear("red")\nshow()\n',
+                                   os.path.join(home, "mac_game.flx"), show=False)
+                mac_names = zipfile.ZipFile(rm["file"]).namelist() if rm.get("ok") else []
+                readme = zipfile.ZipFile(rm["file"]).read("mac_game/README.txt").decode() if rm.get("ok") else ""
+                want_mac = ["mac_game/mac_game", "mac_game/libSDL2-2.0.0.dylib", "mac_game/play.command"]
+                if any(n not in mac_names for n in want_mac) or "double-click play.command" not in readme:
+                    problems.append(f"Mac export went wrong: {rm} {mac_names}")
+            finally:
+                _server.sys.platform, _cli.macos_selfcontain = real_platform, real_fn
         # Windows: a game that never says anything is a window-only program (no console window
         # behind it), and it still runs
         if os.name == "nt" and sdl_installed():

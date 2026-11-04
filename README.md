@@ -1172,6 +1172,13 @@ cd ~/Flaux-Code
 On Linux, do the same with a file called `play.sh`. Ready-made copies are
 in [`examples/launchers/`](examples/launchers/).
 
+**&#11015; Export on a Mac** makes a `.zip` (not a `.dmg`) with your game as a
+real Mac program: double-click **`play.command`** inside to play. For a game,
+the SDL2 library is bundled next to the program, so the folder runs on another
+Mac that hasn't installed SDL2. The first time, **right-click `play.command`
+and choose Open**, so macOS lets a program from outside the App Store run.
+On Linux, Export makes a `.zip` with the program and `play.sh`.
+
 ---
 
 ## For people who want to help build Flaux

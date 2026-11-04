@@ -17,6 +17,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -343,7 +344,23 @@ class Studio:
                         data = fh.read()
                 z.writestr(info, data)
             program = base + cli.EXE
-            add(program, file=exe, executable=True)
+            mac_libs = []
+            if sys.platform == "darwin" and graphics:
+                # Mac: ship SDL2 (and any other non-system library) next to the program,
+                # so the game runs on a Mac that hasn't got it installed.
+                tmp = tempfile.mkdtemp(prefix="flaux-mac-")
+                try:
+                    prog_path, mac_libs = cli.macos_selfcontain(exe, tmp)
+                    add(program, file=prog_path, executable=True)
+                    for lib in mac_libs:
+                        add(os.path.basename(lib), file=lib)
+                except Exception:                        # no Mac tools, or something odd: ship the program alone
+                    mac_libs = []
+                    add(program, file=exe, executable=True)
+                finally:
+                    shutil.rmtree(tmp, ignore_errors=True)
+            else:
+                add(program, file=exe, executable=True)
             if cli.WINDOWS and graphics:
                 dll = os.path.join(cli.BUNDLED_SDL, "bin", "SDL2.dll")
                 if os.path.isfile(dll):
@@ -380,15 +397,25 @@ class Studio:
                     if os.path.isfile(file) and not os.path.isabs(pic) and ".." not in pic.replace("\\", "/").split("/"):
                         add(pic.replace("\\", "/"), file=file)
                         break
+            mac = sys.platform == "darwin"
             if not cli.WINDOWS:
                 add("play.sh", f'#!/bin/sh\ncd "$(dirname "$0")"\n./"{program}"\n', executable=True)
-            how = f"double-click {program}" if cli.WINDOWS else "run play.sh"
+            if mac:
+                # Macs double-click .command files (they open in Terminal and run)
+                add("play.command", f'#!/bin/bash\ncd "$(dirname "$0")"\n./"{program}"\n', executable=True)
+            how = ("double-click " + program if cli.WINDOWS else
+                   "double-click play.command" if mac else "run play.sh")
             add("README.txt", (f"{base}\n{'=' * len(base)}\n\nMade with Flaux (https://github.com/XOBNVR/Flaux-Code).\n\n"
                                f"To play, {how}.\n" +
                                (f"Keep SDL2.dll next to {program} (to share the game, share the whole folder).\n"
                                 if cli.WINDOWS and graphics else "") +
                                ("Keep the mesa folder too: it lets the game run on computers without a good\n"
                                 "graphics card.\n" if cli.WINDOWS and three_d else "") +
+                               ("Keep the .dylib file(s) next to the program (to share the game, share the whole\n"
+                                "folder).\nThe first time, right-click play.command and choose Open, so macOS lets\n"
+                                "an app from outside the App Store run.\n" if mac and mac_libs else
+                                "The first time, right-click play.command and choose Open, so macOS lets an app\n"
+                                "from outside the App Store run.\n" if mac else "") +
                                ("F11 (or Alt+Enter) switches fullscreen.\n" if graphics else "")
                                ).replace("\n", "\r\n" if cli.WINDOWS else "\n"))
         if show:
