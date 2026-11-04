@@ -31,6 +31,19 @@ def build(source, name="untitled.flx"):
         return json.dumps(_problem(e, name, source))
 
 
+def build_c(source, name="untitled.flx"):
+    """The program as C code, for Export: TinyCC (in the page) makes it a Windows program."""
+    from ..compiler import compile_source
+    try:
+        c = compile_source(source, name)
+    except FlauxError as e:
+        return json.dumps(_problem(e, name, source))
+    except RecursionError:
+        return json.dumps({"ok": False, "error": {"message": "This program is nested too deeply for Flaux to read.",
+                                                  "line": None, "text": ""}})
+    return json.dumps({"ok": True, "c": c, "graphics": "#define FX_USES_GRAPHICS" in c, "says": "#define FX_SAYS" in c})
+
+
 def blocks(source):
     try:
         return json.dumps({"ok": True, "workspace": block_editor.to_blocks(source)})

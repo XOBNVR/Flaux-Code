@@ -59,6 +59,9 @@
 #define STBI_ONLY_JPEG
 #define STBI_ONLY_BMP
 #define STBI_ONLY_GIF
+#ifdef __TINYC__
+#define STBI_NO_SIMD   /* (TinyCC, for Flaux Studio on the web's Export, has no SSE headers) */
+#endif
 #ifdef _WIN32
 #define STBI_WINDOWS_UTF8
 #endif
@@ -617,6 +620,15 @@ static unsigned char *fx_read_picture(const char *file, int *w, int *h, int line
     if (!px) {
         snprintf(path, sizeof path, "%s", file);
         px = stbi_load(path, w, h, &comp, 4);
+    }
+    if (!px && !fx_is_absolute(file)) {   /* next to the program itself (a game someone shared) */
+        char *base = SDL_GetBasePath();
+        if (base) {
+            char here[4096];
+            snprintf(here, sizeof here, "%s%s", base, file);
+            SDL_free(base);
+            px = stbi_load(here, w, h, &comp, 4);
+        }
     }
     if (px) return px;
     FILE *f = fopen(path, "rb");

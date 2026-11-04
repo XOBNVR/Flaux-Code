@@ -2,16 +2,17 @@
 serve. The GitHub build zips it as FlauxStudio-web.zip and attaches it
 to each release.
 
-    python3 -m flauxc.web.build OUTPUT_FOLDER --pyodide PYODIDE_FOLDER [--player FlauxPlayer.exe]
+    python3 -m flauxc.web.build OUTPUT_FOLDER --pyodide PYODIDE_FOLDER [--tcc TCC_FOLDER]
 
 PYODIDE_FOLDER holds Pyodide's core files (from the "pyodide" npm package):
 pyodide.js, pyodide.asm.mjs, pyodide.asm.wasm, python_stdlib.zip and
 pyodide-lock.json. They're copied in, so the site works without any other
 website.
 
-FlauxPlayer.exe (made by installer/app/build_app.py) is the Windows game
-player: Export puts it in the zip as <name>.exe, with the game inside, so a
-game is a real Windows app. Without it, Export gives game.html and a .bat.
+TCC_FOLDER is what build_tcc.py makes: TinyCC as WebAssembly, so Export
+makes a real Windows program (<name>.exe, machine code, no web page) right in
+the page. It goes in the site's tcc/ folder; without it, Export says Export
+needs it.
 """
 
 import argparse
@@ -33,7 +34,9 @@ def python_files():
     files = {}
     wanted = (glob.glob(os.path.join(FLAUXC, "*.py")) + glob.glob(os.path.join(FLAUXC, "web", "*.py"))
               + [os.path.join(STUDIO, "__init__.py"), os.path.join(STUDIO, "blocks.py"),
-                 os.path.join(STUDIO, "blocks_table.json"), os.path.join(FLAUXC, "engine.glsl")])
+                 os.path.join(STUDIO, "blocks_table.json"), os.path.join(FLAUXC, "engine.glsl")]
+              # the C runtime: Export makes a real Windows program (C code, compiled by TinyCC, see build_tcc.py)
+              + [os.path.join(FLAUXC, name) for name in ("runtime.h", "graphics.h", "gl.h", "xr.h")])
     for path in wanted:
         with open(path, encoding="utf-8") as fh:
             files[os.path.relpath(path, ROOT).replace(os.sep, "/")] = fh.read()
@@ -73,16 +76,16 @@ def page():
     return html
 
 
-def build(out, pyodide, player=None):
+def build(out, pyodide, tcc=None):
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as fh:
         fh.write(page())
     for name in ("blocks.js", "icon.png"):
         shutil.copyfile(os.path.join(STUDIO, name), os.path.join(out, name))
-    for name in ("fx.js", "fx3d.js", "web.js", "player.html"):
+    for name in ("fx.js", "fx3d.js", "web.js"):
         shutil.copyfile(os.path.join(HERE, name), os.path.join(out, name))
-    if player:
-        shutil.copyfile(player, os.path.join(out, "FlauxPlayer.exe"))
+    if tcc:
+        shutil.copytree(tcc, os.path.join(out, "tcc"), dirs_exist_ok=True)
     shutil.copytree(os.path.join(STUDIO, "blockly"), os.path.join(out, "blockly"), dirs_exist_ok=True)
     with open(os.path.join(out, "flaux-files.json"), "w", encoding="utf-8") as fh:
         json.dump(python_files(), fh)
@@ -96,7 +99,7 @@ def build(out, pyodide, player=None):
                 shutil.copyfile(src, os.path.join(out, "pyodide", name))
     open(os.path.join(out, ".nojekyll"), "w").close()   # serve every file as it is (GitHub Pages)
     with open(os.path.join(out, ".htaccess"), "w") as fh:   # file types, for Apache servers
-        fh.write("AddType application/wasm .wasm\nAddType text/javascript .mjs .js\nAddType application/octet-stream .exe\n"
+        fh.write("AddType application/wasm .wasm\nAddType text/javascript .mjs .js\nAddType application/octet-stream .exe .dll .data\n"
                  "AddType application/json .json\n")
     shutil.copyfile(os.path.join(HERE, "site-CLAUDE.md"), os.path.join(out, "CLAUDE.md"))
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(out) for f in fs) / 1e6
@@ -107,6 +110,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("output")
     ap.add_argument("--pyodide", help="folder with Pyodide's core files")
-    ap.add_argument("--player", help="FlauxPlayer.exe, so Export makes a .exe (installer/app/build_app.py)")
+    ap.add_argument("--tcc", help="the folder build_tcc.py makes, so Export makes real Windows programs")
     args = ap.parse_args()
-    build(args.output, args.pyodide, args.player)
+    build(args.output, args.pyodide, args.tcc)

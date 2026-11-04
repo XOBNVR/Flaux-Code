@@ -792,7 +792,7 @@ class Compiler:
             if i:
                 parts.append('FX_LIT(" ")')
             parts.append(self.to_text(c, t))
-        self.emit(f"{funcs[TEXT]}(fx_join((fx_text[]){{{', '.join(parts)}}}, {len(parts)}));")
+        self.emit(f"{funcs[TEXT]}(fx_join((fx_text[{len(parts)}]){{{', '.join(parts)}}}, {len(parts)}));")
 
     def s_SaySame(self, s):  # say.same: the same, without finishing the line
         self.s_Say(s, same=True)
@@ -1273,7 +1273,7 @@ class Compiler:
             return "", TEXT
         if len(codes) == 1:
             return codes[0], TEXT
-        return f"fx_join((fx_text[]){{{', '.join(codes)}}}, {len(codes)})", TEXT
+        return f"fx_join((fx_text[{len(codes)}]){{{', '.join(codes)}}}, {len(codes)})", TEXT
 
     def x_Name(self, e, hint):
         t = self.scope.vars.get(e.name)
@@ -1320,7 +1320,7 @@ class Compiler:
         if self.emitting:  # regenerate items now that we know the item type
             results = [self.expr(item, elem) for item in e.items]
         codes = [self.conv(c, t, elem) for c, t in results]
-        return f"{self.lname(lt)}_of({len(codes)}, ({self.ctype(elem)}[]){{{', '.join(codes)}}})", lt
+        return f"{self.lname(lt)}_of({len(codes)}, ({self.ctype(elem)}[{len(codes)}]){{{', '.join(codes)}}})", lt
 
     def x_Copies(self, e, hint):
         cc, ct = self.expr(e.count)
@@ -2347,7 +2347,7 @@ class Compiler:
         values = self.shader_values(e, node, "screen")
         if values is None:
             return "", VOID
-        vals = f"(float[]){{{', '.join(values)}}}" if values else "NULL"
+        vals = f"(float[{len(values)}]){{{', '.join(values)}}}" if values else "NULL"
         return self.call_3d(f"fx_g_effect({c}, {vals}, {len(values)})")
 
 

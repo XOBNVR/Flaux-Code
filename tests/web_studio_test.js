@@ -10,12 +10,15 @@
 // fullscreen (size, keys and mouse positions, drawn at the screen's resolution,
 // triangles without seams), Export, the Stop button, and
 // mouse look (lock_mouse() asks for pointer lock, again on a click; mouse
-// movement; the pointer is let go at Stop), in the Studio and an exported game;
+// movement; the pointer is let go at Stop) in the Studio; Export making real Windows programs
+// (run with Wine when it's there);
 // every 3D test from tests/graphics3d (WebGL 2), 3D in fullscreen (at the
 // screen's resolution) and exported, touch, and VR with a pretend headset.
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const { execFileSync } = require("child_process");
 const { chromium } = require("playwright");
 
 const url = process.argv[2] || "http://127.0.0.1:8790/";
@@ -301,8 +304,8 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.click("#btn-stop");
   await page.waitForFunction(() => document.getElementById("console").textContent.includes("Stopped"), null, { timeout: 15000 });
 
-  // Export: a zip with the game as a Windows app (<name>.exe: the site's FlauxPlayer.exe with the
-  // game page added to its end) and as a web page
+  // Export: a zip with the game as a real Windows program: Flaux makes it into C, and TinyCC
+  // (tcc/, WebAssembly) compiles that in the page. With Wine here, the .exe is run too.
   const unzip = (z) => {                    // stored files, one after another
     const files = {};
     for (let at = 0; z.readUInt32LE(at) === 0x04034b50;) {
@@ -312,21 +315,55 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
     }
     return files;
   };
+  const subsystem = (exe) => exe.readUInt16LE(exe.readUInt32LE(0x3C) + 0x5C);   // 2: a window only, 3: a console
+  const hasWine = (() => { try { execFileSync("wine", ["--version"], { stdio: "ignore" }); return true; } catch (e) { return false; } })();
+  const runExported = (files, base, extraEnv) => {      // unzip into a folder and run <base>.exe with Wine
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flaux-export-"));
+    for (const [n, data] of Object.entries(files)) {
+      fs.mkdirSync(path.join(dir, path.dirname(n)), { recursive: true });
+      fs.writeFileSync(path.join(dir, n), data);
+    }
+    const shot = path.join(dir, "shot.bmp");
+    let out = "";
+    try {
+      out = execFileSync("wine", [path.join(dir, base, base + ".exe")], { cwd: path.join(dir, base), timeout: 120000,
+        env: { ...process.env, WINEDEBUG: "-all", SDL_VIDEODRIVER: "dummy", SDL_AUDIODRIVER: "dummy", FLAUX_FAST: "1",
+               FLAUX_FRAMES: "2", FLAUX_SCREENSHOT: "Z:" + shot, ...extraEnv }, input: "" }).toString();
+    } catch (e) { out = "failed: " + (e.stdout || "") + (e.stderr || "") + e.message; }
+    return { out: out.replace(/\r\n/g, "\n"), shot: fs.existsSync(shot) ? fs.readFileSync(shot) : null };
+  };
+  const bmpPixel = (bmp, x, y) => {      // "#rrggbb" of a 32-bit .bmp from SDL (rows from the bottom)
+    const off = bmp.readUInt32LE(10), w = bmp.readInt32LE(18), h = bmp.readInt32LE(22);
+    const row = h > 0 ? h - 1 - y : y, i = off + (row * w + x) * 4;
+    return "#" + [bmp[i + 2], bmp[i + 1], bmp[i]].map((v) => v.toString(16).padStart(2, "0")).join("");
+  };
   const [download] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
   const zip = fs.readFileSync(await download.path());
   const base = download.suggestedFilename().replace(/\.zip$/, "");    // the program's name (web_test, saved above)
   const inZip = unzip(zip);
-  check(base === "web_test" && [`${base}/${base}.exe`, `${base}/game.html`, `${base}/README.txt`].every((n) => n in inZip) &&
-        !(`${base}/Play ${base}.bat` in inZip),
-        `Export downloads ${download.suggestedFilename()} with ${base}.exe, game.html and README.txt (${Object.keys(inZip).join(", ")})`);
-  const exe = inZip[`${base}/${base}.exe`], gamePage = inZip[`${base}/game.html`];
-  if (exe && gamePage) {
-    const player = Buffer.from(await (await fetch(new URL("FlauxPlayer.exe", url))).arrayBuffer());
-    const len = Number(exe.readBigUInt64LE(exe.length - 16));
-    check(exe.slice(0, 2).toString() === "MZ" && exe.slice(0, player.length).equals(player) &&
-          exe.slice(exe.length - 8).toString() === "FLAUXGM1" && len === gamePage.length &&
-          exe.slice(exe.length - 16 - len, exe.length - 16).equals(gamePage),
-          `${base}.exe is the game player with the game inside (${exe.length} bytes: ${player.length} + the ${len}-byte page + 16)`);
+  const exe = inZip[`${base}/${base}.exe`];
+  check(base === "web_test" && !!exe && `${base}/SDL2.dll` in inZip && `${base}/README.txt` in inZip &&
+        !Object.keys(inZip).some((n) => /\.(html|bat)$/.test(n)),
+        `Export downloads ${download.suggestedFilename()}: ${Object.keys(inZip).join(", ")}`);
+  check(!!exe && exe.slice(0, 2).toString() === "MZ" && subsystem(exe) === 2,
+        `${base}.exe is a real Windows program, a window only (${exe ? exe.length : 0} bytes, subsystem ${exe ? subsystem(exe) : "?"})`);
+  if (exe && hasWine) {
+    const ran = runExported(inZip, base, {});
+    const colours = ran.shot ? [bmpPixel(ran.shot, 5, 5), bmpPixel(ran.shot, 120, 90)] : [];
+    check(colours[0] === "#000000" && colours[1] === "#ffffff",
+          `the exported game runs and draws (Wine): ${ran.shot ? colours.join(" ") : "no picture. " + ran.out.slice(0, 300)}`);
+  } else if (exe) console.log("(the exported game isn't run here: no Wine)");
+
+  // a program that says things: a console program
+  await setCode('say.same "hi from"\nsay " the exe"\nsay 6 * 7\n');
+  const [textZip] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
+  const textFiles = unzip(fs.readFileSync(await textZip.path()));
+  const textBase = textZip.suggestedFilename().replace(/\.zip$/, ""), textExe = textFiles[`${textBase}/${textBase}.exe`];
+  check(!!textExe && subsystem(textExe) === 3 && !(`${textBase}/SDL2.dll` in textFiles),
+        `a program that says things exports as a console program (${Object.keys(textFiles).join(", ")})`);
+  if (textExe && hasWine) {
+    const ran = runExported(textFiles, textBase, {});
+    check(ran.out.startsWith("hi from the exe\n42\n"), `...and says the right things (Wine): ${JSON.stringify(ran.out.slice(0, 120))}`);
   }
 
   // mouse look. Headless Chromium locks the pointer (clicking Run counts as the click
@@ -406,39 +443,18 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   check(await page.evaluate(() => !document.pointerLockElement && !FlauxWeb.mouseLook().wanted),
         "Stop lets go of the mouse");
 
-  // the same in an exported game.html
-  const [lookZip] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
-  const zbytes = fs.readFileSync(await lookZip.path());
-  let html = null;
-  for (let at = 0; zbytes.readUInt32LE(at) === 0x04034b50;) {      // stored files, one after another
-    const size = zbytes.readUInt32LE(at + 18), nlen = zbytes.readUInt16LE(at + 26), xlen = zbytes.readUInt16LE(at + 28);
-    const name = zbytes.slice(at + 30, at + 30 + nlen).toString();
-    const data = zbytes.slice(at + 30 + nlen + xlen, at + 30 + nlen + xlen + size);
-    if (name.endsWith("/game.html")) html = data.toString();
-    at += 30 + nlen + xlen + size;
-  }
-  const player = await browser.newPage({ viewport: { width: 1000, height: 600 } });   // (the game shown smaller)
-  player.on("pageerror", (e) => errors.push("game.html: " + e.message));
-  // (the spy goes in first, so it's there when the program calls lock_mouse())
-  await player.setContent((html || "<p>no game.html</p>").replace("<head>", `<head><script>(${spyLocks})()</script>`));
-  await lookTest(player, "#canvas", "#out", "exported game", "#title");
-  // and fullscreen there draws at the screen's resolution too
-  await player.evaluate(() => document.exitPointerLock());
-  await player.setViewportSize({ width: 1600, height: 900 });
-  await player.click("#full");
-  await player.waitForFunction(() => !!document.fullscreenElement, null, { timeout: 5000 });
-  await player.waitForFunction(() => document.getElementById("canvas").width === 1200, null, { timeout: 5000 }).catch(() => {});
-  const shown = await player.evaluate(() => { const c = document.getElementById("canvas"), r = c.getBoundingClientRect();
-    return `${c.width}x${c.height} pixels, shown ${Math.round(r.width)}x${Math.round(r.height)}`; });
-  check(shown === "1200x900 pixels, shown 1200x900", `exported game: fullscreen draws at the screen's resolution (${shown})`);
-  await player.close();
   // on a sharp screen (two screen pixels for each CSS pixel) the game gets all of them
-  const sharpScreen = await browser.newContext({ viewport: { width: 1000, height: 600 }, deviceScaleFactor: 2 });
+  const sharpScreen = await browser.newContext({ viewport: { width: 1300, height: 820 }, deviceScaleFactor: 2 });
   const sharpPage = await sharpScreen.newPage();
-  sharpPage.on("pageerror", (e) => errors.push("game.html (sharp screen): " + e.message));
-  await sharpPage.setContent(html || "<p>no game.html</p>");
-  await sharpPage.waitForFunction(() => document.getElementById("canvas").width > 800, null, { timeout: 5000 }).catch(() => {});
-  const dense = await sharpPage.evaluate(() => { const c = document.getElementById("canvas"), r = c.getBoundingClientRect();
+  sharpPage.on("pageerror", (e) => errors.push("sharp screen: " + e.message));
+  await sharpPage.goto(url);
+  await sharpPage.waitForFunction(() => /Ready|No problems/.test(document.getElementById("status").textContent), null, { timeout: 120000 });
+  await sharpPage.evaluate((t) => { code.value = t; state.lastChecked = null; render(); },
+                           'window(300, 200)\nrepeat forever\n    clear("navy")\n    show()\nend\n');
+  await sharpPage.click("#btn-run");
+  await sharpPage.waitForSelector("#game:not([hidden])", { timeout: 60000 });
+  await sharpPage.waitForFunction(() => document.getElementById("game-canvas").width > 300, null, { timeout: 5000 }).catch(() => {});
+  const dense = await sharpPage.evaluate(() => { const c = document.getElementById("game-canvas"), r = c.getBoundingClientRect();
     return { w: c.width, h: c.height, cssW: Math.round(r.width), cssH: Math.round(r.height) }; });
   check(Math.abs(dense.w - 2 * dense.cssW) <= 2 && Math.abs(dense.h - 2 * dense.cssH) <= 2,
         `on a sharp screen the game gets every screen pixel (${dense.w}x${dense.h} pixels, shown ${dense.cssW}x${dense.cssH})`);
@@ -491,65 +507,14 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.click("#btn-stop");
   await page.waitForFunction(() => document.getElementById("console").textContent.includes("Stopped"), null, { timeout: 15000 });
 
-  // an exported 3D game (with a model) has the 3D engine inside, and draws
+  // an exported 3D game: the 3D engine (gl.h) compiles too, and its model goes in the zip
   await setCode('window(300, 200)\nsky("black")\ncamera(0, 1, 4, 0, 0, 0)\nmodel("house.obj", 0, 0, 0, 2)\nshow()\n');
   const [zip3d] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
-  const z3 = fs.readFileSync(await zip3d.path());
-  let html3d = null;
-  for (let at = 0; z3.readUInt32LE(at) === 0x04034b50;) {
-    const size = z3.readUInt32LE(at + 18), nlen = z3.readUInt16LE(at + 26), xlen = z3.readUInt16LE(at + 28);
-    if (z3.slice(at + 30, at + 30 + nlen).toString().endsWith("/game.html"))
-      html3d = z3.slice(at + 30 + nlen + xlen, at + 30 + nlen + xlen + size).toString();
-    at += 30 + nlen + xlen + size;
-  }
-  const game3d = await browser.newPage({ viewport: { width: 800, height: 600 } });
-  game3d.on("pageerror", (e) => errors.push("3D game.html: " + e.message));
-  await game3d.setContent(html3d || "<p>no game.html</p>");
-  await game3d.waitForTimeout(1500);
-  const drawn = await game3d.evaluate(() => {
-    const c = document.getElementById("canvas");
-    if (!c || c.width < 300) return -1;
-    const t = document.createElement("canvas"); t.width = c.width; t.height = c.height;
-    const g = t.getContext("2d"); g.drawImage(c, 0, 0);
-    const d = g.getImageData(0, 0, c.width, c.height).data;
-    let lit = 0;
-    for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 60) lit++;
-    return lit;
-  });
-  const outText = await game3d.evaluate(() => document.getElementById("out").textContent);
-  check(!!html3d && html3d.includes("FlauxRuntime3D") && drawn > 500,
-        `an exported 3D game has the 3D engine and its model, and draws (${drawn} lit pixels${outText.trim() ? "; says: " + outText.trim() : ""})`);
-  await game3d.close();
+  const files3d = unzip(fs.readFileSync(await zip3d.path()));
+  const base3d = zip3d.suggestedFilename().replace(/\.zip$/, "");
+  check([`${base3d}/${base3d}.exe`, `${base3d}/SDL2.dll`, `${base3d}/house.obj`, `${base3d}/house.mtl`].every((n) => n in files3d),
+        `an exported 3D game is a real program, with its model (${Object.keys(files3d).join(", ")})`);
 
-  // the game page inside the Windows app (<name>.exe), with pretend app functions: the window
-  // gets the game's name and size, the game fills it, and the app hears when it ends
-  await setCode('window(320, 200, "App test")\nsay "hi from the app"\nclear("navy")\nshow()\n');
-  const [appZip] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
-  const appFiles = unzip(fs.readFileSync(await appZip.path()));
-  const appPage = Object.entries(appFiles).find(([n]) => n.endsWith("/game.html"));
-  const inApp = await browser.newPage({ viewport: { width: 1000, height: 700 } });
-  inApp.on("pageerror", (e) => errors.push("game.html in the app: " + e.message));
-  const pretendApp = () => {
-    window.flauxApp = true;
-    window.appCalls = [];
-    window.flauxWindow = (...a) => { window.appCalls.push(["window", ...a]); return Promise.resolve(""); };
-    window.flauxFullscreen = (on) => { window.appCalls.push(["fullscreen", on]); return Promise.resolve(""); };
-    window.flauxDone = (code, text) => { window.appCalls.push(["done", code, text]); return Promise.resolve(""); };
-  };
-  await inApp.setContent(appPage ? appPage[1].toString().replace("<head>", `<head><script>(${pretendApp})()</script>`)
-                                 : "<p>no game.html</p>");
-  await inApp.waitForFunction(() => window.appCalls.some((c) => c[0] === "done"), null, { timeout: 15000 }).catch(() => {});
-  await inApp.waitForTimeout(300);
-  const calls = (await inApp.evaluate(() => window.appCalls)) || [];
-  const appShown = await inApp.evaluate(() => { const r = document.getElementById("canvas").getBoundingClientRect();
-    return [Math.round(r.width), Math.round(r.height), document.body.classList.contains("app")]; });
-  const appWin = calls.find((c) => c[0] === "window"), appDone = calls.find((c) => c[0] === "done");
-  check(!!appWin && appWin[1] === "App test" && appWin[2] === 320 && appWin[3] === 200,
-        `in the Windows app the window gets the game's name and size (${JSON.stringify(appWin)})`);
-  check(appShown[2] && appShown[0] > 600, `in the Windows app the game fills the window (shown ${appShown[0]}x${appShown[1]})`);
-  check(!!appDone && appDone[1] === 0 && appDone[2].includes("hi from the app"),
-        `the Windows app hears when the game ends, and what it said (${JSON.stringify(appDone)})`);
-  await inApp.close();
 
   check(!errors.length, "no errors in the page" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();

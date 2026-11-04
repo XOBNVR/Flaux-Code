@@ -619,6 +619,14 @@ static FILE *fx_open_beside(const char *file, char *path, size_t size) {
         snprintf(path, size, "%s", file);
         f = fopen(path, "r");
     }
+    if (!f && !fx_is_absolute(file)) {   /* next to the program itself (a game someone shared) */
+        char *base = SDL_GetBasePath();
+        if (base) {
+            snprintf(path, size, "%s%s", base, file);
+            SDL_free(base);
+            f = fopen(path, "r");
+        }
+    }
     return f;
 }
 

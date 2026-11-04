@@ -88,27 +88,6 @@ $left = Get-Process python, pythonw -ErrorAction SilentlyContinue | Where-Object
 Check (-not $left) "closing Flaux Studio leaves nothing running"
 $left | Stop-Process -Force -ErrorAction SilentlyContinue
 
-& "$app\python\python.exe" "$root\installer\app\build_app.py" "$dir\apps" --cxx "$app\toolchain\bin\g++.exe" `
-    --windres "$app\toolchain\bin\windres.exe" | Out-Host
-Set-Content -Path "$dir\player_test.flx" -Encoding UTF8 -Value @'
-window(320, 200, "Player test")
-clear("navy")
-say.same "the game"
-say " works"
-show()
-'@
-& "$app\python\python.exe" "$root\installer\app\make_game_exe.py" "$dir\apps\FlauxPlayer.exe" "$dir\player_test.flx" `
-    "$dir\Player Test.exe" | Out-Host
-$said = "$env:TEMP\flaux-player-app.json"
-Remove-Item $said -ErrorAction SilentlyContinue
-$env:FLAUX_APP_TEST = $said
-$game = Start-Process "$dir\Player Test.exe" -PassThru
-$text = Wait-For $said 60
-Check ($text -match '^\[0,' -and $text -match "the game works") "a game exported from the web version plays in its own window ($text)"
-$game.WaitForExit(15000) | Out-Null
-Check $game.HasExited "...and closes"
-Remove-Item Env:FLAUX_APP_TEST
-
 # 8. uninstall cleans up
 $un = Start-Process "$app\unins000.exe" -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
 Check ($un.ExitCode -eq 0) "uninstaller finished"

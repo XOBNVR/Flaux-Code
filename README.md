@@ -127,9 +127,12 @@ their own.
     `say`s anything opens just its window, with no black console window
     behind it; a program that says things waits for **Enter** before its
     window closes, so you can read it.
-  - On the website the zip has `<name>.exe` too (the game inside Flaux's game
-    player), and `game.html`, the same game as one web page: for a Mac, Linux
-    or a phone, or to put on a website.
+  - On the website the zip has a real `<name>.exe` too: the page makes your
+    program into machine code itself, with a small C compiler (TinyCC) that
+    runs inside the page, so you don't need the Windows app to make one. It's
+    a bit slower than the Windows app's (whose compiler takes more time to
+    make programs as fast as they can be), and 3D games made there need a
+    graphics card with OpenGL 3.3 (nearly every PC has one).
 - **&#127769; Night** switches to dark colours. **A&minus;** and **A+**
   change the text size.
 
@@ -1148,10 +1151,10 @@ your .flx file → lexer → parser → type checker → C code → gcc/clang �
 | [`flauxc/cli.py`](flauxc/cli.py) | the `flaux` command |
 | [`flauxc/studio/`](flauxc/studio/) | Flaux Studio: a tiny local web server and the editor page |
 | [`flauxc/jsgen.py`](flauxc/jsgen.py) | the second backend: turns Flaux into JavaScript for the web version |
-| [`flauxc/web/`](flauxc/web/) | Flaux Studio on the web: the JavaScript runtime (`fx.js`), the page's helper (`web.js`), Python's side (`web_api.py`), the page an exported program becomes (`player.html`) and the site builder (`build.py`) |
+| [`flauxc/web/`](flauxc/web/) | Flaux Studio on the web: the JavaScript runtime (`fx.js`), the page's helper (`web.js`), Python's side (`web_api.py`), the site builder (`build.py`) and the C compiler Export uses in the page (`build_tcc.py`: TinyCC as WebAssembly) |
 | [`flauxc/studio/blocks.py`](flauxc/studio/blocks.py), [`blocks.js`](flauxc/studio/blocks.js) | the block editor: code to blocks, and blocks to code (built on [Blockly](https://developers.google.com/blockly)) |
 | [`installer/`](installer/) | the Windows installer (Inno Setup), `flaux.exe`, and its build scripts |
-| [`installer/app/`](installer/app/) | the Windows apps: `FlauxStudio.exe` (Flaux Studio in its own window) and `FlauxPlayer.exe` (the player inside games exported from the website), using WebView2 through [webview](https://github.com/webview/webview) |
+| [`flauxc/studio/app.py`](flauxc/studio/app.py) | Flaux Studio, the desktop app (Tk); `installer/studio_launcher.c` is `FlauxStudio.exe`, which opens it |
 | [`assets/`](assets/) | the Flaux icon, and the script that makes every size of it |
 
 Useful commands:

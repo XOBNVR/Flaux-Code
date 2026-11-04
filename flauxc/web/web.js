@@ -9,8 +9,8 @@
  *   fullscreen (the Fullscreen button, or fullscreen() in the program), drawn at the
  *   full resolution of the screen (see "sharpness"), and
  *   lock the mouse for looking around (lock_mouse(): Pointer Lock API)
- * - Export makes a .zip with the program as one web page (player.html filled
- *   in with fx.js, the compiled program and its pictures) and files that open it
+ * - Export makes a .zip with the program as a real Windows program (<name>.exe): Flaux
+ *   makes it into C, and TinyCC (tcc/, WebAssembly) compiles that right in the page
  *
  * index.html calls FlauxWeb.api(path, data) instead of asking a server.
  */
@@ -499,111 +499,87 @@ window.FlauxWeb = (() => {
   }
 
   // -------------------------------------------------------------- export
-  // A .zip that runs the program without Flaux Studio:
-  //   <name>/game.html          the program, fx.js and its pictures in one page (works from file://)
-  //   <name>/Play <name>.bat    Windows: opens game.html in the web browser
-  //   <name>/play.command       Mac        <name>/play.sh   Linux
+  // A .zip with the program as a real Windows program, made right here in the page: Flaux makes
+  // the program into C (Python, like the desktop app), and TinyCC (a small C compiler, as
+  // WebAssembly: tcc/, made by build_tcc.py) makes that into machine code.
+  //   <name>/<name>.exe     the program (a game opens just its own window)
+  //   <name>/SDL2.dll       for games (graphics, keys, sound)
+  //   <name>/<pictures and models it uses>
   //   <name>/README.txt
   function exportName(path) {
     const name = nameOf(path).replace(/\.flx$/i, "").replace(/[^A-Za-z0-9 _-]+/g, "").trim();
     return !name || name === "untitled" ? "game" : name;
   }
-  function dataUrl(blob) {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  }
-  // the 3D models the program names ("rocket.obj"), and their .mtl files, as text
-  async function modelsFor(source, path) {
-    const files = {}, wanted = [...source.matchAll(/"([^"\n]+\.obj)"/gi)].map((m) => m[1]);
+  // the files the program names: pictures, 3D models and the .mtl files (and pictures) they use
+  async function filesFor(source, path) {
+    const found = {}, wanted = [...source.matchAll(/"([^"\n]+\.(?:png|jpe?g|bmp|gif|obj|mtl))"/gi)].map((m) => m[1]);
     while (wanted.length) {
       const name = wanted.shift();
-      if (name in files) continue;
-      const text = await loadFile(name, path);
-      if (text === null) continue;
-      files[name] = text;
-      for (const m of text.matchAll(/^\s*mtllib\s+(.+?)\s*$/gm)) wanted.push(m[1]);
-    }
-    return files;
-  }
-  // the pictures the program names ("ship.png" and so on), and its models' .mtl files name, as data: URLs
-  async function picturesFor(source, path, models) {
-    const found = {};
-    for (const text of Object.values(models || {}))
-      for (const m of text.matchAll(/^\s*map_Kd\s+(.+?)\s*$/gm)) source += `\n"${m[1]}"`;
-    for (const m of source.matchAll(/"([^"\n]+\.(?:png|jpe?g|bmp|gif))"/gi)) {
-      const name = m[1];
-      if (name in found) continue;
-      let url = await pictureUrl(name, path);
-      if (url && !url.startsWith("data:")) {
-        try { url = await dataUrl(await (await fetch(url)).blob()); } catch (e) { url = null; }
+      if (name in found || /(^|[\\/])\.\.([\\/]|$)/.test(name) || /^[\\/]|^[A-Za-z]:/.test(name)) continue;
+      const url = await pictureUrl(name, path);
+      if (!url) continue;
+      try { found[name] = new Uint8Array(await (await fetch(url)).arrayBuffer()); } catch (e) { continue; }
+      if (/\.(obj|mtl)$/i.test(name)) {
+        const text = new TextDecoder().decode(found[name]);
+        for (const m of text.matchAll(/^\s*(?:mtllib|map_Kd)\s+(.+?)\s*$/gm)) wanted.push(m[1]);
       }
-      if (url) found[name] = url;
     }
     return found;
   }
+  let tccScript = null;
+  function loadTcc() {             // tcc/tcc.js, the first time Export is used
+    if (!tccScript) tccScript = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "tcc/tcc.js";
+      s.onload = resolve;
+      s.onerror = () => { tccScript = null; reject(new Error("This website doesn't have Flaux's C compiler (the tcc folder).")); };
+      document.head.append(s);
+    });
+    return tccScript;
+  }
+  // C code -> a Windows program (bytes). `gui`: a window only, no console window.
+  async function compileExe(c, graphics, gui) {
+    await loadTcc();
+    let said = "";
+    const tcc = await window.createTcc({ locateFile: (f) => "tcc/" + f, print: (t) => { said += t + "\n"; },
+                                         printErr: (t) => { said += t + "\n"; } });
+    tcc.FS.writeFile("/program.c", c);
+    const args = ["-I/sysroot/include/SDL2", "-I/sysroot/flaux", "-DFX_EXPORTED",
+                  ...(gui ? ["-DFX_GUI_APP", "-Wl,-subsystem=gui"] : []),
+                  "-o", "/program.exe", "/program.c", ...(graphics ? ["-lSDL2"] : []), "-lshell32", "-lole32", "-luser32"];
+    let code;
+    try { code = tcc.ccall("flaux_tcc", "number", ["string"], [args.join("\n")]); }
+    catch (e) { code = 1; said += String(e && e.message || e); }
+    if (code !== 0) throw new Error("Flaux's C compiler didn't accept the program. This is a bug in Flaux, not in your " +
+                                    "program.\n" + said.trim());
+    return tcc.FS.readFile("/program.exe");
+  }
   async function exportGame(d) {
     const source = d.content || "", name = exportName(d.path);
-    const built = await ask("build", source, nameOf(d.path));
+    const built = await ask("build_c", source, nameOf(d.path));
     if (!built.ok) return built;
-    const three = built.js.includes("fx.setup3d(");      // 3D or shaders: the WebGL engine too
-    const [player, fx, fx3d] = await Promise.all(["player.html", "fx.js", three ? "fx3d.js" : null].map(async (f) => {
-      if (!f) return "";
-      const res = await fetch(f);
-      if (!res.ok) throw new Error("Couldn't load " + f);
-      return res.text();
-    }));
-    const models = three ? await modelsFor(source, d.path) : {};
-    const program = { name, js: built.js, source, pictures: await picturesFor(source, d.path, models), files: models };
-    const inScript = (code) => code.replace(/<\/script/gi, "<\\/script").replace(/<!--/g, "<\\!--");
-    const html = player
-      .replace("@@TITLE@@", () => name.replace(/&/g, "&amp;").replace(/</g, "&lt;"))
-      .replace("/*@FX@*/", () => inScript(fx))
-      .replace("/*@FX3D@*/", () => inScript(fx3d))
-      .replace("/*@PROGRAM@*/", () => JSON.stringify(program).replace(/</g, "\\u003c"));
+    let exe;
+    try { exe = await compileExe(built.c, built.graphics, built.graphics && !built.says); }
+    catch (e) { return { ok: false, message: e.message }; }
     const crlf = (t) => t.replace(/\n/g, "\r\n");
-    // <name>.exe: Flaux's game player (FlauxPlayer.exe, a real Windows app with its own window,
-    // next to this page on the website) with the game added to the end of it (see
-    // installer/app/flaux_app.cc: the page, its length in 8 bytes, then "FLAUXGM1")
-    let exe = null;
-    try {
-      const res = await fetch("FlauxPlayer.exe");
-      if (res.ok) exe = gameExe(new Uint8Array(await res.arrayBuffer()), new TextEncoder().encode(html));
-    } catch (e) { /* not on this website: the game still works from game.html */ }
-    const files = [];
-    if (exe) files.push([`${name}/${name}.exe`, exe, true]);
-    files.push([`${name}/game.html`, html]);
-    if (!exe) files.push([`${name}/Play ${name}.bat`, crlf(`@echo off\nrem Opens ${name} in your web browser.\nstart "" "%~dp0game.html"\n`)]);
+    const files = [[`${name}/${name}.exe`, exe, true]];
+    if (built.graphics) {
+      const dll = await fetch("tcc/SDL2.dll");
+      if (!dll.ok) return { ok: false, message: "This website is missing tcc/SDL2.dll." };
+      files.push([`${name}/SDL2.dll`, new Uint8Array(await dll.arrayBuffer())]);
+    }
+    for (const [file, bytes] of Object.entries(await filesFor(source, d.path)))
+      files.push([`${name}/${file.replace(/\\/g, "/")}`, bytes]);
     files.push([`${name}/README.txt`, crlf(`${name}\n${"=".repeat(name.length)}\n\n` +
       `Made with Flaux (https://github.com/XOBNVR/Flaux-Code).\n\n` +
-      (exe ? `To play on Windows, double-click ${name}.exe. It's the whole game, in its own window:\n` +
-             `you can copy it anywhere, or send it to a friend.\n` +
-             `(Windows 10 and 11 have everything it needs. If Windows says it protected your PC,\n` +
-             `click "More info", then "Run anyway": that happens with any new program.)\n\n` +
-             `On a Mac, Linux or a phone, open game.html in a web browser instead.\n`
-           : `To play on Windows, double-click "Play ${name}.bat" (or game.html).\n` +
-             `On a Mac or Linux, open game.html in a web browser.\n`) +
-      `\nEverything is inside game.html too, so you can also put that one file on a website.\n` +
-      `Click the game so it gets the keys. F11 or the Fullscreen button plays on the whole screen\n` +
-      `(Esc leaves).\n`)]);
+      `To play on Windows, double-click ${name}.exe. It's a real Windows program, in a window of its own.\n` +
+      (built.graphics ? `Keep SDL2.dll${files.length > 2 ? " and the pictures" : ""} next to it: to share the game, ` +
+                        `share the whole folder (or this zip).\n` : "") +
+      `\n(If Windows says it protected your PC, click "More info", then "Run anyway": that happens\n` +
+      `with any new program that isn't from a big company.)\n` +
+      (built.graphics ? `\nF11 (or Alt+Enter) plays on the whole screen.\n` : ""))]);
     download(name + ".zip", makeZip(files), "application/zip");
-    return { ok: true, name: name + ".zip", exe: !!exe };
-  }
-
-  // The game player with a game in it: the player, the page, the page's length (8 bytes, little
-  // endian), then "FLAUXGM1" (what installer/app/flaux_app.cc looks for)
-  function gameExe(player, page) {
-    const exe = new Uint8Array(player.length + page.length + 16);
-    exe.set(player, 0);
-    exe.set(page, player.length);
-    const tail = new DataView(exe.buffer, player.length + page.length, 16);
-    tail.setUint32(0, page.length >>> 0, true);
-    tail.setUint32(4, Math.floor(page.length / 2 ** 32), true);
-    exe.set(new TextEncoder().encode("FLAUXGM1"), player.length + page.length + 8);
-    return exe;
+    return { ok: true, name: name + ".zip", exe: true };
   }
 
   // A .zip file (stored, not compressed). files: [path, text or bytes, executable?]

@@ -29,6 +29,12 @@
 
 #define FX_INLINE static inline __attribute__((always_inline))
 
+#ifdef __TINYC__
+/* TinyCC (Flaux Studio on the web makes Windows programs with it) uses Windows' own C
+   library, msvcrt.dll, which has these under other names */
+#define strtoll _strtoi64
+#endif
+
 typedef struct { const char *p; int64_t n; } fx_text;
 #define FX_LIT(s) ((fx_text){ (s), (int64_t)(sizeof(s) - 1) })
 
@@ -169,8 +175,10 @@ static int fx_fmt_float(char *buf, size_t size, double v) {
         if (strtod(buf, NULL) == v) { digits = d; break; }
     }
     snprintf(buf, size, "%.*e", digits - 1, v);
-    int exp = atoi(strchr(buf, 'e') + 1);
-    if (exp < -5 || exp >= 17) return (int)strlen(buf); /* tiny or huge: 1.5e+20 */
+    char *e = strchr(buf, 'e');
+    int exp = atoi(e + 1);
+    if (exp < -5 || exp >= 17)   /* tiny or huge: 1.5e+20 (two digits at least, everywhere: not e+020) */
+        return (int)(e - buf) + snprintf(e, size - (size_t)(e - buf), "e%c%02d", exp < 0 ? '-' : '+', exp < 0 ? -exp : exp);
     int decimals = digits - 1 - exp;
     return snprintf(buf, size, "%.*f", decimals > 0 ? decimals : 0, v);
 }
