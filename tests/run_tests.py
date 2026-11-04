@@ -211,7 +211,8 @@ def studio_checks():
             problems.append(f"the Mac library reader (otool) is wrong: {_parse_otool(otool)}")
         # and on a Mac the zip gets a double-clickable play.command, with SDL2 bundled next to the
         # program (install_name_tool); here we pretend to be a Mac and stand in for the Mac tools.
-        if sdl_installed():
+        # (Not on Windows: pretending there would leave cli.WINDOWS/.exe set, a state no real Mac is in.)
+        if sdl_installed() and os.name != "nt":
             from flauxc.studio import server as _server
             from flauxc import cli as _cli
             real_platform, real_fn = _server.sys.platform, _cli.macos_selfcontain
