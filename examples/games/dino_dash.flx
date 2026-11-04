@@ -1,0 +1,701 @@
+# Dino Dash: run as far as you can!
+#
+#   Space, Up or a click   jump (hold it to jump higher, tap it for a hop)
+#   Down                   duck under high bugs (and drop fast in the air)
+#   F11                    fullscreen
+#
+# Jump over boulders, stumps and logs, duck under the bugs, and grab the
+# gems for 25 points each. The dino gets faster and faster, and the sky goes
+# from day to sunset to night and back while you run.
+
+window(960, 400, "Dino Dash")
+
+set ground to 320
+set dino_x to 110
+
+# ------------------------------------------------------------------ helpers
+
+# a number part of the way from a to b (t = 0 gives a, t = 1 gives b)
+function mix(a, b, t)
+    return a + (b - a) * t
+end
+
+# a whole number with zeros in front, like 00042
+function five_digits(n)
+    set s to text(n)
+    repeat while length of s < 5
+        set s to "0" + s
+    end
+    return s
+end
+
+# a flat oval (for shadows): a rectangle with round ends
+function oval(x, y, width, height, colour)
+    rect(x + height / 2, y - height / 2, width - height, height, colour)
+    circle(x + height / 2, y, height / 2, colour)
+    circle(x + width - height / 2, y, height / 2, colour)
+end
+
+# ------------------------------------------------------------- the dinosaur
+
+# (x, y) is the back of its feet on the ground. pose: "run", "jump", "duck" or "ouch".
+# t counts frames (for the legs, the tail and blinking).
+function draw_dino(x, y, pose, t, dark)
+    set skin to rgb(mix(92, 60, dark), mix(184, 120, dark), mix(46, 60, dark))
+    set back to rgb(mix(58, 40, dark), mix(140, 90, dark), mix(30, 45, dark))
+    set belly to rgb(mix(206, 150, dark), mix(240, 170, dark), mix(140, 110, dark))
+    set line_colour to rgb(30, 60, 20)
+    if pose = "ouch"
+        set skin to rgb(140, 150, 130)
+        set back to rgb(105, 115, 100)
+        set belly to rgb(190, 195, 180)
+    end
+    set wag to sin(t * 0.35) * 4
+    set step to (t // 4) mod 4
+
+    if pose = "duck"
+        # --- tail, body and head, low and long, each with a dark outline
+        triangle(x - 2, y - 26, x - 34, y - 14 + wag, x - 2, y - 8, line_colour)
+        triangle(x, y - 24, x - 30, y - 15 + wag, x, y - 10, skin)
+        rect(x - 2, y - 34, 58, 28, line_colour)
+        rect(x, y - 32, 54, 24, skin)
+        rect(x, y - 32, 54, 6, back)
+        rect(x + 8, y - 20, 38, 9, belly)
+        rect(x + 48, y - 40, 34, 22, line_colour)
+        rect(x + 50, y - 38, 30, 18, skin)
+        rect(x + 66, y - 26, 14, 3, line_colour)                 # mouth
+        circle(x + 70, y - 33, 4, "white")
+        circle(x + 71, y - 33, 2, "black")
+        circle(x + 77, y - 35, 1, line_colour)                   # nostril
+        # spikes, flattened
+        repeat with k from 0 to 4
+            triangle(x + 4 + k * 10, y - 32, x + 8 + k * 10, y - 38, x + 12 + k * 10, y - 32, back)
+        end
+        # little legs, still running
+        set a to 4 - (step mod 2) * 4
+        rect(x + 10, y - 8, 9, 8 - a, back)
+        rect(x + 34, y - 8, 9, 4 + a, skin)
+        rect(x + 32, y - 2, 14, 2, line_colour)
+        return
+    end
+
+    # --- tail (it swings while running)
+    triangle(x + 2, y - 50, x - 30, y - 30 + wag, x + 2, y - 22, line_colour)
+    triangle(x + 4, y - 48, x - 26, y - 31 + wag, x + 4, y - 25, skin)
+    triangle(x + 4, y - 48, x - 26, y - 31 + wag, x + 4, y - 44, back)
+
+    # --- back leg (darker, it's further away)
+    set lift_back to 0
+    set lift_front to 0
+    if pose = "run"
+        set lift_back to [0, 4, 8, 4][step + 1]
+        set lift_front to [8, 4, 0, 4][step + 1]
+    else if pose = "jump"
+        set lift_back to 6
+        set lift_front to 2
+    end
+    rect(x + 6, y - 22, 11, 22 - lift_back, back)
+    rect(x + 4, y - 3 - lift_back, 17, 4, line_colour)
+    # --- body
+    rect(x - 2, y - 58, 42, 40, line_colour)
+    rect(x, y - 56, 38, 36, skin)
+    rect(x, y - 56, 38, 8, back)
+    rect(x + 8, y - 46, 22, 22, belly)
+    rect(x + 8, y - 38, 22, 2, rgb(170, 210, 110))           # belly stripes
+    rect(x + 8, y - 31, 22, 2, rgb(170, 210, 110))
+    circle(x + 6, y - 40, 3, back)                             # spots
+    circle(x + 32, y - 28, 2, back)
+    # --- front leg, with toes
+    rect(x + 24, y - 22, 11, 22 - lift_front, skin)
+    rect(x + 22, y - 3 - lift_front, 19, 4, line_colour)
+    rect(x + 36, y - 5 - lift_front, 3, 3, "white")            # claw
+    # --- neck and head
+    rect(x + 20, y - 70, 18, 16, skin)
+    rect(x + 22, y - 84, 40, 30, line_colour)
+    rect(x + 24, y - 82, 36, 26, skin)
+    rect(x + 24, y - 82, 36, 6, back)
+    set open to 0
+    if pose = "jump" or pose = "ouch"
+        set open to 5
+    end
+    rect(x + 40, y - 62 + 0, 20, 2 + open, line_colour)       # mouth
+    if open > 0
+        triangle(x + 44, y - 62, x + 47, y - 58, x + 50, y - 62, "white")   # teeth
+        triangle(x + 52, y - 62, x + 55, y - 58, x + 58, y - 62, "white")
+    end
+    circle(x + 56, y - 76, 1, line_colour)                     # nostril
+    circle(x + 34, y - 64, 3, rgb(240, 140, 140))              # rosy cheek
+    # --- the eye: blinks now and then, crosses when hit
+    if pose = "ouch"
+        line(x + 40, y - 75, x + 48, y - 67, "black", 2)
+        line(x + 48, y - 75, x + 40, y - 67, "black", 2)
+    else if t mod 170 < 6
+        line(x + 39, y - 71, x + 49, y - 71, "black", 2)
+    else
+        circle(x + 44, y - 71, 6, "white")
+        circle(x + 46, y - 71, 3, "black")
+        circle(x + 47, y - 72, 1, "white")
+    end
+    # --- arm and claws (up when jumping)
+    if pose = "jump"
+        rect(x + 34, y - 52, 6, 10, skin)
+        rect(x + 38, y - 54, 4, 3, "white")
+    else
+        rect(x + 34, y - 44, 10, 6, skin)
+        rect(x + 43, y - 42, 3, 3, "white")
+    end
+    # --- spikes along the back, big to small
+    repeat with k from 0 to 3
+        set size to 9 - k * 2
+        triangle(x + 30 - k * 10, y - 56, x + 34 - k * 10, y - 56 - size, x + 38 - k * 10, y - 56, back)
+    end
+    triangle(x + 30, y - 82, x + 34, y - 90, x + 38, y - 82, back)
+end
+
+# ------------------------------------------------------------------- things
+
+# 1 boulder, 2 tree stump, 3 bug, 4 fallen log
+function thing_width(kind)
+    return [36, 28, 38, 76][kind]
+end
+
+function thing_height(kind)
+    return [32, 56, 24, 30][kind]
+end
+
+function draw_thing(kind, x, bottom, t, night)
+    if kind = 1
+        circle(x + 18, bottom - 15, 18, rgb(70, 60, 52))
+        circle(x + 18, bottom - 15, 16, rgb(128, 112, 98))
+        circle(x + 12, bottom - 21, 8, rgb(158, 142, 126))             # light from above
+        circle(x + 10, bottom - 23, 3, rgb(190, 176, 160))
+        line(x + 22, bottom - 26, x + 27, bottom - 16, rgb(70, 60, 52), 2)  # a crack
+        line(x + 27, bottom - 16, x + 24, bottom - 8, rgb(70, 60, 52), 2)
+        circle(x + 24, bottom - 29, 4, rgb(96, 150, 60))                 # moss
+        circle(x + 29, bottom - 26, 3, rgb(110, 165, 70))
+        rect(x - 2, bottom - 3, 40, 3, rgb(60, 50, 42))
+    else if kind = 2
+        triangle(x - 8, bottom, x + 2, bottom - 14, x + 4, bottom, rgb(110, 70, 34))   # roots
+        triangle(x + 24, bottom, x + 26, bottom - 14, x + 36, bottom, rgb(110, 70, 34))
+        rect(x - 1, bottom - 52, 30, 52, rgb(70, 42, 18))
+        rect(x + 1, bottom - 50, 26, 50, rgb(139, 90, 43))
+        repeat with k from 0 to 3                                          # bark
+            rect(x + 4 + k * 6, bottom - 44 + (k mod 2) * 8, 2, 30, rgb(100, 62, 28))
+        end
+        rect(x - 4, bottom - 58, 36, 10, rgb(70, 42, 18))
+        rect(x - 2, bottom - 57, 32, 8, rgb(196, 150, 94))                # the cut top, with rings
+        rect(x + 6, bottom - 55, 16, 4, rgb(170, 122, 70))
+        rect(x + 11, bottom - 54, 6, 2, rgb(140, 96, 52))
+        # two little mushrooms
+        rect(x + 26, bottom - 12, 3, 12, rgb(240, 230, 210))
+        circle(x + 27, bottom - 13, 6, rgb(220, 50, 40))
+        circle(x + 25, bottom - 15, 1, "white")
+        circle(x + 29, bottom - 13, 1, "white")
+        rect(x - 4, bottom - 8, 2, 8, rgb(240, 230, 210))
+        circle(x - 3, bottom - 9, 4, rgb(220, 50, 40))
+    else if kind = 3
+        set flap to sin(t * 0.8)
+        set glow to rgb(mix(142, 200, night), mix(68, 255, night), mix(173, 120, night))
+        if night > 0.5
+            circle(x + 4, bottom - 10, 7, rgb(120, 140, 60))                # glowing tail at night
+        end
+        circle(x + 6, bottom - 11, 6, glow)
+        circle(x + 18, bottom - 12, 10, rgb(70, 30, 90))
+        circle(x + 18, bottom - 12, 8, rgb(142, 68, 173))
+        circle(x + 15, bottom - 15, 3, rgb(190, 130, 215))
+        circle(x + 30, bottom - 14, 6, rgb(110, 50, 140))
+        circle(x + 32, bottom - 15, 3, "white")
+        circle(x + 33, bottom - 15, 1, "black")
+        line(x + 32, bottom - 19, x + 38, bottom - 27, rgb(70, 30, 90), 1)  # antennae
+        line(x + 29, bottom - 19, x + 31, bottom - 28, rgb(70, 30, 90), 1)
+        circle(x + 38, bottom - 27, 2, rgb(255, 200, 80))
+        circle(x + 31, bottom - 28, 2, rgb(255, 200, 80))
+        set tip to bottom - 12 - flap * 22
+        triangle(x + 10, bottom - 14, x + 18, tip, x + 26, bottom - 14, rgb(215, 190, 230))
+        triangle(x + 13, bottom - 14, x + 18, tip + flap * 6, x + 23, bottom - 14, rgb(240, 225, 250))
+    else
+        oval(x - 2, bottom - 15, 80, 32, rgb(70, 42, 18))
+        oval(x, bottom - 15, 76, 28, rgb(150, 98, 50))
+        rect(x + 10, bottom - 24, 52, 3, rgb(120, 76, 36))                 # bark lines
+        rect(x + 18, bottom - 12, 44, 3, rgb(120, 76, 36))
+        circle(x + 62, bottom - 15, 13, rgb(70, 42, 18))                   # the cut end
+        circle(x + 62, bottom - 15, 12, rgb(206, 160, 100))
+        circle(x + 62, bottom - 15, 8, rgb(180, 132, 76))
+        circle(x + 62, bottom - 15, 4, rgb(150, 104, 56))
+        rect(x + 28, bottom - 33, 3, 6, rgb(80, 140, 50))                  # a sprout
+        circle(x + 26, bottom - 34, 3, rgb(110, 180, 70))
+        circle(x + 33, bottom - 35, 3, rgb(110, 180, 70))
+    end
+end
+
+function draw_gem(x, y, t)
+    set bob to sin(t * 0.1) * 4
+    circle(x, y + bob, 13, rgb(255, 250, 200))
+    triangle(x - 10, y - 2 + bob, x + 10, y - 2 + bob, x, y + 12 + bob, rgb(40, 170, 220))
+    triangle(x - 10, y - 2 + bob, x - 5, y - 10 + bob, x + 5, y - 10 + bob, rgb(120, 220, 250))
+    triangle(x - 10, y - 2 + bob, x + 5, y - 10 + bob, x + 10, y - 2 + bob, rgb(80, 200, 240))
+    line(x - 4, y - 6 + bob, x - 1, y + bob, "white", 2)
+    if (t // 10) mod 3 = 0
+        line(x + 12, y - 12 + bob, x + 12, y - 4 + bob, "white", 1)       # a twinkle
+        line(x + 8, y - 8 + bob, x + 16, y - 8 + bob, "white", 1)
+    end
+end
+
+# --------------------------------------------------------------- the scenery
+
+function draw_mountains(far, ground, haze_r, haze_g, haze_b, night)
+    set heights to [120, 170, 140, 200, 130, 160]
+    set shift to far mod 220
+    set first to floor(far / 220)
+    repeat with i from 0 to 5
+        set idx to (first + i) mod 6 + 1
+        set px to i * 220 - shift
+        set top to ground - 40 - heights[idx]
+        set rock to rgb(mix(118, haze_r, 0.45), mix(124, haze_g, 0.45), mix(150, haze_b, 0.45))
+        triangle(px - 140, ground - 40, px + 10, top, px + 160, ground - 40, rock)
+        triangle(px + 10, top, px + 160, ground - 40, px + 60, ground - 40, rgb(mix(96, haze_r, 0.45), mix(100, haze_g, 0.45), mix(128, haze_b, 0.45)))
+        set snow to rgb(mix(245, 120, night), mix(248, 130, night), mix(255, 170, night))
+        triangle(px - 18, top + 30, px + 10, top, px + 38, top + 30, snow)
+        triangle(px - 18, top + 30, px - 4, top + 40, px + 10, top + 30, snow)
+        triangle(px + 10, top + 30, px + 24, top + 38, px + 38, top + 30, snow)
+    end
+end
+
+function draw_hills(near, ground, night)
+    set shift to near mod 300
+    set first to floor(near / 300)
+    set grass to rgb(mix(98, 24, night), mix(168, 60, night), mix(78, 50, night))
+    set dark_grass to rgb(mix(70, 18, night), mix(130, 46, night), mix(60, 40, night))
+    set trunk to rgb(mix(100, 40, night), mix(70, 30, night), mix(40, 25, night))
+    rect(0, ground - 44, 960, 44, dark_grass)
+    repeat with i from 0 to 4
+        set idx to first + i
+        set hx to i * 300 - shift
+        circle(hx + 150, ground + 140, 210, dark_grass)
+        circle(hx + 150, ground + 150, 205, grass)
+        # pine trees on top: how many and where depends on which hill this is
+        repeat with k from 0 to (idx * 7) mod 3 + 1
+            set tx to hx + 90 + k * 46 + (idx * 13) mod 20
+            set base to ground + 150 - sqrt(max(205 * 205 - (tx - hx - 150) * (tx - hx - 150), 0)) + 6
+            rect(tx - 3, base - 10, 6, 12, trunk)
+            triangle(tx - 18, base - 8, tx, base - 40, tx + 18, base - 8, dark_grass)
+            triangle(tx - 14, base - 24, tx, base - 54, tx + 14, base - 24, dark_grass)
+            triangle(tx - 10, base - 38, tx, base - 64, tx + 10, base - 38, grass)
+        end
+    end
+end
+
+function draw_cloud(cx, cy, size, light_r, light_g, light_b)
+    set under to rgb(light_r * 0.82, light_g * 0.82, light_b * 0.88)
+    set top to rgb(light_r, light_g, light_b)
+    circle(cx, cy + 4, 16 * size, under)
+    circle(cx + 26 * size, cy - 4, 24 * size, under)
+    circle(cx + 54 * size, cy + 4, 18 * size, under)
+    rect(cx, cy + 4, 54 * size, 16 * size, under)
+    circle(cx, cy, 15 * size, top)
+    circle(cx + 26 * size, cy - 8, 22 * size, top)
+    circle(cx + 52 * size, cy, 16 * size, top)
+    circle(cx + 14 * size, cy - 12, 12 * size, top)
+end
+
+function draw_ground(scroll, ground, night)
+    set dirt to rgb(mix(214, 90, night), mix(178, 72, night), mix(118, 60, night))
+    set dirt_dark to rgb(mix(186, 70, night), mix(150, 56, night), mix(96, 46, night))
+    set grass to rgb(mix(96, 30, night), mix(178, 80, night), mix(66, 50, night))
+    set grass_dark to rgb(mix(66, 20, night), mix(138, 60, night), mix(50, 40, night))
+    rect(0, ground, 960, 80, dirt)
+    rect(0, ground + 30, 960, 6, dirt_dark)
+    rect(0, ground + 58, 960, 4, dirt_dark)
+    rect(0, ground, 960, 8, grass)
+    rect(0, ground + 8, 960, 3, grass_dark)
+    # grass tufts, pebbles and the odd fossil, scrolling with the ground
+    set shift to scroll mod 40
+    set first to floor(scroll / 40)
+    repeat with i from 0 to 24
+        set n to first + i
+        set gx to i * 40 - shift
+        set tall to 6 + (n * 7) mod 6
+        triangle(gx, ground + 1, gx + 3, ground - tall, gx + 6, ground + 1, grass)
+        triangle(gx + 4, ground + 1, gx + 8, ground - tall + 3, gx + 10, ground + 1, grass_dark)
+        if n mod 3 = 0
+            set pebble to rgb(mix(160, 70, night), mix(140, 62, night), mix(118, 56, night))
+            oval(gx + 12, ground + 18 + (n * 11) mod 40, 6 + n mod 5, 4, pebble)
+        end
+        if n mod 29 = 0
+            # a fossil fish skeleton, deep in the dirt
+            set bone to rgb(mix(240, 120, night), mix(232, 116, night), mix(214, 110, night))
+            set fy to ground + 46
+            line(gx, fy, gx + 44, fy, bone, 2)
+            repeat with r from 1 to 4
+                line(gx + r * 8, fy - 7, gx + r * 8, fy + 7, bone, 2)
+            end
+            triangle(gx + 44, fy, gx + 54, fy - 7, gx + 54, fy + 7, bone)
+            circle(gx - 4, fy, 5, bone)
+        end
+    end
+end
+
+# ------------------------------------------------------------------ the game
+
+set state to "start"
+set best to 0
+set new_best to false
+set score to 0.0
+set bonus to 0
+set speed to 6.0
+set dist to 0.0
+set dino_y to 0.0 + ground
+set fall to 0.0
+set on_ground to true
+set pose to "run"
+set t to 0
+set since_over to 0
+set next_beep to 100
+set blink to 0
+
+set kinds to [1, 2, 1]
+set xs to [1100.0, 1600.0, 2100.0]
+set lifts to [0, 0, 0]
+set gem_x to 1400.0
+set gem_y to 220.0
+set popup_life to 0
+set popup_x to 0.0
+set popup_y to 0.0
+
+# dust and sparkles: 40 little bits that fly, fall and fade
+set bits to 40
+set bit_x to bits copies of 0.0
+set bit_y to bits copies of 0.0
+set bit_vx to bits copies of 0.0
+set bit_vy to bits copies of 0.0
+set bit_life to bits copies of 0
+set bit_kind to bits copies of 0
+set next_bit to 1
+
+set cloud_x to [80.0, 380.0, 640.0, 900.0]
+set cloud_y to [60.0, 110.0, 50.0, 95.0]
+set cloud_size to [1.0, 0.7, 1.2, 0.8]
+set bird_x to 500.0
+
+repeat forever
+    add 1 to t
+    set jump_pressed to key_pressed("space") or key_pressed("up") or mouse_clicked()
+    set jump_held to key_down("space") or key_down("up") or mouse_down()
+    set puff to 0                  # how many dust bits to make this frame
+    set puff_kind to 1
+
+    if state != "play"
+        add 1 to since_over
+        if jump_pressed and (state = "start" or since_over > 35)
+            set state to "play"
+            set score to 0.0
+            set bonus to 0
+            set speed to 6.0
+            set dino_y to 0.0 + ground
+            set fall to 0.0
+            set on_ground to true
+            set next_beep to 100
+            set new_best to false
+            set kinds to [1, 2, 1]
+            set xs to [1100.0, 1600.0, 2100.0]
+            set lifts to [0, 0, 0]
+            set gem_x to 1400.0
+        end
+    else
+        # ---- the dino: jumping, falling, ducking
+        set pose to "run"
+        if on_ground and jump_pressed
+            set fall to -13.0
+            set on_ground to false
+            set puff to 6
+            beep(620, 0.04)
+            beep(780, 0.04)
+        end
+        if not on_ground
+            set gravity to 0.62
+            if not jump_held and fall < 0
+                set gravity to 1.5                 # let go early: a smaller hop
+            end
+            if key_down("down")
+                set gravity to 2.4                 # drop fast
+            end
+            set fall to fall + gravity
+            set dino_y to dino_y + fall
+            set pose to "jump"
+            if dino_y >= ground
+                set dino_y to 0.0 + ground
+                set fall to 0.0
+                set on_ground to true
+                set puff to 8
+            end
+        else if key_down("down")
+            set pose to "duck"
+        end
+        if on_ground and t mod 6 = 0
+            set puff to max(puff, 1)
+        end
+
+        # ---- faster and faster, and points for every step
+        set speed to min(16, speed + 0.0025)
+        set score to score + speed / 12
+        if score + bonus >= next_beep
+            beep(880, 0.05)
+            beep(1320, 0.07)
+            add 100 to next_beep
+            set blink to 60
+        end
+
+        # ---- the things in the way
+        set top to dino_y - 86
+        set left to dino_x + 2
+        set right to dino_x + 58
+        if pose = "duck"
+            set top to dino_y - 40
+            set right to dino_x + 80
+        end
+        repeat with i from 1 to 3
+            set xs[i] to xs[i] - speed
+            if xs[i] < -100
+                set far to max(xs[1], xs[2], xs[3])
+                set kinds[i] to random(1, 2)
+                if score > 200 and random(1, 3) = 1
+                    set kinds[i] to 4
+                end
+                set lifts[i] to 0
+                if score > 350 and random(1, 4) = 1
+                    set kinds[i] to 3
+                    set lifts[i] to 50              # a high bug: duck!
+                    if score > 700 and random(1, 2) = 1
+                        set lifts[i] to 10          # a low bug: jump!
+                    end
+                end
+                set xs[i] to max(far, 960) + random(280, 560) + speed * 16
+            end
+            # touching? (the boxes are a little smaller than the drawings, to be fair)
+            set t_left to xs[i] + 5
+            set t_right to xs[i] + thing_width(kinds[i]) - 5
+            set t_bottom to ground - lifts[i]
+            set t_top to t_bottom - thing_height(kinds[i]) + 5
+            if right > t_left and left < t_right and dino_y - 2 > t_top and top < t_bottom
+                set state to "over"
+                set since_over to 0
+                set pose to "ouch"
+                if floor(score) + bonus > best
+                    set best to floor(score) + bonus
+                    set new_best to true
+                end
+                set puff to 18
+                set puff_kind to 3
+                beep(330, 0.08)
+                beep(220, 0.12)
+                beep(150, 0.3)
+            end
+        end
+
+        # ---- the gem
+        set gem_x to gem_x - speed
+        if gem_x < -40
+            set gem_x to 1300.0 + random(0, 900)
+            set gem_y to 0.0 + random(170, 270)
+        end
+        if distance(gem_x, gem_y, dino_x + 34, dino_y - 50) < 44 and state = "play"
+            add 25 to bonus
+            set popup_life to 50
+            set popup_x to gem_x
+            set popup_y to gem_y
+            repeat 12 times
+                set k to next_bit
+                set next_bit to next_bit mod bits + 1
+                set bit_x[k] to gem_x
+                set bit_y[k] to gem_y
+                set bit_vx[k] to random(-40, 40) / 10
+                set bit_vy[k] to random(-50, 10) / 10
+                set bit_life[k] to 30
+                set bit_kind[k] to 2
+            end
+            set gem_x to 1500.0 + random(0, 900)
+            beep(1046, 0.05)
+            beep(1568, 0.08)
+        end
+    end
+
+    # ---- dust: kicked up by the feet (or a big puff when it lands or crashes)
+    repeat puff times
+        set k to next_bit
+        set next_bit to next_bit mod bits + 1
+        set bit_x[k] to dino_x + random(0, 40)
+        set bit_y[k] to dino_y - random(0, 6)
+        set bit_vx[k] to 0 - random(5, 30) / 10
+        set bit_vy[k] to 0 - random(5, 25) / 10
+        set bit_life[k] to random(14, 26)
+        set bit_kind[k] to puff_kind
+    end
+
+    # ---- the world moves (slowly on the start and game-over screens)
+    set move to speed
+    if state != "play"
+        set move to 1.5
+    end
+    set dist to dist + move
+    repeat with i from 1 to 4
+        set cloud_x[i] to cloud_x[i] - move * 0.12 - 0.2
+        if cloud_x[i] < -160
+            set cloud_x[i] to 1000.0 + random(0, 200)
+            set cloud_y[i] to 0.0 + random(40, 140)
+        end
+    end
+    set bird_x to bird_x - move * 0.25 - 0.8
+    if bird_x < -200
+        set bird_x to 1200.0 + random(0, 800)
+    end
+
+    # ------------------------------------------------------------- drawing
+    # the time of day: 0 is day, 1 is night, with a sunset in between
+    set night to (1 - cos((score + bonus) / 700 * 6.28318)) / 2
+    set dusk to sin(night * 3.14159)
+    set top_r to mix(mix(84, 10, night), 70, dusk * 0.6)
+    set top_g to mix(mix(150, 14, night), 60, dusk * 0.6)
+    set top_b to mix(mix(232, 40, night), 140, dusk * 0.6)
+    set low_r to mix(mix(196, 34, night), 252, dusk * 0.8)
+    set low_g to mix(mix(228, 44, night), 150, dusk * 0.8)
+    set low_b to mix(mix(250, 86, night), 96, dusk * 0.8)
+    # the sky, top to bottom, in 32 bands
+    repeat with band from 0 to 31
+        set f to band / 31
+        rect(0, band * 10, 960, 11, rgb(mix(top_r, low_r, f), mix(top_g, low_g, f), mix(top_b, low_b, f)))
+    end
+    # stars twinkle at night, and the moon rises
+    if night > 0.35
+        set shine to (night - 0.35) / 0.65
+        repeat with s from 1 to 60
+            set twinkle to (sin(t * 0.05 + s * 1.7) + 1) / 2
+            set b to 255 * shine * (0.4 + 0.6 * twinkle)
+            dot((s * 197 + floor(dist * 0.01)) mod 960, (s * 71) mod 240, rgb(b, b, b))
+        end
+        set moon_y to 340 - shine * 270
+        circle(820, moon_y, 34, rgb(mix(low_r, 90, shine), mix(low_g, 100, shine), mix(low_b, 140, shine)))
+        circle(820, moon_y, 26, rgb(250, 248, 225))
+        circle(810, moon_y - 6, 5, rgb(225, 222, 200))
+        circle(828, moon_y + 8, 4, rgb(225, 222, 200))
+        circle(830, moon_y - 10, 3, rgb(225, 222, 200))
+    end
+    # the sun sets as night comes
+    set sun_y to 80 + night * 300
+    if sun_y < ground
+        circle(160, sun_y, 52, rgb(mix(low_r, 255, 0.35), mix(low_g, 240, 0.35), mix(low_b, 180, 0.35)))
+        circle(160, sun_y, 42, rgb(mix(low_r, 255, 0.6), mix(low_g, 230, 0.6), mix(low_b, 150, 0.6)))
+        circle(160, sun_y, 32, rgb(255, mix(222, 140, dusk), mix(80, 60, dusk)))
+    end
+    # birds far away
+    set wing to sin(t * 0.25) * 5
+    repeat with b from 0 to 2
+        set bx to bird_x + b * 26
+        set by to 90 + b * 12 + sin(t * 0.03 + b) * 4
+        set bird_colour to rgb(mix(60, 20, night), mix(60, 20, night), mix(80, 40, night))
+        line(bx - 7, by - wing, bx, by, bird_colour, 2)
+        line(bx, by, bx + 7, by - wing, bird_colour, 2)
+    end
+    draw_mountains(dist * 0.06, ground, low_r, low_g, low_b, night)
+    repeat with i from 1 to 4
+        draw_cloud(cloud_x[i], cloud_y[i], cloud_size[i], mix(mix(255, 90, night), 255, dusk * 0.5), mix(mix(255, 96, night), 200, dusk * 0.5), mix(mix(255, 130, night), 190, dusk * 0.5))
+    end
+    draw_hills(dist * 0.3, ground, night)
+    draw_ground(dist, ground, night)
+    # fireflies at night
+    if night > 0.6
+        repeat with f from 1 to 14
+            set fx to (f * 151 - dist * 0.4 + sin(t * 0.02 + f) * 30) mod 960
+            set fy to 200 + (f * 37) mod 100 + sin(t * 0.05 + f * 2) * 12
+            if (t + f * 20) mod 90 < 60
+                circle(fx, fy, 4, rgb(80, 110, 40))
+                circle(fx, fy, 2, rgb(230, 255, 120))
+            end
+        end
+    end
+
+    # the gem, the things in the way, and their shadows
+    if gem_x < 1000
+        oval(gem_x - 10, ground + 4, 20, 4, rgb(mix(160, 60, night), mix(130, 50, night), mix(90, 40, night)))
+        draw_gem(gem_x, gem_y, t)
+    end
+    repeat with i from 1 to 3
+        if xs[i] < 1000
+            oval(xs[i] - 4, ground + 3, thing_width(kinds[i]) + 8, 6, rgb(mix(170, 60, night), mix(140, 50, night), mix(96, 40, night)))
+            draw_thing(kinds[i], xs[i], ground - lifts[i], t, night)
+        end
+    end
+
+    # the dino's shadow gets smaller the higher it jumps
+    set high to ground - dino_y
+    set shadow_w to max(20, 56 - high / 4)
+    oval(dino_x + 30 - shadow_w / 2, ground + 4, shadow_w, 6, rgb(mix(170, 60, night), mix(140, 50, night), mix(96, 40, night)))
+    set feet to t
+    if state != "play" or not on_ground
+        set feet to 0
+    end
+    draw_dino(dino_x, floor(dino_y), pose, feet, night * 0.4)
+
+    # dust and sparkles
+    repeat with k from 1 to bits
+        if bit_life[k] > 0
+            set bit_x[k] to bit_x[k] + bit_vx[k] - move * 0.3
+            set bit_y[k] to bit_y[k] + bit_vy[k]
+            set bit_vy[k] to bit_vy[k] + 0.15
+            subtract 1 from bit_life[k]
+            set size to 1 + bit_life[k] / 8
+            if bit_kind[k] = 2
+                circle(bit_x[k], bit_y[k], size, rgb(255, 240, 120))
+            else if bit_kind[k] = 3
+                circle(bit_x[k], bit_y[k], size + 1, rgb(255, 160, 60))
+            else
+                circle(bit_x[k], bit_y[k], size, rgb(mix(230, 110, night), mix(205, 95, night), mix(160, 80, night)))
+            end
+        end
+    end
+
+    # "+25" floats up where a gem was
+    if popup_life > 0
+        subtract 1 from popup_life
+        set popup_y to popup_y - 1
+        write("+25", popup_x - 18, popup_y - 30, rgb(255, 230, 90), 3)
+    end
+
+    # ---- the score (it blinks at every 100)
+    set ink to rgb(mix(50, 235, night), mix(50, 235, night), mix(70, 245, night))
+    set shown to five_digits(floor(score) + bonus)
+    if blink > 0
+        subtract 1 from blink
+    end
+    if blink = 0 or (blink // 8) mod 2 = 0
+        write(shown, 940 - text_width(shown, 4), 14, ink, 4)
+    end
+    if best > 0
+        set best_text to "BEST " + five_digits(best)
+        write(best_text, 940 - text_width(best_text, 2), 52, ink, 2)
+    end
+
+    if state = "start"
+        set bounce to sin(t * 0.08) * 6
+        write("DINO DASH", 483 - text_width("DINO DASH", 8) / 2, 66 + bounce, rgb(30, 60, 20), 8)
+        write("DINO DASH", 480 - text_width("DINO DASH", 8) / 2, 62 + bounce, rgb(255, 214, 70), 8)
+        rect(250, 150, 460, 64, rgb(30, 60, 20))
+        rect(253, 153, 454, 58, rgb(250, 245, 225))
+        set hint to "SPACE or click: jump    DOWN: duck"
+        write(hint, 480 - text_width(hint, 2) / 2, 164, rgb(60, 70, 50), 2)
+        set hint2 to "Grab the gems for +25!"
+        write(hint2, 480 - text_width(hint2, 2) / 2, 188, rgb(40, 140, 200), 2)
+    else if state = "over"
+        rect(300, 70, 360, 150, rgb(60, 20, 20))
+        rect(304, 74, 352, 142, rgb(250, 245, 225))
+        write("OUCH!", 480 - text_width("OUCH!", 7) / 2, 84, rgb(220, 60, 50), 7)
+        set result to "Score " + text(floor(score) + bonus)
+        write(result, 480 - text_width(result, 3) / 2, 148, rgb(60, 60, 60), 3)
+        if new_best and (t // 15) mod 2 = 0
+            write("NEW BEST!", 480 - text_width("NEW BEST!", 2) / 2, 178, rgb(230, 150, 20), 2)
+        else if since_over > 35
+            set again to "SPACE to run again"
+            write(again, 480 - text_width(again, 2) / 2, 180, rgb(90, 90, 90), 2)
+        end
+    end
+    show()
+end
