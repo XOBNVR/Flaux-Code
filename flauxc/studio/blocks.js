@@ -27,6 +27,8 @@ window.FlauxBlocks = (() => {
         tooltip: "Show something on the screen." },
       { type: "flx_say_blank", message0: "say an empty line", ...stmt, colour: cat["Say & Ask"],
         tooltip: "Show an empty line." },
+      { type: "flx_say_same", message0: "say %1 on the same line", args0: [v("VALUE")], ...stmt, colour: cat["Say & Ask"],
+        tooltip: "say.same: show something without finishing the line, so the next thing said goes right after it." },
       { type: "flx_say_2", message0: "say %1 %2", args0: [v("VALUE0"), v("VALUE1")], inputsInline: true, ...stmt,
         colour: cat["Say & Ask"], tooltip: "Show two things on one line, with a space between." },
       { type: "flx_say_3", message0: "say %1 %2 %3", args0: [v("VALUE0"), v("VALUE1"), v("VALUE2")], inputsInline: true,
@@ -143,7 +145,8 @@ window.FlauxBlocks = (() => {
     const category = (name, contents, extra) => ({ kind: "category", name, colour: cats[name], contents, ...(extra || {}) });
     return { kind: "categoryToolbox", contents: [
       category("Say & Ask", [block("flx_say", { VALUE: txt("Hello!") }),
-        block("flx_say_2", { VALUE0: txt("Score:"), VALUE1: num(10) }), block("flx_say_blank"), ...fns("Say & Ask")]),
+        block("flx_say_2", { VALUE0: txt("Score:"), VALUE1: num(10) }), block("flx_say_same", { VALUE: txt("hi ") }),
+        block("flx_say_blank"), ...fns("Say & Ask")]),
       category("Variables", [], { custom: "FLX_VARIABLES" }),
       category("Control", [
         block("controls_if", { IF0: { block: { type: "flx_compare", fields: { OP: "GT" }, inputs: { A: num(5), B: num(3) } } } }),
@@ -311,6 +314,7 @@ window.FlauxBlocks = (() => {
       switch (b.type) {
         case "flx_say": emit(`say ${value(b, "VALUE")}`); break;
         case "flx_say_blank": emit("say()"); break;
+        case "flx_say_same": emit(`say.same ${value(b, "VALUE")}`); break;
         case "flx_say_2": case "flx_say_3": case "flx_say_4": {
           const parts = [];
           for (let i = 0; b.getInput("VALUE" + i); i++) parts.push(value(b, "VALUE" + i));

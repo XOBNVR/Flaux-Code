@@ -1,0 +1,4 @@
+# expect: Flaux uses `say.same` instead of `Console.Write`.
+# expect: How to fix it:
+# expect: say.same "Loading"
+Console.Write("Loading");

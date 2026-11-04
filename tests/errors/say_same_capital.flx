@@ -1,0 +1,4 @@
+# expect: Flaux has `say` and `say.same`, but not `say.Same`.
+# expect: How to fix it:
+# expect: say.same "hi"
+say.Same "hi"
