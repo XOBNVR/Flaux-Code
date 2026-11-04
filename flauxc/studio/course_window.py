@@ -352,6 +352,9 @@ class CourseWindow:
         self.progress.answered(q["id"], right)
         if right:
             self.quiz_right += 1
+        title = next(u["title"] for u in self.units if u["id"] == q["unit"])
+        self.quiz_head.configure(text=f"Question {self.quiz_at + 1} of {len(self.quiz)}   ·   {title}   ·   "
+                                      f"{self.quiz_right} right so far")
         for b in self.answer_buttons:
             b.configure(state="disabled")
         self.paint_answers()

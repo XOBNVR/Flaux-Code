@@ -1190,7 +1190,7 @@ const Course = (() => {
     chosen = null;
     const title = data.units.find((u) => u.id === q.unit).title;
     $("c-body").innerHTML = `<div class="c-muted">Question ${at + 1} of ${quiz.length} &middot; ${esc(title)} &middot; ` +
-      `${right} right so far</div><div class="c-big">${inline(q.q)}</div>` +
+      `<span class="c-count">${right}</span> right so far</div><div class="c-big">${inline(q.q)}</div>` +
       (q.code ? `<pre class="q-code">${codeHTML(q.code)}</pre>` : "") +
       `<div class="answers${q.mono ? " mono" : ""}"></div><div class="c-feedback"></div><p class="c-why"></p>`;
     const box = $("c-body").querySelector(".answers");
@@ -1209,6 +1209,7 @@ const Course = (() => {
     const ok = i === q.answer;
     progress.answers[q.id] = ok ? 1 : 0; keep();
     if (ok) right++;
+    $("c-body").querySelector(".c-count").textContent = right;
     const buttons = $("c-body").querySelectorAll(".answers button");
     buttons.forEach((b, k) => { b.disabled = true; if (k === q.answer) b.classList.add("right"); else if (k === i) b.classList.add("wrong"); });
     const fb = $("c-body").querySelector(".c-feedback");
