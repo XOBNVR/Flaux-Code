@@ -565,24 +565,48 @@ window.FlauxWeb = (() => {
       .replace("/*@FX3D@*/", () => inScript(fx3d))
       .replace("/*@PROGRAM@*/", () => JSON.stringify(program).replace(/</g, "\\u003c"));
     const crlf = (t) => t.replace(/\n/g, "\r\n");
-    const files = [
-      [`${name}/game.html`, html],
-      [`${name}/Play ${name}.bat`, crlf(`@echo off\nrem Opens ${name} in your web browser.\nstart "" "%~dp0game.html"\n`)],
-      [`${name}/play.command`, `#!/bin/sh\n# Mac: opens ${name} in your web browser.\nopen "$(dirname "$0")/game.html"\n`, true],
-      [`${name}/play.sh`, `#!/bin/sh\n# Linux: opens ${name} in your web browser.\nxdg-open "$(dirname "$0")/game.html"\n`, true],
-      [`${name}/README.txt`, crlf(`${name}\n${"=".repeat(name.length)}\n\n` +
-        `Made with Flaux (https://github.com/XOBNVR/Flaux-Code).\n\n` +
-        `To play:\n  Windows: double-click "Play ${name}.bat" (or game.html).\n` +
-        `  Mac: double-click play.command (or game.html).\n  Linux: run play.sh (or open game.html).\n\n` +
-        `It opens in your web browser. Everything is inside game.html, so you can also\n` +
-        `put that one file on a website. Click the game so it gets the keys, and use the\n` +
-        `Fullscreen button to play on the whole screen (Esc leaves).\n`)],
-    ];
+    // <name>.exe: Flaux's game player (FlauxPlayer.exe, a real Windows app with its own window,
+    // next to this page on the website) with the game added to the end of it (see
+    // installer/app/flaux_app.cc: the page, its length in 8 bytes, then "FLAUXGM1")
+    let exe = null;
+    try {
+      const res = await fetch("FlauxPlayer.exe");
+      if (res.ok) exe = gameExe(new Uint8Array(await res.arrayBuffer()), new TextEncoder().encode(html));
+    } catch (e) { /* not on this website: the game still works from game.html */ }
+    const files = [];
+    if (exe) files.push([`${name}/${name}.exe`, exe, true]);
+    files.push([`${name}/game.html`, html]);
+    if (!exe) files.push([`${name}/Play ${name}.bat`, crlf(`@echo off\nrem Opens ${name} in your web browser.\nstart "" "%~dp0game.html"\n`)]);
+    files.push([`${name}/README.txt`, crlf(`${name}\n${"=".repeat(name.length)}\n\n` +
+      `Made with Flaux (https://github.com/XOBNVR/Flaux-Code).\n\n` +
+      (exe ? `To play on Windows, double-click ${name}.exe. It's the whole game, in its own window:\n` +
+             `you can copy it anywhere, or send it to a friend.\n` +
+             `(Windows 10 and 11 have everything it needs. If Windows says it protected your PC,\n` +
+             `click "More info", then "Run anyway": that happens with any new program.)\n\n` +
+             `On a Mac, Linux or a phone, open game.html in a web browser instead.\n`
+           : `To play on Windows, double-click "Play ${name}.bat" (or game.html).\n` +
+             `On a Mac or Linux, open game.html in a web browser.\n`) +
+      `\nEverything is inside game.html too, so you can also put that one file on a website.\n` +
+      `Click the game so it gets the keys. F11 or the Fullscreen button plays on the whole screen\n` +
+      `(Esc leaves).\n`)]);
     download(name + ".zip", makeZip(files), "application/zip");
-    return { ok: true, name: name + ".zip" };
+    return { ok: true, name: name + ".zip", exe: !!exe };
   }
 
-  // A .zip file (stored, not compressed). files: [path, text, executable?]
+  // The game player with a game in it: the player, the page, the page's length (8 bytes, little
+  // endian), then "FLAUXGM1" (what installer/app/flaux_app.cc looks for)
+  function gameExe(player, page) {
+    const exe = new Uint8Array(player.length + page.length + 16);
+    exe.set(player, 0);
+    exe.set(page, player.length);
+    const tail = new DataView(exe.buffer, player.length + page.length, 16);
+    tail.setUint32(0, page.length >>> 0, true);
+    tail.setUint32(4, Math.floor(page.length / 2 ** 32), true);
+    exe.set(new TextEncoder().encode("FLAUXGM1"), player.length + page.length + 8);
+    return exe;
+  }
+
+  // A .zip file (stored, not compressed). files: [path, text or bytes, executable?]
   const CRC_TABLE = (() => {
     const t = new Uint32Array(256);
     for (let n = 0; n < 256; n++) {

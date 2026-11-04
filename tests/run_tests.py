@@ -184,9 +184,37 @@ def studio_checks():
         import zipfile
         r = studio.export('say "hi"\n', None, show=False)
         names = zipfile.ZipFile(r["file"]).namelist() if r.get("ok") else []
-        launcher = "game/Play game.bat" if os.name == "nt" else "game/play.sh"
-        if f"game/game{EXE}" not in names or launcher not in names:
+        # (on Windows the .exe is all you double-click; elsewhere play.sh starts it)
+        launcher = f"game/game{EXE}" if os.name == "nt" else "game/play.sh"
+        if f"game/game{EXE}" not in names or launcher not in names or "game/Play game.bat" in names:
             problems.append(f"export went wrong: {r} {names}")
+        else:   # and the program in it runs on its own
+            unzipped = os.path.join(home, "unzipped")
+            zipfile.ZipFile(r["file"]).extractall(unzipped)
+            exe = os.path.join(unzipped, "game", f"game{EXE}")
+            os.chmod(exe, 0o755)
+            ran = subprocess.run([exe], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+            if ran.returncode != 0 or ran.stdout != "hi\n":
+                problems.append(f"the exported program didn't run: exit {ran.returncode}, said {ran.stdout!r} {ran.stderr!r}")
+        # Windows: a game that never says anything is a window-only program (no console window
+        # behind it), and it still runs
+        if os.name == "nt" and sdl_installed():
+            r = studio.export('window(200, 100)\nclear("red")\nshow()\n', os.path.join(home, "quiet.flx"), show=False)
+            if not r.get("ok"):
+                problems.append(f"exporting a quiet game went wrong: {r}")
+            else:
+                zipfile.ZipFile(r["file"]).extractall(os.path.join(home, "quiet-unzipped"))
+                exe = os.path.join(home, "quiet-unzipped", "quiet", f"quiet{EXE}")
+                data = open(exe, "rb").read()
+                pe = int.from_bytes(data[0x3C:0x40], "little")
+                subsystem = int.from_bytes(data[pe + 0x5C:pe + 0x5E], "little")   # 2: a window, 3: a console
+                shot = os.path.join(home, "quiet.bmp")
+                ran = subprocess.run([exe], capture_output=True, timeout=60, env={
+                    **os.environ, "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "FLAUX_FAST": "1",
+                    "FLAUX_FRAMES": "2", "FLAUX_SCREENSHOT": shot})
+                if subsystem != 2 or ran.returncode != 0 or not os.path.isfile(shot):
+                    problems.append(f"the exported quiet game: subsystem {subsystem} (2 wanted), exit {ran.returncode}, "
+                                    f"screenshot {os.path.isfile(shot)}")
         # a 3D game takes its model, the model's .mtl and the picture that names along
         # (and on Windows Mesa, for computers without a good graphics card)
         if sdl_installed():

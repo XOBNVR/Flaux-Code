@@ -315,16 +315,17 @@ class Studio:
 
     def export(self, content, path=None, show=True):
         """A .zip that runs the program without Flaux Studio, saved in the
-        programs folder: the built program (plus SDL2.dll on Windows for
-        games), the pictures it names, and a file that starts it
-        ("Play <name>.bat" on Windows, play.sh elsewhere)."""
+        programs folder: the built program, <name>.exe on Windows (plus
+        SDL2.dll for games), and the pictures it names. On Windows the .exe
+        is all you double-click (see cli.compile_c's `exported`); elsewhere
+        play.sh starts it."""
         name = os.path.basename(path) if path else "untitled.flx"
         try:
             c_code = compile_source(content, name, self.program_dir(path))
         except FlauxError as e:
             return {"ok": False, "error": e.to_dict(name, content)}
         try:
-            exe = cli.cached_build(c_code)
+            exe = cli.cached_build(c_code, exported=True)
         except cli.CliError as e:
             return {"ok": False, "error": {"message": str(e), "line": None, "text": str(e)}}
         base = re.sub(r"[^A-Za-z0-9 _-]+", "", os.path.splitext(name)[0]).strip()
@@ -379,16 +380,13 @@ class Studio:
                     if os.path.isfile(file) and not os.path.isabs(pic) and ".." not in pic.replace("\\", "/").split("/"):
                         add(pic.replace("\\", "/"), file=file)
                         break
-            if cli.WINDOWS:
-                # a game keeps its window open; a program that only says things needs `pause` to be read
-                wait = "if errorlevel 1 pause" if graphics else "pause"
-                add(f"Play {base}.bat", f'@echo off\r\ncd /d "%~dp0"\r\n"{program}"\r\n{wait}\r\n')
-            else:
+            if not cli.WINDOWS:
                 add("play.sh", f'#!/bin/sh\ncd "$(dirname "$0")"\n./"{program}"\n', executable=True)
-            how = f'double-click "Play {base}.bat"' if cli.WINDOWS else "run play.sh"
+            how = f"double-click {program}" if cli.WINDOWS else "run play.sh"
             add("README.txt", (f"{base}\n{'=' * len(base)}\n\nMade with Flaux (https://github.com/XOBNVR/Flaux-Code).\n\n"
                                f"To play, {how}.\n" +
-                               ("Keep SDL2.dll next to the program.\n" if cli.WINDOWS and graphics else "") +
+                               (f"Keep SDL2.dll next to {program} (to share the game, share the whole folder).\n"
+                                if cli.WINDOWS and graphics else "") +
                                ("Keep the mesa folder too: it lets the game run on computers without a good\n"
                                 "graphics card.\n" if cli.WINDOWS and three_d else "") +
                                ("F11 (or Alt+Enter) switches fullscreen.\n" if graphics else "")

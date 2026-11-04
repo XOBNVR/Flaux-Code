@@ -90,8 +90,12 @@ jobs:
           npx --prefix "$RUNNER_TEMP/pw" playwright install --with-deps chromium
       - name: Test the web version of Flaux (every test program, run with Node)
         run: python3 tests/js_tests.py
+      - name: Build the Windows game player (FlauxPlayer.exe, for Export)
+        run: |
+          sudo apt-get install -y g++-mingw-w64-x86-64
+          python3 installer/app/build_app.py "$RUNNER_TEMP/apps"
       - name: Build the website
-        run: python3 -m flauxc.web.build site --pyodide "$RUNNER_TEMP/pw/node_modules/pyodide"
+        run: python3 -m flauxc.web.build site --pyodide "$RUNNER_TEMP/pw/node_modules/pyodide" --player "$RUNNER_TEMP/apps/FlauxPlayer.exe"
       - name: Test Flaux Studio on the web in a browser
         env:
           NODE_PATH: ${{ runner.temp }}/pw/node_modules

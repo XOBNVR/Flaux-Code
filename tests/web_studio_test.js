@@ -301,14 +301,33 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.click("#btn-stop");
   await page.waitForFunction(() => document.getElementById("console").textContent.includes("Stopped"), null, { timeout: 15000 });
 
-  // Export: a zip with the program as a web page and a .bat that opens it
+  // Export: a zip with the game as a Windows app (<name>.exe: the site's FlauxPlayer.exe with the
+  // game page added to its end) and as a web page
+  const unzip = (z) => {                    // stored files, one after another
+    const files = {};
+    for (let at = 0; z.readUInt32LE(at) === 0x04034b50;) {
+      const size = z.readUInt32LE(at + 18), nlen = z.readUInt16LE(at + 26), xlen = z.readUInt16LE(at + 28);
+      files[z.slice(at + 30, at + 30 + nlen).toString()] = z.slice(at + 30 + nlen + xlen, at + 30 + nlen + xlen + size);
+      at += 30 + nlen + xlen + size;
+    }
+    return files;
+  };
   const [download] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
   const zip = fs.readFileSync(await download.path());
   const base = download.suggestedFilename().replace(/\.zip$/, "");    // the program's name (web_test, saved above)
-  const names = [`${base}/game.html`, `${base}/Play ${base}.bat`, `${base}/README.txt`];
-  check(base === "web_test" && zip.readUInt32LE(0) === 0x04034b50 &&
-        names.every((n) => zip.includes(Buffer.from(n))) && zip.includes(Buffer.from('start "" "%~dp0game.html"')),
-        `Export downloads ${download.suggestedFilename()} (${zip.length} bytes)`);
+  const inZip = unzip(zip);
+  check(base === "web_test" && [`${base}/${base}.exe`, `${base}/game.html`, `${base}/README.txt`].every((n) => n in inZip) &&
+        !(`${base}/Play ${base}.bat` in inZip),
+        `Export downloads ${download.suggestedFilename()} with ${base}.exe, game.html and README.txt (${Object.keys(inZip).join(", ")})`);
+  const exe = inZip[`${base}/${base}.exe`], gamePage = inZip[`${base}/game.html`];
+  if (exe && gamePage) {
+    const player = Buffer.from(await (await fetch(new URL("FlauxPlayer.exe", url))).arrayBuffer());
+    const len = Number(exe.readBigUInt64LE(exe.length - 16));
+    check(exe.slice(0, 2).toString() === "MZ" && exe.slice(0, player.length).equals(player) &&
+          exe.slice(exe.length - 8).toString() === "FLAUXGM1" && len === gamePage.length &&
+          exe.slice(exe.length - 16 - len, exe.length - 16).equals(gamePage),
+          `${base}.exe is the game player with the game inside (${exe.length} bytes: ${player.length} + the ${len}-byte page + 16)`);
+  }
 
   // mouse look. Headless Chromium locks the pointer (clicking Run counts as the click
   // browsers want), but its pretend mouse doesn't move a locked pointer. So: lock_mouse()
@@ -501,6 +520,36 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   check(!!html3d && html3d.includes("FlauxRuntime3D") && drawn > 500,
         `an exported 3D game has the 3D engine and its model, and draws (${drawn} lit pixels${outText.trim() ? "; says: " + outText.trim() : ""})`);
   await game3d.close();
+
+  // the game page inside the Windows app (<name>.exe), with pretend app functions: the window
+  // gets the game's name and size, the game fills it, and the app hears when it ends
+  await setCode('window(320, 200, "App test")\nsay "hi from the app"\nclear("navy")\nshow()\n');
+  const [appZip] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
+  const appFiles = unzip(fs.readFileSync(await appZip.path()));
+  const appPage = Object.entries(appFiles).find(([n]) => n.endsWith("/game.html"));
+  const inApp = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+  inApp.on("pageerror", (e) => errors.push("game.html in the app: " + e.message));
+  const pretendApp = () => {
+    window.flauxApp = true;
+    window.appCalls = [];
+    window.flauxWindow = (...a) => { window.appCalls.push(["window", ...a]); return Promise.resolve(""); };
+    window.flauxFullscreen = (on) => { window.appCalls.push(["fullscreen", on]); return Promise.resolve(""); };
+    window.flauxDone = (code, text) => { window.appCalls.push(["done", code, text]); return Promise.resolve(""); };
+  };
+  await inApp.setContent(appPage ? appPage[1].toString().replace("<head>", `<head><script>(${pretendApp})()</script>`)
+                                 : "<p>no game.html</p>");
+  await inApp.waitForFunction(() => window.appCalls.some((c) => c[0] === "done"), null, { timeout: 15000 }).catch(() => {});
+  await inApp.waitForTimeout(300);
+  const calls = (await inApp.evaluate(() => window.appCalls)) || [];
+  const appShown = await inApp.evaluate(() => { const r = document.getElementById("canvas").getBoundingClientRect();
+    return [Math.round(r.width), Math.round(r.height), document.body.classList.contains("app")]; });
+  const appWin = calls.find((c) => c[0] === "window"), appDone = calls.find((c) => c[0] === "done");
+  check(!!appWin && appWin[1] === "App test" && appWin[2] === 320 && appWin[3] === 200,
+        `in the Windows app the window gets the game's name and size (${JSON.stringify(appWin)})`);
+  check(appShown[2] && appShown[0] > 600, `in the Windows app the game fills the window (shown ${appShown[0]}x${appShown[1]})`);
+  check(!!appDone && appDone[1] === 0 && appDone[2].includes("hi from the app"),
+        `the Windows app hears when the game ends, and what it said (${JSON.stringify(appDone)})`);
+  await inApp.close();
 
   check(!errors.length, "no errors in the page" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();

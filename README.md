@@ -99,7 +99,10 @@ A few things are different in the browser:
 ## Flaux Studio
 
 Flaux Studio is where you write and run your programs. Open it from the
-**Flaux Studio** icon on your Desktop or in the Start menu.
+**Flaux Studio** icon on your Desktop or in the Start menu. It's a real
+Windows app with its own window (it isn't a web browser, and doesn't use
+Electron): it draws its pages with WebView2, the part of Windows 10 and 11
+that apps use for that.
 
 ![Flaux Studio, showing a program with a mistake and the Apply fix button](docs/images/studio.png)
 
@@ -114,12 +117,17 @@ Flaux Studio is where you write and run your programs. Open it from the
 - **Open** shows your programs, the lessons and the games.
   **Save** keeps your program in your **Documents\Flaux** folder.
 - **&#11015; Export** makes a `.zip` of your program that runs without Flaux
-  Studio, to share or keep. Unzip it and double-click the **Play** file
-  inside. In the Windows app the zip (in your **Documents\Flaux** folder)
-  holds your real program (`.exe`, plus `SDL2.dll` and its pictures for a
-  game); on the website it downloads a zip with your program as one web page,
-  `game.html`, that opens in the web browser (it works from your computer,
-  and you can put it on any website too).
+  Studio, to share or keep. Unzip it and double-click **`<name>.exe`**: your
+  game, in a window of its own, like any other Windows program.
+  - In the Windows app the zip (in your **Documents\Flaux** folder) holds
+    your real program, as fast as Flaux makes it (plus `SDL2.dll` and its
+    pictures for a game: keep them in the same folder). A game that never
+    `say`s anything opens just its window, with no black console window
+    behind it; a program that says things waits for **Enter** before its
+    window closes, so you can read it.
+  - On the website the zip has `<name>.exe` too (the game inside Flaux's game
+    player), and `game.html`, the same game as one web page: for a Mac, Linux
+    or a phone, or to put on a website.
 - **&#127769; Night** switches to dark colours. **A&minus;** and **A+**
   change the text size.
 
@@ -1140,6 +1148,7 @@ your .flx file → lexer → parser → type checker → C code → gcc/clang �
 | [`flauxc/web/`](flauxc/web/) | Flaux Studio on the web: the JavaScript runtime (`fx.js`), the page's helper (`web.js`), Python's side (`web_api.py`), the page an exported program becomes (`player.html`) and the site builder (`build.py`) |
 | [`flauxc/studio/blocks.py`](flauxc/studio/blocks.py), [`blocks.js`](flauxc/studio/blocks.js) | the block editor: code to blocks, and blocks to code (built on [Blockly](https://developers.google.com/blockly)) |
 | [`installer/`](installer/) | the Windows installer (Inno Setup), `flaux.exe`, and its build scripts |
+| [`installer/app/`](installer/app/) | the Windows apps: `FlauxStudio.exe` (Flaux Studio in its own window) and `FlauxPlayer.exe` (the player inside games exported from the website), using WebView2 through [webview](https://github.com/webview/webview) |
 | [`assets/`](assets/) | the Flaux icon, and the script that makes every size of it |
 
 Useful commands:

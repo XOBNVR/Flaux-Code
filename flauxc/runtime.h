@@ -56,12 +56,24 @@ static void fx_fail(int line, const char *fix, const char *fmt, ...) {
     } else {
         fprintf(stderr, "\n%sProblem%s%s while running %s:%s\n\n", red, off, bold, fx_file, off);
     }
+    char what[2048];
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    vsnprintf(what, sizeof what, fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
+    fprintf(stderr, "%s\n", what);
     if (fix && *fix) fprintf(stderr, "\n%sHow to fix it:%s\n  %s\n", bold, off, fix);
+#if defined(_WIN32) && defined(FX_GUI_APP)
+    /* an exported game without a console window: say it in a message box */
+    char box[8192];
+    int n = line > 0 ? snprintf(box, sizeof box, "Problem while running %s, line %d:\n\n    %s\n\n%s\n", fx_file, line,
+                                line <= fx_nlines ? fx_lines[line - 1] : "", what)
+                     : snprintf(box, sizeof box, "Problem while running %s:\n\n%s\n", fx_file, what);
+    if (fix && *fix && n > 0 && n < (int)sizeof box) snprintf(box + n, sizeof box - n, "\nHow to fix it:\n  %s\n", fix);
+    wchar_t wbox[8192];
+    if (MultiByteToWideChar(CP_UTF8, 0, box, -1, wbox, 8192) > 0)
+        MessageBoxW(NULL, wbox, L"Problem", MB_OK | MB_ICONERROR);
+#endif
     exit(1);
 }
 
@@ -240,6 +252,15 @@ static void fx_say_same_text(fx_text t) {
 static void fx_say_same_int(int64_t v) { printf("%" PRId64, v); fx_said_same(true); }
 static void fx_say_same_bool(bool b) { fputs(b ? "true" : "false", stdout); fx_said_same(true); }
 static void fx_say_same_float(double v) { char buf[64]; fx_fmt_float(buf, sizeof buf, v); fputs(buf, stdout); fx_said_same(true); }
+
+#if defined(_WIN32) && defined(FX_EXPORTED) && !defined(FX_GUI_APP)
+static void fx_wait_to_close(void) {
+    fputs("\nPress Enter to close this window.", stdout);
+    fflush(stdout);
+    int c;
+    while ((c = getchar()) != EOF && c != '\n') {}
+}
+#endif
 
 /* when the program ends halfway through a line, finish it (so a terminal's
  * prompt doesn't end up on the same line) */
@@ -528,6 +549,12 @@ static void fx_init(const char *file, const char *const *lines, int nlines) {
     const char *unbuffered = getenv("FLAUX_UNBUFFERED");
     if (unbuffered && *unbuffered) setvbuf(stdout, NULL, _IONBF, 0);
     fx_out_tty = fx_isatty(1);
+#if defined(_WIN32) && defined(FX_EXPORTED) && !defined(FX_GUI_APP)
+    /* an exported program, double-clicked: it has a console window of its own, which would
+       close the moment the program ends, so wait for Enter first (runs after fx_finish_line) */
+    DWORD others[2];
+    if (GetConsoleProcessList(others, 2) == 1) atexit(fx_wait_to_close);
+#endif
     atexit(fx_finish_line);
 #ifdef _WIN32
     /* show letters like é and emoji properly, and allow colours */

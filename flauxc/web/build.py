@@ -2,12 +2,16 @@
 serve. The GitHub build zips it as FlauxStudio-web.zip and attaches it
 to each release.
 
-    python3 -m flauxc.web.build OUTPUT_FOLDER --pyodide PYODIDE_FOLDER
+    python3 -m flauxc.web.build OUTPUT_FOLDER --pyodide PYODIDE_FOLDER [--player FlauxPlayer.exe]
 
 PYODIDE_FOLDER holds Pyodide's core files (from the "pyodide" npm package):
 pyodide.js, pyodide.asm.mjs, pyodide.asm.wasm, python_stdlib.zip and
 pyodide-lock.json. They're copied in, so the site works without any other
 website.
+
+FlauxPlayer.exe (made by installer/app/build_app.py) is the Windows game
+player: Export puts it in the zip as <name>.exe, with the game inside, so a
+game is a real Windows app. Without it, Export gives game.html and a .bat.
 """
 
 import argparse
@@ -69,7 +73,7 @@ def page():
     return html
 
 
-def build(out, pyodide):
+def build(out, pyodide, player=None):
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as fh:
         fh.write(page())
@@ -77,6 +81,8 @@ def build(out, pyodide):
         shutil.copyfile(os.path.join(STUDIO, name), os.path.join(out, name))
     for name in ("fx.js", "fx3d.js", "web.js", "player.html"):
         shutil.copyfile(os.path.join(HERE, name), os.path.join(out, name))
+    if player:
+        shutil.copyfile(player, os.path.join(out, "FlauxPlayer.exe"))
     shutil.copytree(os.path.join(STUDIO, "blockly"), os.path.join(out, "blockly"), dirs_exist_ok=True)
     with open(os.path.join(out, "flaux-files.json"), "w", encoding="utf-8") as fh:
         json.dump(python_files(), fh)
@@ -90,7 +96,7 @@ def build(out, pyodide):
                 shutil.copyfile(src, os.path.join(out, "pyodide", name))
     open(os.path.join(out, ".nojekyll"), "w").close()   # serve every file as it is (GitHub Pages)
     with open(os.path.join(out, ".htaccess"), "w") as fh:   # file types, for Apache servers
-        fh.write("AddType application/wasm .wasm\nAddType text/javascript .mjs .js\n"
+        fh.write("AddType application/wasm .wasm\nAddType text/javascript .mjs .js\nAddType application/octet-stream .exe\n"
                  "AddType application/json .json\n")
     shutil.copyfile(os.path.join(HERE, "site-CLAUDE.md"), os.path.join(out, "CLAUDE.md"))
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(out) for f in fs) / 1e6
@@ -101,5 +107,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("output")
     ap.add_argument("--pyodide", help="folder with Pyodide's core files")
+    ap.add_argument("--player", help="FlauxPlayer.exe, so Export makes a .exe (installer/app/build_app.py)")
     args = ap.parse_args()
-    build(args.output, args.pyodide)
+    build(args.output, args.pyodide, args.player)

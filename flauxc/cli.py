@@ -110,12 +110,19 @@ def sdl_flags():
     fail(SDL_HELP)
 
 
-def compile_c(c_code, out_path):
+def compile_c(c_code, out_path, exported=False):
+    """Build the C code into a program. `exported`: a program to share (Flaux Studio's Export):
+    on Windows, a game that never says anything has no console window (problems show in a
+    message box), and a program with a console waits for Enter before it closes."""
     cc = find_c_compiler()
     cflags, libs = [], []
+    if exported and WINDOWS:
+        cflags.append("-DFX_EXPORTED")
+        if "#define FX_USES_GRAPHICS" in c_code and "#define FX_SAYS" not in c_code:
+            cflags += ["-DFX_GUI_APP", "-mwindows"]
     if "#define FX_USES_GRAPHICS" in c_code:
-        cflags, libs = sdl_flags()
-        cflags = cflags + ["-I", os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")]
+        sdl_cflags, libs = sdl_flags()
+        cflags = cflags + sdl_cflags + ["-I", os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")]
         if "#define FX_USES_3D" in c_code and WINDOWS and os.path.isfile(os.path.join(BUNDLED_MESA, "opengl32.dll")):
             mesa = os.path.abspath(BUNDLED_MESA).replace("\\", "/")
             cflags.append(f'-DFX_SOFTWARE_GL="{mesa}"')
@@ -156,15 +163,15 @@ def cache_dir():
     return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "flaux")
 
 
-def cached_build(c_code):
+def cached_build(c_code, exported=False):
     """Build into a cache so running the same program again is instant."""
     cache = cache_dir()
     os.makedirs(cache, exist_ok=True)
-    digest = hashlib.sha256((c_code + " ".join(CFLAGS)).encode()).hexdigest()[:20]
+    digest = hashlib.sha256((c_code + " ".join(CFLAGS) + (" exported" if exported else "")).encode()).hexdigest()[:20]
     exe = os.path.join(cache, f"prog-{digest}{EXE}")
     if not os.path.exists(exe):
         partial = os.path.join(cache, f"partial-{digest}-{os.getpid()}{EXE}")
-        compile_c(c_code, partial)
+        compile_c(c_code, partial, exported)
         try:
             os.replace(partial, exe)
         except OSError:  # another copy is running and finished first: use that one

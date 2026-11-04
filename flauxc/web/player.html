@@ -38,6 +38,16 @@ body.text-only #out { max-height: none; flex: 1; }
 #ask { display: flex; gap: 8px; width: min(800px, 100%); }
 #ask input { flex: 1; font: inherit; font-size: 16px; padding: 8px 12px; border-radius: 8px;
              border: 2px solid #8a7dff; background: #0d0f16; color: inherit; }
+/* in the Windows app (the exported <name>.exe): the game fills the window, what it says goes
+   below it, and the window has the game's name (so there's no bar) */
+body.app { padding: 0; gap: 0; height: 100vh; overflow: hidden; background: #000; }
+body.app #screen { flex: 1 1 auto; min-height: 0; width: 100%; align-items: center; }
+body.app #canvas { max-width: none; max-height: none; border-radius: 0; box-shadow: none; }
+body.app #canvas:focus { box-shadow: none; }
+body.app #bar { display: none !important; }
+body.app #out { width: 100%; max-height: 30vh; border-radius: 0; flex: none; }
+body.app.text-only #out { max-height: none; flex: 1; }
+body.app #ask { width: 100%; padding: 8px; background: #0d0f16; }
 </style>
 </head>
 <body class="text-only">
@@ -66,10 +76,15 @@ body.text-only #out { max-height: none; flex: 1; }
   const program = JSON.parse($("program").textContent);   // { name, js, source, pictures, files }
   const canvas = $("canvas"), screen = $("screen"), out = $("out");
   const mouse = { x: 0, y: 0, down: false, pressed: false, mx: 0, my: 0 }, keys = new Set();
+  // inside the Windows app (<name>.exe, see installer/app/flaux_app.cc): flauxWindow(title, w, h)
+  // names and sizes the window, and page fullscreen is window fullscreen
+  const app = !!window.flauxApp;
+  if (app) document.body.classList.add("app");
   let W = 800, H = 600, win = null;     // the program's window(w, h) size (the canvas can have more pixels)
 
   // ------------------------------------------------------------- output
   function write(stream, text) {
+    if (out.hidden && app) setTimeout(fit, 0);   // (the game gets a little smaller to make room)
     out.hidden = false;
     const span = document.createElement("span");
     if (stream === "err") span.className = "err";
@@ -134,7 +149,7 @@ body.text-only #out { max-height: none; flex: 1; }
   // --------------------------------------------------------- fullscreen
   let fake = false, wanted = false;
   const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
-  const isFull = () => fake || fsElement() === screen;
+  const isFull = () => fake || app || fsElement() === screen;
   function fit() {
     if (!isFull()) {      // the program's own size, or smaller to fit the page (same shape)
       canvas.style.width = `min(100%, ${W}px, calc((100vh - 140px) * ${W / H}))`;
@@ -168,7 +183,7 @@ body.text-only #out { max-height: none; flex: 1; }
   function want(on) { wanted = on; $("full").classList.toggle("wants", on); }
   function enter() {
     want(false);
-    if (isFull()) return Promise.resolve(true);
+    if (fsElement() === screen || fake) return Promise.resolve(true);
     const req = screen.requestFullscreen ? () => screen.requestFullscreen({ navigationUI: "hide" })
       : screen.webkitRequestFullscreen ? () => screen.webkitRequestFullscreen() : null;
     if (!req) { fake = true; screen.classList.add("fake-full"); fit(); canvas.focus(); return Promise.resolve(true); }
@@ -186,6 +201,16 @@ body.text-only #out { max-height: none; flex: 1; }
   document.addEventListener("webkitfullscreenchange", changed);
   window.addEventListener("resize", () => { if (isFull()) fit(); });
   $("full").addEventListener("click", () => (isFull() ? leave() : enter()));
+  if (app) {
+    // F11 or Alt+Enter: the whole window fullscreen (Esc leaves), like games made with the Windows app
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "F11" || (e.key === "Enter" && e.altKey)) {
+        e.preventDefault();
+        if (fsElement()) leave(); else enter();
+      }
+    }, true);
+    if (window.ResizeObserver) new ResizeObserver(() => fit()).observe(screen);
+  }
   $("exit").addEventListener("click", leave);
   screen.addEventListener("mousedown", (e) => { if (e.target === screen) { e.preventDefault(); canvas.focus(); } });
 
@@ -241,6 +266,10 @@ body.text-only #out { max-height: none; flex: 1; }
       screen.hidden = $("bar").hidden = false;
       $("title").dataset.name = $("title").textContent = title === "Flaux" ? program.name : title;
       if (title !== "Flaux") document.title = title;
+      if (app && window.flauxWindow) {       // the window: the game's name, and its size (if the screen has room)
+        const k = Math.min(1, 0.92 * window.screen.availWidth / w, 0.85 * window.screen.availHeight / h);
+        window.flauxWindow(title === "Flaux" ? program.name : title, Math.round(w * k), Math.round(h * k));
+      }
       fit();
       canvas.focus();
       const back = document.createElement("canvas");
@@ -288,6 +317,7 @@ body.text-only #out { max-height: none; flex: 1; }
     lockMouse(false);                        // the pointer back when the program ends
     if (code !== 0) leave();                 // a problem: show the message
     if (!out.hidden || code !== 0) write("note", code === 0 ? "\n— Finished —\n" : "\n— Stopped —\n");
+    if (window.flauxDone) window.flauxDone(code, out.textContent);   // (the Windows app's tests)
   });
 })();
 </script>

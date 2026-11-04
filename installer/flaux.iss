@@ -4,6 +4,7 @@
 ; installer/fetch-windows-parts.ps1 to put everything in build\app:
 ;   build\app\flaux, flauxc\, examples\, docs\, assets\   Flaux itself
 ;   build\app\bin\flaux.exe                                the `flaux` command
+;   build\app\FlauxStudio.exe                              Flaux Studio, the app (installer\app)
 ;   build\app\python\                                      Python (embeddable)
 ;   build\app\toolchain\                                   gcc for Windows (w64devkit)
 ;   build\app\sdl2\                                        SDL2 (graphics)
@@ -56,8 +57,8 @@ Type: filesandordirs; Name: "{app}\flauxc\__pycache__"
 Source: "..\build\app\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Flaux Studio"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\flaux"" studio"; WorkingDir: "{app}"; IconFilename: "{app}\assets\flaux.ico"; Comment: "Write and run Flaux programs"
-Name: "{autodesktop}\Flaux Studio"; Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\flaux"" studio"; WorkingDir: "{app}"; IconFilename: "{app}\assets\flaux.ico"; Comment: "Write and run Flaux programs"; Tasks: desktopicon
+Name: "{autoprograms}\Flaux Studio"; Filename: "{app}\FlauxStudio.exe"; WorkingDir: "{app}"; Comment: "Write and run Flaux programs"
+Name: "{autodesktop}\Flaux Studio"; Filename: "{app}\FlauxStudio.exe"; WorkingDir: "{app}"; Comment: "Write and run Flaux programs"; Tasks: desktopicon
 Name: "{autoprograms}\Flaux lessons and guide"; Filename: "{app}\README.md"
 
 [Registry]
@@ -67,12 +68,12 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; Value
 Root: HKCU; Subkey: "Software\Classes\.flx"; ValueType: string; ValueName: ""; ValueData: "Flaux.Program"; Flags: uninsdeletevalue; Tasks: associate
 Root: HKCU; Subkey: "Software\Classes\Flaux.Program"; ValueType: string; ValueName: ""; ValueData: "Flaux program"; Flags: uninsdeletekey; Tasks: associate
 Root: HKCU; Subkey: "Software\Classes\Flaux.Program\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\assets\flaux.ico"; Tasks: associate
-Root: HKCU; Subkey: "Software\Classes\Flaux.Program\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\python\pythonw.exe"" ""{app}\flaux"" studio ""%1"""; Tasks: associate
+Root: HKCU; Subkey: "Software\Classes\Flaux.Program\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\FlauxStudio.exe"" ""%1"""; Tasks: associate
 Root: HKCU; Subkey: "Software\Classes\Flaux.Program\shell\run"; ValueType: string; ValueName: ""; ValueData: "Run with Flaux"; Tasks: associate
 Root: HKCU; Subkey: "Software\Classes\Flaux.Program\shell\run\command"; ValueType: string; ValueName: ""; ValueData: "cmd.exe /c """"{app}\bin\flaux.exe"" ""%1"" & pause"""; Tasks: associate
 
 [Run]
-Filename: "{app}\python\pythonw.exe"; Parameters: """{app}\flaux"" studio"; WorkingDir: "{app}"; Description: "Open Flaux Studio now"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\FlauxStudio.exe"; WorkingDir: "{app}"; Description: "Open Flaux Studio now"; Flags: postinstall nowait skipifsilent
 
 [Code]
 function NeedsAddPath(Folder: string): Boolean;

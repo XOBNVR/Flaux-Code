@@ -17,7 +17,8 @@ are **built from that repository**, so make lasting changes there and rebuild
 | `web.js` | the page's helper: loads Python, runs programs, keeps files in the browser |
 | `fx.js` | the runtime that compiled Flaux programs use (maths, text, 2D graphics, keys, mouse, controllers, sound) |
 | `fx3d.js` | 3D, shaders and VR/AR: the same engine as the Windows app, drawn with WebGL 2 and WebXR |
-| `player.html` | the page an exported program becomes (**Export** button: `web.js` fills in `fx.js` (and `fx3d.js` plus the GPU code for 3D programs), the compiled program and its pictures, and zips it with a `Play <name>.bat`) |
+| `player.html` | the page an exported program becomes (**Export** button: `web.js` fills in `fx.js` (and `fx3d.js` plus the GPU code for 3D programs), the compiled program and its pictures) |
+| `FlauxPlayer.exe` | Flaux's game player for Windows: a real app with its own window (WebView2, no Electron; source in `installer/app` in the Flaux repository). **Export** puts it in the zip as `<name>.exe`, with the game page added to the end of the file, so a game is one `.exe` people double-click. Keep it on the website (if it's missing, Export gives `game.html` and a `Play <name>.bat` instead). |
 | `blocks.js`, `blockly/` | the block editor (built on Google's Blockly) |
 | `pyodide/` | Python for web pages (Pyodide 314.0.7). It runs Flaux's real compiler in the browser |
 | `flaux-files.json` | the Flaux compiler's Python source files, loaded into Pyodide |

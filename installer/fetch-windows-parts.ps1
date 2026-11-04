@@ -100,6 +100,12 @@ Write-Host "OpenXR loader: $($xrAsset.name) ($($xrDll.FullName))"
 & "$app\toolchain\bin\gcc.exe" -municode -O2 -Wall -o "$app\bin\flaux.exe" installer\launcher.c
 if ($LASTEXITCODE -ne 0) { throw "Couldn't build flaux.exe" }
 
+# 6. FlauxStudio.exe: Flaux Studio as a real app with its own window (WebView2, see installer\app)
+& "$app\python\python.exe" installer\app\build_app.py "$tmp\apps" --cxx "$app\toolchain\bin\g++.exe" --windres "$app\toolchain\bin\windres.exe"
+if ($LASTEXITCODE -ne 0) { throw "Couldn't build FlauxStudio.exe" }
+Copy-Item "$tmp\apps\FlauxStudio.exe" "$app\"
+Write-Host "FlauxStudio.exe: $([math]::Round((Get-Item "$app\FlauxStudio.exe").Length / 1KB)) KB"
+
 Remove-Item -Recurse -Force $tmp
 $size = (Get-ChildItem $app -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
 Write-Host ("Everything is in build\app ({0:N0} MB)" -f $size)
