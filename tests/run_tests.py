@@ -43,6 +43,9 @@ import sys
 import tempfile
 import time
 
+# C code that newer compilers refuse (GCC 14 and later, like Windows') must fail here too
+os.environ["FLAUX_STRICT_C"] = "1"
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)

@@ -20,6 +20,12 @@ from .compiler import compile_source
 from .errors import FlauxError
 
 CFLAGS = ["-O3", "-std=gnu11", "-fwrapv", "-w"]
+# FLAUX_STRICT_C=1 (the tests): mistakes in the C code that newer C compilers (GCC 14 and later, like
+# the one Flaux comes with on Windows) always refuse are refused by older ones too
+if os.environ.get("FLAUX_STRICT_C"):
+    CFLAGS = [f for f in CFLAGS if f != "-w"] + [
+        "-Werror=incompatible-pointer-types", "-Werror=int-conversion", "-Werror=implicit-function-declaration",
+        "-Werror=implicit-int", "-Werror=return-type"]
 WINDOWS = os.name == "nt"
 EXE = ".exe" if WINDOWS else ""
 

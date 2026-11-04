@@ -164,7 +164,7 @@ static @N *@N_new(int64_t cap) {
     l->items = l->cap ? fx_alloc(sizeof(@CT) * (size_t)l->cap) : NULL;
     return l;
 }
-static @N *@N_of(int64_t n, const @CT *src) {
+static @N *@N_of(int64_t n, @CT const *src) {   /* (const after the type: right for lists of lists too) */
     @N *l = @N_new(n);
     memcpy(l->items, src, sizeof(@CT) * (size_t)n);
     l->len = n;

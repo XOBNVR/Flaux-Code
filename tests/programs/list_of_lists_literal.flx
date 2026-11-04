@@ -1,0 +1,15 @@
+# Lists written inside lists (newer C compilers refused the C Flaux made for these)
+set SAVE_BLOCKS to [[0]]
+say SAVE_BLOCKS
+set grid to [[1, 2], [3, 4], [5, 6]]
+say grid[2][1]
+set names to [["Sam", "Mia"], ["Leo"]]
+say names[1][2]
+set sizes to [[1.5, 2.5], [3.5]]
+say sizes[1][2]
+set flags to [[true], [false, true]]
+say flags[2]
+set deep to [[[1, 2]], [[3]]]
+say deep[2][1][1]
+add [7, 8] to grid
+say length of grid
