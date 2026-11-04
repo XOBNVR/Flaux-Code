@@ -64,6 +64,16 @@ the SDL2 graphics library), so there's nothing else to download. It doesn't
 need an administrator, and it works on Windows 10 and 11. To remove it, go
 to **Settings, Apps** and uninstall **Flaux**.
 
+Flaux Studio is a real Windows app: **Flaux Studio.exe** opens in a window of
+its own (it uses WebView2, the web view that's built into Windows 10 and 11;
+no Electron, and no browser window).
+
+**Rather not install anything?** Download
+**[FlauxStudio-windows.zip](https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxStudio-windows.zip)**,
+unzip it anywhere (a USB stick works too) and double-click **Flaux Studio.exe**
+in the **Flaux Studio** folder. Keep the folder together: the app uses the
+files next to it.
+
 ### Flaux Studio on your website
 
 Flaux Studio also comes as a website, so people can code in their browser
@@ -111,12 +121,14 @@ Flaux Studio is where you write and run your programs. Open it from the
 - **Open** shows your programs, the lessons and the games.
   **Save** keeps your program in your **Documents\Flaux** folder.
 - **&#11015; Export** makes a `.zip` of your program that runs without Flaux
-  Studio, to share or keep. Unzip it and double-click the **Play** file
-  inside. In the Windows app the zip (in your **Documents\Flaux** folder)
-  holds your real program (`.exe`, plus `SDL2.dll` and its pictures for a
-  game); on the website it downloads a zip with your program as one web page,
-  `game.html`, that opens in the web browser (it works from your computer,
-  and you can put it on any website too).
+  Studio, to share or keep. In the Windows app the zip (in your
+  **Documents\Flaux** folder) holds your program as a real Windows program,
+  **`<name>.exe`** (plus `SDL2.dll` and its pictures for a game): unzip it
+  and double-click the `.exe`. A game opens just its window (no black
+  console window); a program that only says things keeps its window open
+  at the end until you press **Enter**. On the website, Export downloads a
+  zip with your program as one web page, `game.html`, that opens in the web
+  browser (double-click the **Play** file inside).
 - **&#127769; Night** switches to dark colours. **A&minus;** and **A+**
   change the text size.
 

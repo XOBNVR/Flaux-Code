@@ -10,6 +10,7 @@
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -108,7 +109,7 @@ def sdl_flags():
     fail(SDL_HELP)
 
 
-def compile_c(c_code, out_path):
+def compile_c(c_code, out_path, extra_flags=()):
     cc = find_c_compiler()
     cflags, libs = [], []
     if "#define FX_USES_GRAPHICS" in c_code:
@@ -119,7 +120,7 @@ def compile_c(c_code, out_path):
         with open(c_path, "w", encoding="utf-8") as fh:
             fh.write(c_code)
         extra = ["-Wl,--stack,16777216"] if WINDOWS else []  # 16 MB, like Linux, for deep recursion
-        result = subprocess.run([cc, *CFLAGS, *cflags, c_path, "-o", out_path, *libs, "-lm", *extra],
+        result = subprocess.run([cc, *CFLAGS, *cflags, c_path, "-o", out_path, *libs, "-lm", *extra, *extra_flags],
                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if result.returncode != 0:
@@ -131,6 +132,50 @@ def compile_c(c_code, out_path):
              f"not in your program.\nThe C code was saved to {keep}\n\n{errors}")
     if libs and WINDOWS:
         copy_sdl_dll(os.path.dirname(os.path.abspath(out_path)))
+
+
+def windows_resources(name, tmp):
+    """The Flaux icon and the program's name, for a Windows program to share
+    (so it shows the icon in File Explorer and its name in Task Manager).
+    None if there's no windres (it comes with gcc for Windows)."""
+    cc = find_c_compiler()
+    windres = os.path.join(os.path.dirname(cc), "windres" + EXE)
+    if not os.path.isfile(windres):
+        windres = shutil.which("windres")
+    icon = os.path.join(ROOT, "assets", "flaux.ico")
+    if not windres or not os.path.isfile(icon):
+        return None
+    safe = re.sub(r'[^A-Za-z0-9 _-]', "", name) or "game"
+    rc = os.path.join(tmp, "program.rc")
+    with open(rc, "w", encoding="utf-8") as fh:
+        fh.write(f'1 ICON "{icon.replace(chr(92), "/")}"\n'
+                 "1 VERSIONINFO\nFILEVERSION 1,0,0,0\nPRODUCTVERSION 1,0,0,0\nBEGIN\n"
+                 '  BLOCK "StringFileInfo"\n  BEGIN\n    BLOCK "040904B0"\n    BEGIN\n'
+                 f'      VALUE "FileDescription", "{safe}"\n      VALUE "ProductName", "{safe}"\n'
+                 f'      VALUE "OriginalFilename", "{safe}.exe"\n      VALUE "Comments", "Made with Flaux"\n'
+                 '    END\n  END\n  BLOCK "VarFileInfo"\n  BEGIN\n    VALUE "Translation", 0x409, 1200\n  END\nEND\n')
+    obj = os.path.join(tmp, "program-res.o")
+    # windres reads the .rc through the C preprocessor: name ours, so it doesn't depend on PATH
+    pre = ["--preprocessor", cc] + [a for arg in ("-E", "-xc", "-DRC_INVOKED") for a in ("--preprocessor-arg", arg)]
+    result = subprocess.run([windres, *pre, "-O", "coff", "-i", rc, "-o", obj], capture_output=True, text=True,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return obj if result.returncode == 0 and os.path.isfile(obj) else None
+
+
+def build_to_share(c_code, out_path, name):
+    """Build a program to give to other people (Flaux Studio's Export). On
+    Windows a game is a Windows program, so no black console window opens
+    next to it (one opens only if it says or asks something), and it gets the
+    Flaux icon and its name."""
+    extra = []
+    with tempfile.TemporaryDirectory() as tmp:
+        if WINDOWS:
+            if "#define FX_USES_GRAPHICS" in c_code:
+                extra.append("-mwindows")
+            res = windows_resources(name, tmp)
+            if res:
+                extra.append(res)
+        compile_c(c_code, out_path, extra)
 
 
 def copy_sdl_dll(folder):
@@ -201,7 +246,8 @@ def cmd_c(args):
 
 def cmd_studio(args):
     from .studio import server
-    server.main(args.file, port=args.port, show=not args.no_window, keep_running=args.keep_running)
+    server.main(args.file, port=args.port, show=not args.no_window, keep_running=args.keep_running,
+                host=args.host)
 
 
 def main(argv=None):
@@ -244,6 +290,7 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=0, help=argparse.SUPPRESS)
     p.add_argument("--no-window", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--keep-running", action="store_true", help=argparse.SUPPRESS)  # for tests
+    p.add_argument("--host", action="store_true", help=argparse.SUPPRESS)  # for Flaux Studio.exe
     p.set_defaults(func=cmd_studio)
 
     args = parser.parse_args(argv)

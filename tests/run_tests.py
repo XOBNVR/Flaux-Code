@@ -36,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+from flauxc import cli  # noqa: E402
 from flauxc.cli import BUNDLED_SDL, EXE, compile_c  # noqa: E402
 from flauxc.compiler import compile_source  # noqa: E402
 from flauxc.errors import FlauxError  # noqa: E402
@@ -131,13 +132,59 @@ def studio_checks():
         saved = studio.save("say 1\n", name="My Game")
         if not os.path.isfile(os.path.join(home, "My_Game.flx")) or saved["name"] != "My_Game.flx":
             problems.append(f"save went wrong: {saved}")
-        # Export: a zip with the built program and a file that starts it
-        import zipfile
-        r = studio.export('say "hi"\n', None, show=False)
-        names = zipfile.ZipFile(r["file"]).namelist() if r.get("ok") else []
-        launcher = "game/Play game.bat" if os.name == "nt" else "game/play.sh"
-        if f"game/game{EXE}" not in names or launcher not in names:
-            problems.append(f"export went wrong: {r} {names}")
+        problems += export_checks(studio, home)
+    return problems
+
+
+def pe_subsystem(exe):
+    """2 for a Windows (GUI) program, 3 for a console program."""
+    with open(exe, "rb") as fh:
+        data = fh.read(4096)
+    pe = int.from_bytes(data[0x3C:0x40], "little")
+    return int.from_bytes(data[pe + 24 + 68: pe + 24 + 70], "little")
+
+
+def export_checks(studio, home):
+    """Export makes a zip with the real program: <name>.exe on Windows (a game
+    is a Windows program with SDL2.dll next to it), no .bat files needed."""
+    import zipfile
+    problems = []
+    r = studio.export('say.same "hi "\nsay "there"\n', None, show=False)
+    names = zipfile.ZipFile(r["file"]).namelist() if r.get("ok") else []
+    wanted = [f"game/game{EXE}", "game/README.txt"] + ([] if os.name == "nt" else ["game/play.sh"])
+    if any(w not in names for w in wanted) or any(n.endswith(".bat") for n in names):
+        return [f"export of a text program went wrong: {r} {names}"]
+    out = os.path.join(home, "unzipped")
+    zipfile.ZipFile(r["file"]).extractall(out)
+    exe = os.path.join(out, "game", "game" + EXE)
+    os.chmod(exe, 0o755)
+    run = subprocess.run([exe], input="", capture_output=True, text=True, timeout=60)
+    if run.returncode != 0 or run.stdout != "hi there\n":
+        problems.append(f"the exported program didn't run right: {run}")
+    if os.name == "nt" and pe_subsystem(exe) != 3:
+        problems.append(f"an exported text program should be a console program (subsystem {pe_subsystem(exe)})")
+    try:
+        cli.sdl_flags()
+    except cli.CliError:
+        return problems      # no SDL2 here: skip the game
+    game = 'window(200, 120, "Exported")\nclear("red")\nshow()\nsay "game says hi"\nwait 0.1s\n'
+    with open(os.path.join(home, "My Game.flx"), "w", encoding="utf-8") as fh:
+        fh.write(game)
+    r = studio.export(game, os.path.join(home, "My Game.flx"), show=False)
+    names = zipfile.ZipFile(r["file"]).namelist() if r.get("ok") else []
+    wanted = [f"My Game/My Game{EXE}"] + (["My Game/SDL2.dll"] if os.name == "nt" else [])
+    if any(w not in names for w in wanted) or any(n.endswith(".bat") for n in names):
+        return problems + [f"export of a game went wrong: {r} {names}"]
+    zipfile.ZipFile(r["file"]).extractall(out)
+    exe = os.path.join(out, "My Game", "My Game" + EXE)
+    os.chmod(exe, 0o755)
+    shot = os.path.join(home, "exported.bmp")
+    env = {**os.environ, "SDL_VIDEODRIVER": "dummy", "FLAUX_FRAMES": "3", "FLAUX_SCREENSHOT": shot}
+    run = subprocess.run([exe], capture_output=True, text=True, timeout=60, env=env, cwd=os.path.dirname(exe))
+    if run.returncode != 0 or not os.path.isfile(shot) or "game says hi" not in run.stdout:
+        problems.append(f"the exported game didn't run right: {run}")
+    if os.name == "nt" and pe_subsystem(exe) != 2:
+        problems.append(f"an exported game should be a Windows program (subsystem {pe_subsystem(exe)})")
     return problems
 
 

@@ -66,6 +66,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Get-Item dist\FlauxSetup.exe | Format-List Name, Length
 
+      - name: Make FlauxStudio-windows.zip (Flaux Studio without installing)
+        shell: pwsh
+        run: |
+          $folder = "build\portable\Flaux Studio"
+          New-Item -ItemType Directory -Force build\portable | Out-Null
+          Copy-Item -Recurse build\app $folder
+          Set-Content "$folder\Start here.txt" -NoNewline -Value ("Flaux Studio`r`n============`r`n`r`n" +
+            "Double-click Flaux Studio.exe to start Flaux Studio. Nothing needs to be installed:`r`n" +
+            "keep this whole folder together (Flaux Studio.exe uses the files next to it).`r`n`r`n" +
+            "Your programs are saved in Documents\Flaux. To have Start menu and Desktop icons,`r`n" +
+            "and to type ``flaux`` in Command Prompt, install Flaux with FlauxSetup.exe instead.`r`n")
+          7z a -tzip -mx=7 dist\FlauxStudio-windows.zip ".\build\portable\Flaux Studio" | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Item dist\FlauxStudio-windows.zip | Format-List Name, Length
+
       - name: Install it and use it like a beginner would
         shell: pwsh
         run: ./installer/try-installed.ps1
@@ -74,6 +89,19 @@ jobs:
         with:
           name: FlauxSetup
           path: dist/FlauxSetup.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlauxStudio-windows
+          path: dist/FlauxStudio-windows.zip
+          compression-level: 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: studio-window
+          path: dist/studio-window.png
+          if-no-files-found: ignore
 
   web:
     name: Flaux Studio on the web
@@ -122,6 +150,10 @@ jobs:
         with:
           name: FlauxStudio-web
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: FlauxStudio-windows
+          path: dist
       - name: Publish FlauxSetup.exe as a release
         uses: softprops/action-gh-release@v2
         with:
@@ -131,6 +163,7 @@ jobs:
           make_latest: true
           files: |
             dist/FlauxSetup.exe
+            dist/FlauxStudio-windows.zip
             dist/FlauxStudio-web.zip
           body: |
             ## Install Flaux on Windows
@@ -141,10 +174,16 @@ jobs:
 
             Everything is included: Python, a C compiler and SDL2 graphics. No administrator needed. Works on Windows 10 and 11 (64-bit).
 
+            Flaux Studio is a real Windows app (Flaux Studio.exe, in its own window), and its **Export** button makes a .zip with your program as a **.exe** that anyone can double-click.
+
+            ## Or without installing
+
+            **FlauxStudio-windows.zip** is the same Flaux Studio, ready to go: unzip it anywhere and double-click **Flaux Studio.exe** inside.
+
             See the [README](https://github.com/XOBNVR/Flaux-Code#readme) for the lessons.
 
             ## Flaux Studio for your website
 
             **FlauxStudio-web.zip** is Flaux Studio as a website: unzip it and upload everything inside to any web host. Its CLAUDE.md explains each file and how to host it.
 
-            _Built and tested automatically: every test passed on Windows and Linux (including the block editor), this exact installer was installed and tried out, and the website was tested in a real browser before being published._
+            _Built and tested automatically: every test passed on Windows and Linux (including the block editor), this exact installer was installed and tried out (Flaux Studio.exe opened and ran a program, from the installer and from the zip), and the website was tested in a real browser before being published._

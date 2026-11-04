@@ -192,8 +192,13 @@ html.web .native-only { display: none !important; }
   max-width: none; max-height: none; border-radius: 0; box-shadow: none; }
 #game-exit { display: none; position: absolute; top: 10px; right: 10px; z-index: 1; opacity: .75; }
 #game-screen.fake-full #game-exit { display: inline-block; }
-a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
-            padding: 7px 12px; white-space: nowrap; align-items: center; }
+.get-app { white-space: nowrap; align-items: center; }
+.downloads { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 4px; }
+.downloads a { display: block; text-decoration: none; color: var(--text); border: 1px solid var(--line);
+               border-radius: 10px; padding: 11px 14px; background: var(--bg); }
+.downloads a:hover { border-color: var(--accent); }
+.downloads a b { display: block; font-size: 16px; margin-bottom: 2px; }
+.downloads a span { color: var(--muted); font-size: 14px; }
 </style>
 </head>
 <body>
@@ -202,7 +207,7 @@ a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--l
   <button id="btn-new" title="New program (Ctrl+N)">New</button>
   <button id="btn-open" title="Open a program (Ctrl+O)">Open</button>
   <button id="btn-save" title="Save (Ctrl+S)">Save</button>
-  <button id="btn-export" title="Make a .zip of your program that runs without Flaux Studio (double-click the .bat inside)">&#11015; Export</button>
+  <button id="btn-export" title="Make a .zip of your program that runs without Flaux Studio">&#11015; Export</button>
   <div class="mode" role="group" aria-label="Write with code or blocks">
     <button id="mode-code" class="active" title="Write your program as text">&#9998; Code</button>
     <button id="mode-blocks" title="Build your program from blocks">&#9638; Blocks</button>
@@ -210,8 +215,8 @@ a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--l
   <span id="filename"></span>
   <div class="spacer"></div>
   <button id="btn-pictures" class="small web-only" title="Add pictures for image(...)">&#128444; Pictures</button>
-  <a class="get-app web-only" href="https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe"
-     title="Flaux for Windows: runs programs much faster, and games get their own window">&#11015; Windows app</a>
+  <button id="btn-get-app" class="get-app web-only"
+     title="Flaux Studio for Windows: a real app that runs programs much faster and exports them as .exe files">&#11015; Windows app</button>
   <button id="btn-theme" class="small" title="Night mode / day mode"></button>
   <button id="btn-smaller" class="small" title="Smaller text">A&minus;</button>
   <button id="btn-bigger" class="small" title="Bigger text">A+</button>
@@ -302,6 +307,27 @@ a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--l
     <div class="spacer"></div>
     <button id="open-cancel">Cancel</button>
   </div>
+</dialog>
+
+<dialog id="app-dialog">
+  <div class="d-body">
+    <h2>Flaux Studio for Windows</h2>
+    <div>A real Windows app: <b>Flaux Studio.exe</b> opens in its own window. Programs run much
+      faster, games get their own window, and <b>Export</b> makes your program a <b>.exe</b>
+      that anyone can double-click.</div>
+    <div class="downloads">
+      <a href="https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxStudio-windows.zip">
+        <b>&#11015; Flaux Studio (.zip)</b>
+        <span>Nothing to install: unzip it anywhere and double-click <b style="display:inline">Flaux Studio.exe</b>.</span></a>
+      <a href="https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe">
+        <b>&#11015; Installer (FlauxSetup.exe)</b>
+        <span>Installs it with Start menu and Desktop icons, and the <code>flaux</code> command.</span></a>
+    </div>
+    <div class="hint">For Windows 10 and 11 (64-bit). If Windows says "Windows protected your PC",
+      click More info, then Run anyway (Flaux is new and isn't signed by a big company yet).
+      Programs saved in this browser stay here: use Open, then Download this program, to take one along.</div>
+  </div>
+  <div class="d-foot"><button id="app-close">Close</button></div>
 </dialog>
 
 <dialog id="save-dialog">
@@ -739,7 +765,8 @@ function finish(exit) {
 
 // Export: a .zip that runs the program without Flaux Studio. The web version
 // makes a web page (game.html) and downloads the zip; the desktop version
-// builds the real program and saves the zip in your programs folder.
+// builds the real program (<name>.exe on Windows) and saves the zip in your
+// programs folder.
 async function exportProgram() {
   if (state.mode === "blocks" && refreshFromBlocks().problems.length) return;
   status("Making the export...");
@@ -752,10 +779,11 @@ async function exportProgram() {
   }
   if (r.native) {
     print(`\nExported ${r.name}, saved in your programs folder:\n  ${r.file}\n` +
-          "Unzip it anywhere and double-click the Play file inside to run your program.\n", "note");
+          `Unzip it anywhere and double-click ${r.program || "the program"} inside to run it.\n`, "note");
     status(`Exported ${r.name}`, "good");
   } else {
-    status(`Downloaded ${r.name}. Unzip it and double-click the Play file (or game.html) to play.`, "good");
+    status(`Downloaded ${r.name}. Unzip it and double-click the Play file (or game.html) to play. ` +
+           "To export a real .exe, use the Windows app (\u2b07 Windows app).", "good");
   }
 }
 
@@ -859,6 +887,8 @@ function lessonName(f) {
   return m ? `Lesson ${Number(m[1])}: ${m[2].replace(/_/g, " ")}` : f.name;
 }
 $("open-cancel").addEventListener("click", () => $("open-dialog").close());
+$("btn-get-app").addEventListener("click", () => $("app-dialog").showModal());
+$("app-close").addEventListener("click", () => $("app-dialog").close());
 $("open-folder").addEventListener("click", () => api("/api/folder", {}));
 
 function newFile() {

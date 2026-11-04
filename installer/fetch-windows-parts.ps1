@@ -6,6 +6,9 @@
 #   build\app\toolchain\   gcc for Windows, from w64devkit (github.com/skeeto/w64devkit)
 #   build\app\sdl2\        SDL2 for graphics (github.com/libsdl-org/SDL)
 #   build\app\bin\         flaux.exe, made from installer\launcher.c
+#   build\app\Flaux Studio.exe (+ WebView2Loader.dll)
+#                          Flaux Studio in its own window, made from installer\studio.cpp
+#                          with Microsoft's WebView2 SDK (nuget.org/packages/Microsoft.Web.WebView2)
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # makes downloads much faster
@@ -67,6 +70,26 @@ Write-Host "SDL2: $($sdlAsset.name)"
 # 5. flaux.exe
 & "$app\toolchain\bin\gcc.exe" -municode -O2 -Wall -o "$app\bin\flaux.exe" installer\launcher.c
 if ($LASTEXITCODE -ne 0) { throw "Couldn't build flaux.exe" }
+
+# 6. Flaux Studio.exe: the Studio in a window of its own, shown with WebView2
+#    (part of Windows 10 and 11). Its header comes from Microsoft's WebView2 SDK.
+$wvVersions = (Invoke-RestMethod "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/index.json").versions
+$wvVersion = $wvVersions | Where-Object { $_ -notmatch "-" } | Select-Object -Last 1
+Download "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/$wvVersion/microsoft.web.webview2.$wvVersion.nupkg" "$tmp\webview2.zip"
+Expand-Archive "$tmp\webview2.zip" "$tmp\webview2"
+$wvNative = "$tmp\webview2\build\native"
+& "$app\python\python.exe" installer\webview2_iids.py "$wvNative\include\WebView2.h" "$tmp\webview2_iids.h"
+if ($LASTEXITCODE -ne 0) { throw "Couldn't read WebView2.h" }
+$bin = "$app\toolchain\bin"
+& "$bin\windres.exe" --preprocessor "$bin\gcc.exe" --preprocessor-arg -E --preprocessor-arg -xc `
+    --preprocessor-arg -DRC_INVOKED -I assets -I installer -O coff -i installer\studio.rc -o "$tmp\studio-res.o"
+if ($LASTEXITCODE -ne 0) { throw "Couldn't make Flaux Studio.exe's icon" }
+& "$bin\g++.exe" -std=c++17 -O2 -Wall -municode -mwindows -D_WIN32_WINNT=0x0A00 -I "$wvNative\include" -I $tmp `
+    -o "$app\Flaux Studio.exe" installer\studio.cpp "$tmp\studio-res.o" -static `
+    -lole32 -loleaut32 -luuid -lshell32 -lshlwapi -ldwmapi -luser32 -lgdi32 -ladvapi32
+if ($LASTEXITCODE -ne 0) { throw "Couldn't build Flaux Studio.exe" }
+Copy-Item "$wvNative\x64\WebView2Loader.dll" "$app\WebView2Loader.dll"
+Write-Host "Flaux Studio.exe (WebView2 SDK $wvVersion)"
 
 Remove-Item -Recurse -Force $tmp
 $size = (Get-ChildItem $app -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB

@@ -127,8 +127,11 @@ node tests/web_studio_test.js http://127.0.0.1:8790/   # the whole web Studio, i
 - **Saving:** programs are saved per browser and per website address. If
   the site moves to a new address, people should download their programs
   first (Open, then Download this program).
-- **The "Windows app" button** links to the newest installer on GitHub:
-  `https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxSetup.exe`.
+- **The "Windows app" button** opens a box with the two downloads of Flaux
+  Studio for Windows (a real app, `Flaux Studio.exe`, whose Export makes
+  `.exe` files), both from the newest release on GitHub:
+  `https://github.com/XOBNVR/Flaux-Code/releases/latest/download/FlauxStudio-windows.zip`
+  (nothing to install) and `.../FlauxSetup.exe` (the installer).
 
 ## Licences
 

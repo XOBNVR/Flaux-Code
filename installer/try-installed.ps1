@@ -63,7 +63,50 @@ try { Invoke-WebRequest "http://127.0.0.1:8790/" -UseBasicParsing | Out-Null } c
 Check ($code -eq 403) "Flaux Studio is running and protected (answered $code)"
 Stop-Process -Id $studio.Id -Force -ErrorAction SilentlyContinue
 
-# 7. uninstall cleans up
+# 7. Flaux Studio.exe: the Studio in a window of its own (WebView2, part of Windows).
+#    --selftest opens it, waits for the Studio, runs a program in it, writes what happened and closes.
+function StudioSelftest($exe, $result) {
+    Remove-Item $result, "$result.png" -ErrorAction SilentlyContinue
+    $p = Start-Process $exe -ArgumentList "--selftest", "`"$result`"" -PassThru
+    $null = $p.Handle   # keeps the exit code readable
+    if (-not $p.WaitForExit(180000)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; return -1 }
+    return $p.ExitCode
+}
+function TryStudio($exe, $what) {
+    $result = "$env:TEMP\studio-selftest.txt"
+    $code = StudioSelftest $exe $result
+    if ($code -eq 2 -and -not $script:installedWebView2) {
+        # Windows 10 and 11 come with WebView2; this test computer may not
+        Write-Host "No WebView2 on this computer: installing Microsoft's WebView2 Runtime to test with"
+        Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "$env:TEMP\MicrosoftEdgeWebview2Setup.exe"
+        Start-Process "$env:TEMP\MicrosoftEdgeWebview2Setup.exe" -ArgumentList "/silent", "/install" -Wait
+        $script:installedWebView2 = $true
+        $code = StudioSelftest $exe $result
+    }
+    $said = if (Test-Path $result) { Get-Content $result -Raw } else { "(it wrote nothing)" }
+    Write-Host "$what said: $said"
+    Check ($code -eq 0 -and $said -match "Hello from Flaux Studio.exe") "$what opens the Studio and runs a program in it (exit code $code)"
+    Check ($said -match "window: .*Flaux Studio") "...in its own window, called Flaux Studio"
+    if (Test-Path "$result.png") { Copy-Item "$result.png" "$root\dist\studio-window.png" -Force }
+}
+Check (Test-Path "$app\Flaux Studio.exe") "Flaux Studio.exe installed"
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Flaux Studio.lnk")
+Check ($lnk.TargetPath -like "*\Flaux Studio.exe") "the Start menu shortcut opens Flaux Studio.exe ($($lnk.TargetPath))"
+$open = (Get-ItemProperty "HKCU:\Software\Classes\Flaux.Program\shell\open\command" -ErrorAction SilentlyContinue)."(default)"
+Check ($open -like "*Flaux Studio.exe*") "double-clicking a .flx file opens Flaux Studio.exe"
+TryStudio "$app\Flaux Studio.exe" "Flaux Studio.exe"
+
+# 8. the zip version (FlauxStudio-windows.zip) works without installing anything
+$zip = "$root\dist\FlauxStudio-windows.zip"
+if (Test-Path $zip) {
+    $portable = "$env:TEMP\flaux-zip-test"
+    Remove-Item -Recurse -Force $portable -ErrorAction SilentlyContinue
+    & 7z x $zip "-o$portable" -y | Out-Null
+    Check (Test-Path "$portable\Flaux Studio\Flaux Studio.exe") "FlauxStudio-windows.zip has Flaux Studio\Flaux Studio.exe"
+    TryStudio "$portable\Flaux Studio\Flaux Studio.exe" "Flaux Studio.exe from the zip"
+}
+
+# 9. uninstall cleans up
 $un = Start-Process "$app\unins000.exe" -Wait -PassThru -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
 Check ($un.ExitCode -eq 0) "uninstaller finished"
 Start-Sleep -Seconds 2

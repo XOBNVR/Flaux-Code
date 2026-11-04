@@ -510,6 +510,7 @@ static void fx_g_window(int64_t w, int64_t h, fx_text title, int line) {
     fx_win = SDL_CreateWindow(name, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                               (int)w, (int)h, SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!fx_win) fx_fail(line, NULL, "Flaux couldn't open a window: %s", SDL_GetError());
+    fx_has_window = true;
     SDL_Surface *icon = SDL_CreateRGBSurfaceWithFormatFrom((void *)fx_icon, FX_ICON_SIZE, FX_ICON_SIZE, 32,
                                                            FX_ICON_SIZE * 4, SDL_PIXELFORMAT_RGBA32);
     if (icon) { SDL_SetWindowIcon(fx_win, icon); SDL_FreeSurface(icon); }

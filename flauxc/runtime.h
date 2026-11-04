@@ -37,6 +37,62 @@ static const char *const *fx_lines = 0;
 static int fx_nlines = 0;
 static bool fx_mid_line = false;   /* the last thing said was with say.same, so its line isn't finished */
 static bool fx_out_tty = false;    /* the output goes to a terminal (set by fx_init) */
+static bool fx_has_window = false; /* window(...) has opened a window */
+
+#ifdef _WIN32
+/* Show letters like é and emoji properly, and allow colours. */
+static void fx_setup_console(void) {
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    for (DWORD which = STD_OUTPUT_HANDLE; ; which = STD_ERROR_HANDLE) {
+        HANDLE h = GetStdHandle(which);
+        DWORD mode;
+        if (h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode))
+            SetConsoleMode(h, mode | 0x0004 /* ENABLE_VIRTUAL_TERMINAL_PROCESSING */);
+        if (which == STD_ERROR_HANDLE) break;
+    }
+}
+
+/* A game made with Export is a Windows program, so no black console window
+ * opens next to it. If it says or asks something, or has a problem to
+ * explain, a console window opens then (or it uses the terminal it was
+ * started from). */
+static bool fx_console_ready = false;
+static void fx_console(void) {
+    if (fx_console_ready) return;
+    fx_console_ready = true;
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (h != NULL && h != INVALID_HANDLE_VALUE && GetFileType(h) != FILE_TYPE_UNKNOWN)
+        return;   /* it already has somewhere to write: a console, Flaux Studio or a file */
+    if (!AttachConsole(ATTACH_PARENT_PROCESS) && !AllocConsole()) return;
+    if (!freopen("CONOUT$", "w", stdout) || !freopen("CONOUT$", "w", stderr) || !freopen("CONIN$", "r", stdin))
+        return;
+    fx_setup_console();
+    fx_out_tty = true;
+}
+#define FX_CONSOLE() fx_console()
+
+/* A console window that was opened just for this program (it was
+ * double-clicked) closes as soon as the program ends, so keep it until Enter
+ * is pressed, to give time to read it. Started from a terminal, a batch file
+ * or Flaux Studio, nothing waits. */
+static bool fx_paused = false;
+static void fx_pause(void) {
+    if (fx_paused) return;
+    fx_paused = true;
+    DWORD ids[4], mode;
+    if (GetConsoleProcessList(ids, 4) != 1) return;
+    if (!GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) ||
+        !GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode)) return;
+    fputs("\nPress Enter to close this window.", stdout);
+    fflush(stdout);
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+    int c;
+    while ((c = getchar()) != EOF && c != '\n') {}
+}
+#else
+#define FX_CONSOLE() ((void)0)
+#endif
 
 /* ---------------------------------------------------------- errors */
 
@@ -44,6 +100,7 @@ static bool fx_out_tty = false;    /* the output goes to a terminal (set by fx_i
  * it. `fix` is plain text (lines starting with spaces are shown as code). */
 __attribute__((noinline, cold, noreturn, format(printf, 3, 4)))
 static void fx_fail(int line, const char *fix, const char *fmt, ...) {
+    FX_CONSOLE();
     fflush(stdout);
     fx_mid_line = false;   /* the problem message starts on a new line */
     bool color = fx_isatty(2);
@@ -62,6 +119,10 @@ static void fx_fail(int line, const char *fix, const char *fmt, ...) {
     va_end(ap);
     fputc('\n', stderr);
     if (fix && *fix) fprintf(stderr, "\n%sHow to fix it:%s\n  %s\n", bold, off, fix);
+#ifdef _WIN32
+    fflush(stderr);
+    fx_pause();
+#endif
     exit(1);
 }
 
@@ -221,10 +282,10 @@ static fx_text fx_text_lower(fx_text t) {
 
 /* ------------------------------------------------------------- say */
 
-static void fx_say_text(fx_text t) { fwrite(t.p, 1, (size_t)t.n, stdout); putchar('\n'); fx_mid_line = false; }
-static void fx_say_int(int64_t v) { printf("%" PRId64 "\n", v); fx_mid_line = false; }
-static void fx_say_bool(bool b) { puts(b ? "true" : "false"); fx_mid_line = false; }
-static void fx_say_float(double v) { char buf[64]; fx_fmt_float(buf, sizeof buf, v); puts(buf); fx_mid_line = false; }
+static void fx_say_text(fx_text t) { FX_CONSOLE(); fwrite(t.p, 1, (size_t)t.n, stdout); putchar('\n'); fx_mid_line = false; }
+static void fx_say_int(int64_t v) { FX_CONSOLE(); printf("%" PRId64 "\n", v); fx_mid_line = false; }
+static void fx_say_bool(bool b) { FX_CONSOLE(); puts(b ? "true" : "false"); fx_mid_line = false; }
+static void fx_say_float(double v) { FX_CONSOLE(); char buf[64]; fx_fmt_float(buf, sizeof buf, v); puts(buf); fx_mid_line = false; }
 
 /* `say.same`: the same, but the line isn't finished, so the next thing said
  * goes right after it. A terminal only shows a line once it's finished, so
@@ -234,18 +295,22 @@ static void fx_said_same(bool mid) {
     if (fx_out_tty) fflush(stdout);
 }
 static void fx_say_same_text(fx_text t) {
+    FX_CONSOLE();
     fwrite(t.p, 1, (size_t)t.n, stdout);
     fx_said_same(t.n ? t.p[t.n - 1] != '\n' : fx_mid_line);
 }
-static void fx_say_same_int(int64_t v) { printf("%" PRId64, v); fx_said_same(true); }
-static void fx_say_same_bool(bool b) { fputs(b ? "true" : "false", stdout); fx_said_same(true); }
-static void fx_say_same_float(double v) { char buf[64]; fx_fmt_float(buf, sizeof buf, v); fputs(buf, stdout); fx_said_same(true); }
+static void fx_say_same_int(int64_t v) { FX_CONSOLE(); printf("%" PRId64, v); fx_said_same(true); }
+static void fx_say_same_bool(bool b) { FX_CONSOLE(); fputs(b ? "true" : "false", stdout); fx_said_same(true); }
+static void fx_say_same_float(double v) { FX_CONSOLE(); char buf[64]; fx_fmt_float(buf, sizeof buf, v); fputs(buf, stdout); fx_said_same(true); }
 
 /* when the program ends halfway through a line, finish it (so a terminal's
  * prompt doesn't end up on the same line) */
 static void fx_finish_line(void) {
     if (fx_mid_line) { putchar('\n'); fx_mid_line = false; }
     fflush(stdout);
+#ifdef _WIN32
+    if (!fx_has_window) fx_pause();   /* a game's own window was what you looked at */
+#endif
 }
 
 /* ------------------------------------------------------------ maths */
@@ -358,6 +423,7 @@ static fx_text fx_rgb_text(double r, double g, double b) {
 /* --------------------------------------------------- input and time */
 
 static fx_text fx_ask(fx_text prompt) {
+    FX_CONSOLE();
     if (prompt.n) {
         fwrite(prompt.p, 1, (size_t)prompt.n, stdout);
         if (prompt.p[prompt.n - 1] != ' ') putchar(' ');
@@ -496,8 +562,22 @@ static LONG CALLBACK fx_crash(PEXCEPTION_POINTERS info) {
     DWORD code = info->ExceptionRecord->ExceptionCode;
     if (code != EXCEPTION_STACK_OVERFLOW && code != EXCEPTION_ACCESS_VIOLATION)
         return EXCEPTION_CONTINUE_SEARCH;
-    DWORD written;
-    WriteFile(GetStdHandle(STD_ERROR_HANDLE), fx_crash_msg, (DWORD)(sizeof fx_crash_msg - 1), &written, NULL);
+    DWORD n, ids[4];
+    HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+    if (err == NULL || err == INVALID_HANDLE_VALUE || GetFileType(err) == FILE_TYPE_UNKNOWN) {
+        /* an exported game with no console window yet */
+        if (!AttachConsole(ATTACH_PARENT_PROCESS)) AllocConsole();
+        err = CreateFileA("CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    }
+    WriteFile(err, fx_crash_msg, (DWORD)(sizeof fx_crash_msg - 1), &n, NULL);
+    if (GetConsoleProcessList(ids, 4) == 1) {   /* a window opened just for this program: wait for Enter */
+        static const char wait_msg[] = "\nPress Enter to close this window.";
+        WriteFile(err, wait_msg, (DWORD)(sizeof wait_msg - 1), &n, NULL);
+        HANDLE in = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        char buf[64];
+        FlushConsoleInputBuffer(in);
+        ReadFile(in, buf, sizeof buf, &n, NULL);
+    }
     ExitProcess(1);
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -530,16 +610,7 @@ static void fx_init(const char *file, const char *const *lines, int nlines) {
     fx_out_tty = fx_isatty(1);
     atexit(fx_finish_line);
 #ifdef _WIN32
-    /* show letters like é and emoji properly, and allow colours */
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
-    for (DWORD which = STD_OUTPUT_HANDLE; ; which = STD_ERROR_HANDLE) {
-        HANDLE h = GetStdHandle(which);
-        DWORD mode;
-        if (h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode))
-            SetConsoleMode(h, mode | 0x0004 /* ENABLE_VIRTUAL_TERMINAL_PROCESSING */);
-        if (which == STD_ERROR_HANDLE) break;
-    }
+    fx_setup_console();
     ULONG guarantee = 1 << 16; /* room to print the message if the stack runs out */
     SetThreadStackGuarantee(&guarantee);
     AddVectoredExceptionHandler(1, fx_crash);

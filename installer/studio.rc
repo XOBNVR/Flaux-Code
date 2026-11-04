@@ -1,0 +1,24 @@
+/* Resources for Flaux Studio.exe: its icon, its manifest and its name.
+   windres -I assets -I installer -i installer/studio.rc ... */
+1 ICON "flaux.ico"
+1 24 "studio.manifest"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Flaux"
+      VALUE "FileDescription", "Flaux Studio"
+      VALUE "ProductName", "Flaux Studio"
+      VALUE "OriginalFilename", "Flaux Studio.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

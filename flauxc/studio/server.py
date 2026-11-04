@@ -17,6 +17,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -314,64 +315,68 @@ class Studio:
     # ------------------------------------------------------------ export
 
     def export(self, content, path=None, show=True):
-        """A .zip that runs the program without Flaux Studio, saved in the
-        programs folder: the built program (plus SDL2.dll on Windows for
-        games), the pictures it names, and a file that starts it
-        ("Play <name>.bat" on Windows, play.sh elsewhere)."""
+        """A .zip to give to other people, saved in the programs folder. On
+        Windows it holds <name>.exe, a real Windows program you double-click
+        (games open just their window; see cli.build_to_share), plus SDL2.dll
+        for games and the pictures the program names. Elsewhere the program
+        and play.sh, which starts it."""
         name = os.path.basename(path) if path else "untitled.flx"
         try:
             c_code = compile_source(content, name, self.program_dir(path))
         except FlauxError as e:
             return {"ok": False, "error": e.to_dict(name, content)}
-        try:
-            exe = cli.cached_build(c_code)
-        except cli.CliError as e:
-            return {"ok": False, "error": {"message": str(e), "line": None, "text": str(e)}}
         base = re.sub(r"[^A-Za-z0-9 _-]+", "", os.path.splitext(name)[0]).strip()
         base = "game" if not base or base == "untitled" else base
         graphics = "FX_USES_GRAPHICS" in c_code
-        target = os.path.join(self.home, base + ".zip")
-        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
-            def add(arc, data=None, file=None, executable=False):
-                info = zipfile.ZipInfo(f"{base}/{arc}", time.localtime()[:6])
-                info.compress_type = zipfile.ZIP_DEFLATED
-                info.create_system = 3                          # Unix, so the file mode counts
-                info.external_attr = (0o100755 if executable else 0o100644) << 16
-                if file:
-                    with open(file, "rb") as fh:
-                        data = fh.read()
-                z.writestr(info, data)
-            program = base + cli.EXE
-            add(program, file=exe, executable=True)
-            if cli.WINDOWS and graphics:
-                dll = os.path.join(cli.BUNDLED_SDL, "bin", "SDL2.dll")
-                if os.path.isfile(dll):
-                    add("SDL2.dll", file=dll)
-            pictures = set(re.findall(r'"([^"\n]+\.(?:png|jpe?g|bmp|gif))"', content, re.I))
-            for pic in sorted(pictures):
-                for folder in (self.program_dir(path), os.getcwd()):
-                    file = os.path.join(folder, pic)
-                    if os.path.isfile(file) and not os.path.isabs(pic) and ".." not in pic.replace("\\", "/").split("/"):
-                        add(pic.replace("\\", "/"), file=file)
-                        break
-            if cli.WINDOWS:
-                # a game keeps its window open; a program that only says things needs `pause` to be read
-                wait = "if errorlevel 1 pause" if graphics else "pause"
-                add(f"Play {base}.bat", f'@echo off\r\ncd /d "%~dp0"\r\n"{program}"\r\n{wait}\r\n')
-            else:
-                add("play.sh", f'#!/bin/sh\ncd "$(dirname "$0")"\n./"{program}"\n', executable=True)
-            how = f'double-click "Play {base}.bat"' if cli.WINDOWS else "run play.sh"
-            add("README.txt", (f"{base}\n{'=' * len(base)}\n\nMade with Flaux (https://github.com/XOBNVR/Flaux-Code).\n\n"
-                               f"To play, {how}.\n" +
-                               ("Keep SDL2.dll next to the program.\n" if cli.WINDOWS and graphics else "") +
-                               ("F11 (or Alt+Enter) switches fullscreen.\n" if graphics else "")
-                               ).replace("\n", "\r\n" if cli.WINDOWS else "\n"))
+        program = base + cli.EXE
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = os.path.join(tmp, program)
+            try:
+                cli.build_to_share(c_code, exe, base)
+            except cli.CliError as e:
+                return {"ok": False, "error": {"message": str(e), "line": None, "text": str(e)}}
+            target = os.path.join(self.home, base + ".zip")
+            with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
+                def add(arc, data=None, file=None, executable=False):
+                    info = zipfile.ZipInfo(f"{base}/{arc}", time.localtime()[:6])
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    info.create_system = 3                          # Unix, so the file mode counts
+                    info.external_attr = (0o100755 if executable else 0o100644) << 16
+                    if file:
+                        with open(file, "rb") as fh:
+                            data = fh.read()
+                    z.writestr(info, data)
+                add(program, file=exe, executable=True)
+                if cli.WINDOWS and graphics:
+                    dll = os.path.join(cli.BUNDLED_SDL, "bin", "SDL2.dll")
+                    if not os.path.isfile(dll):
+                        dll = os.path.join(tmp, "SDL2.dll")        # copied there by the build
+                    if os.path.isfile(dll):
+                        add("SDL2.dll", file=dll)
+                pictures = set(re.findall(r'"([^"\n]+\.(?:png|jpe?g|bmp|gif))"', content, re.I))
+                for pic in sorted(pictures):
+                    for folder in (self.program_dir(path), os.getcwd()):
+                        file = os.path.join(folder, pic)
+                        if os.path.isfile(file) and not os.path.isabs(pic) and ".." not in pic.replace("\\", "/").split("/"):
+                            add(pic.replace("\\", "/"), file=file)
+                            break
+                if not cli.WINDOWS:
+                    add("play.sh", f'#!/bin/sh\ncd "$(dirname "$0")"\n./"{program}"\n', executable=True)
+                if cli.WINDOWS:
+                    how = (f"To play, double-click {program}. It's a real Windows program, so nothing else "
+                           "needs to be installed.\n" + ("Keep SDL2.dll (and any pictures) next to it.\n" if graphics else ""))
+                else:
+                    how = "To play, run play.sh.\n" + ("Games need the SDL2 library (on Ubuntu: sudo apt install "
+                                                        "libsdl2-2.0-0).\n" if graphics else "")
+                add("README.txt", (f"{base}\n{'=' * len(base)}\n\nMade with Flaux (https://github.com/XOBNVR/Flaux-Code).\n\n"
+                                   + how + ("F11 (or Alt+Enter) switches fullscreen.\n" if graphics else "")
+                                   ).replace("\n", "\r\n" if cli.WINDOWS else "\n"))
         if show:
             try:
                 self.show_folder()
             except OSError:
                 pass
-        return {"ok": True, "name": base + ".zip", "file": target, "native": True}
+        return {"ok": True, "name": base + ".zip", "file": target, "native": True, "program": program}
 
     def blocks(self, content):
         """The program as blocks, for the block editor."""
@@ -528,11 +533,41 @@ def open_window(url):
         webbrowser.open(url)
 
 
-def main(open_file=None, port=0, show=True, quiet=False, keep_running=False):
+# Flaux Studio.exe (installer/studio.cpp) shows the Studio in its own window.
+# It starts `flaux studio --host`, which prints this line with the page's
+# address, and keeps it running until the window closes its input.
+HOST_MARKER = "FLAUX-STUDIO-URL"
+HOST_PORT = 47115   # the same address each time, so the page's settings are kept
+
+
+def main(open_file=None, port=0, show=True, quiet=False, keep_running=False, host=False):
     studio = Studio(open_file)
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(studio))
+    handler = make_handler(studio)
+    server = None
+    if host and not port:
+        try:
+            server = ThreadingHTTPServer(("127.0.0.1", HOST_PORT), handler)
+        except OSError:   # in use (another Studio window): any free port
+            server = None
+    if server is None:
+        server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     url = f"http://127.0.0.1:{server.server_address[1]}/?t={studio.token}"
-    if not quiet and sys.stdout:
+    if host:
+        print(f"{HOST_MARKER} {url}", flush=True)
+
+        def until_window_closes():
+            # Flaux Studio.exe keeps our input open while its window is open
+            try:
+                while sys.stdin and sys.stdin.buffer.read(4096):
+                    pass
+            except (OSError, ValueError):
+                pass
+            studio.stop_all()
+            server.shutdown()
+
+        threading.Thread(target=until_window_closes, daemon=True).start()
+        show, keep_running = False, True
+    elif not quiet and sys.stdout:
         print(f"Flaux Studio is running at {url}", flush=True)
         print("(Close the Studio window to stop it.)", flush=True)
     if show:
