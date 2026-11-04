@@ -155,6 +155,15 @@ def tokens(line):
     return out
 
 
+def Progress_answers(path):
+    """(For the self-test) the answers saved in the course's progress file."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh).get("answers", {})
+    except (OSError, ValueError):
+        return {}
+
+
 def lesson_name(name):
     m = re.match(r"^(\d+)_(.*)\.flx$", name)
     return f"Lesson {int(m.group(1))}: {m.group(2).replace('_', ' ')}" if m else name
@@ -179,6 +188,9 @@ class StudioApp:
         self.loading = False
         self.mode = "code"         # or "blocks"
         self.blocks_view = None
+        self.course_window = None
+        self.challenge = None      # the course challenge being done in the editor (a unit's id)
+        self.run_said = ""         # what the running program has said (to check a challenge)
 
         root.title("Flaux Studio")
         root.minsize(760, 480)
@@ -268,6 +280,8 @@ class StudioApp:
         self.stop_button.state(["disabled"])
         ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=8)
         button("⬇  Export", self.export)
+        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=8)
+        button("★  Course", self.open_course)
         for text, cmd in (("A+", lambda: self.zoom(1)), ("A−", lambda: self.zoom(-1))):
             ttk.Button(bar, text=text, width=4, command=cmd).pack(side="right", padx=2)
         self.night_button = ttk.Button(bar, text="Night", width=7, command=self.toggle_night)
@@ -430,6 +444,8 @@ class StudioApp:
         self.night_button.configure(text="Day" if self.night else "Night")
         if self.blocks_view:
             self.blocks_view.set_theme(t)
+        if getattr(self, "course_window", None):
+            self.course_window.apply_theme()
         self.draw_gutter()
 
     def bind_keys(self):
@@ -688,6 +704,7 @@ class StudioApp:
         self.console.delete("1.0", "end")
         self.console.configure(state="disabled")
         self.code.tag_remove("run_line", "1.0", "end")
+        self.run_said = ""
         content, path = self.get_code(), self.path
         self.status("Getting your program ready...")
         self.run_button.state(["disabled"])
@@ -721,6 +738,8 @@ class StudioApp:
             self.say("\n(... some output was skipped: the program said things faster than anyone can read)\n", "note")
         for stream, text in r["chunks"]:
             self.say(text, stream)
+            if stream == "out":
+                self.run_said += text
         self.run_from = r.get("start", self.run_from) + len(r["chunks"])
         if r["done"]:
             self.finished(r["exit"])
@@ -732,6 +751,10 @@ class StudioApp:
         self.stop_button.state(["disabled"])
         self.answer.state(["disabled"])
         self.send_button.state(["disabled"])
+        if self.challenge:
+            self.check_challenge(code)
+            if code == 0:
+                return
         if code == 0:
             self.say("\n— Finished —\n", "note")
             self.status("Finished.", "good")
@@ -744,6 +767,36 @@ class StudioApp:
             self.code.see(f"{line}.0")
         self.say("\n— Stopped —\n", "note")
         self.status("The program stopped." + (" The line it stopped on is lit up." if m else ""), "bad")
+
+    def check_challenge(self, code):
+        """The program for a course challenge finished: did it do it?"""
+        from .course_window import check_challenge, load_course
+        unit = next((u for u in load_course()["units"] if u["id"] == self.challenge), None)
+        if not unit:
+            return
+        ok = check_challenge(unit["challenge"], self.run_said, code)
+        if ok:
+            self.say(f"\n★ Challenge done: {unit['title']}! ★\n", "good")
+            self.status(f"Challenge done: {unit['title']}!", "good")
+            self.challenge = None
+        elif code == 0:
+            self.say("\n— Finished —\n", "note")
+            self.say("Not quite yet: for the challenge it should say\n" + unit["challenge"]["expected"] + "\n", "note")
+            self.status("Not quite yet. Compare what it said with what the challenge wants.", "bad")
+        if self.course_window or ok:
+            from .course_window import Progress
+            if self.course_window:
+                self.course_window.challenge_finished(unit["id"], ok)
+            elif ok:
+                Progress(os.path.join(os.path.dirname(settings_path()), "course-progress.json")).challenge_done(unit["id"])
+
+    def open_course(self):
+        if self.course_window:
+            self.course_window.top.deiconify()
+            self.course_window.top.lift()
+            return
+        from .course_window import CourseWindow
+        self.course_window = CourseWindow(self)
 
     def stop(self):
         if self.run_id:
@@ -777,6 +830,7 @@ class StudioApp:
         if not self.keep_changes():
             return
         self.path, self.example, self.dirty = None, False, False
+        self.challenge = None
         self.set_code("")
         self.reload_blocks()
         self.update_title()
@@ -800,6 +854,7 @@ class StudioApp:
             messagebox.showerror("Flaux Studio", f"Flaux Studio couldn't open that file.\n\n{e}", parent=self.root)
             return
         self.path, self.example, self.dirty = info["path"], info["example"], False
+        self.challenge = None
         self.set_code(info["content"])
         self.reload_blocks()
         self.code.mark_set("insert", "1.0")
@@ -922,18 +977,26 @@ class StudioApp:
         tree.delete(*tree.get_children())
         self.learn_items = {}
         info = self.studio.state()
-        sections = [("Lessons", [(lesson_name(f["name"]), f["path"]) for f in info["lessons"]]),
+        sections = [("The Flaux course", [("Lessons, quizzes (1000+ questions) and challenges", ("course", None))]),
+                    ("Lessons", [(lesson_name(f["name"]), f["path"]) for f in info["lessons"]]),
                     ("Games", [(f["name"][:-4].replace("_", " "), f["path"]) for f in info["games"]]),
                     ("Examples", [(f["name"][:-4].replace("_", " "), f["path"]) for f in info["examples"]]),
                     ("Your programs", [(f["name"], f["path"]) for f in info["mine"]]),
                     ("Code you can add", [(title, ("snippet", code)) for title, code in SNIPPETS])]
         for title, items in sections:
-            head = tree.insert("", "end", text=title, open=title in ("Lessons", "Code you can add"))
+            head = tree.insert("", "end", text=title, open=title in ("The Flaux course", "Lessons", "Code you can add"))
             for label, what in items:
                 self.learn_items[tree.insert(head, "end", text="   " + label)] = what
 
     def learn_selected(self):
         what = self.learn_items.get((self.learn_tree.selection() or [None])[0])
+        if isinstance(what, tuple) and what[0] == "course":
+            self.learn_button.configure(text="Open the course")
+            self.learn_hint.configure(text="18 units, each with a lesson, a quiz and a challenge.")
+            self.snippet_view.configure(state="normal")
+            self.snippet_view.delete("1.0", "end")
+            self.snippet_view.configure(state="disabled")
+            return
         snippet = isinstance(what, tuple)
         self.learn_button.configure(text="Add to my program" if snippet else "Open")
         self.learn_hint.configure(text="It goes where your cursor is." if snippet
@@ -953,7 +1016,9 @@ class StudioApp:
 
     def learn_go(self):
         what = self.learn_items.get((self.learn_tree.selection() or [None])[0])
-        if isinstance(what, tuple):
+        if isinstance(what, tuple) and what[0] == "course":
+            self.open_course()
+        elif isinstance(what, tuple):
             self.add_snippet(what[1])
         elif isinstance(what, str):
             self.open_path(what)
@@ -1060,6 +1125,37 @@ class StudioApp:
             self.toggle_blocks()
             self.toggle_night()
             report["night"] = self.night
+            # the Course: a quiz question answered right and one wrong, then a challenge done in the editor
+            self.dirty = False
+            self.open_course()
+            course = self.course_window
+            self.root.update()
+            report["course_units"] = len(course.units)
+            report["course_questions"] = len(course.course["questions"])
+            course.start_quiz()
+            self.root.update()
+            first = course.quiz[0]
+            course.answer_buttons[first["answer"]].invoke()
+            report["quiz_right"] = str(course.feedback.cget("text"))
+            course.next_question()
+            second = course.quiz[1]
+            course.choose((second["answer"] + 1) % len(second["choices"]))
+            report["quiz_wrong"] = str(course.feedback.cget("text"))
+            report["quiz_saved"] = Progress_answers(course.progress.path)
+            course.tree.selection_set("say")
+            course.show_unit("say")
+            course.start_challenge()
+            self.set_code(self.get_code() + course.unit["challenge"]["solution"])
+            report["challenge_code"] = self.get_code()
+            self.run()
+            wait_for(lambda: self.run_id is None and "Challenge done" in self.console.get("1.0", "end")
+                     or "Stopped" in self.console.get("1.0", "end"), challenged, 60)
+
+        def challenged():
+            course = self.course_window
+            report["challenge_output"] = self.console.get("1.0", "end-1c")
+            report["challenge_done"] = "say" in course.progress.challenges
+            report["unit_label"] = course.tree.item("say", "text")
             with open(out, "w", encoding="utf-8") as fh:
                 json.dump(report, fh)
             self.dirty = False         # (the test's changes aren't kept: no "Save the changes?")
@@ -1068,6 +1164,8 @@ class StudioApp:
         typed()
 
     def close(self):
+        if self.course_window:
+            self.course_window.close()
         if not self.keep_changes():
             return
         self.save_settings()

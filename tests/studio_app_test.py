@@ -63,6 +63,15 @@ def main():
          f"a block dragged out of the menus with the mouse snaps under the last one "
          f"({got.get('blocks_dragged', '')[-40:]!r})"),
         (got.get("night") is True, "Night mode"),
+        (got.get("course_units") == 18 and got.get("course_questions", 0) >= 1000,
+         f"the Course opens ({got.get('course_units')} units, {got.get('course_questions')} questions)"),
+        (got.get("quiz_right", "").startswith("✓") and got.get("quiz_wrong", "").startswith("✗"),
+         f"a quiz question answered right, and one wrong ({got.get('quiz_right')!r}, {got.get('quiz_wrong')!r})"),
+        (sorted(got.get("quiz_saved", {}).values()) == [0, 1], f"the answers are saved ({got.get('quiz_saved')})"),
+        (got.get("challenge_done") is True and "Challenge done" in got.get("challenge_output", ""),
+         f"a challenge done in the editor ({got.get('challenge_output', '')[-80:]!r})"),
+        ("1/" in got.get("unit_label", "") or "0/" in got.get("unit_label", ""),
+         f"the unit shows how far you've got ({got.get('unit_label')!r})"),
     ]
     for ok, what in checks:
         print(("OK    " if ok else "FAIL  ") + what)
