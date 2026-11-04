@@ -315,6 +315,14 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
     }
     return files;
   };
+  // press Export and wait for the zip (if it doesn't come, say what the Studio said instead)
+  const exportZip = async () => {
+    const [d] = await Promise.all([page.waitForEvent("download", { timeout: 120000 }).catch(async () => {
+      throw new Error("Export gave no zip. The Studio said: " + await page.textContent("#status") + " | " +
+                      (await page.textContent("#console")).slice(-600));
+    }), page.click("#btn-export")]);
+    return [d];
+  };
   const subsystem = (exe) => exe.readUInt16LE(exe.readUInt32LE(0x3C) + 0x5C);   // 2: a window only, 3: a console
   const hasWine = (() => { try { execFileSync("wine", ["--version"], { stdio: "ignore" }); return true; } catch (e) { return false; } })();
   const runExported = (files, base, extraEnv) => {      // unzip into a folder and run <base>.exe with Wine
@@ -337,7 +345,7 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
     const row = h > 0 ? h - 1 - y : y, i = off + (row * w + x) * 4;
     return "#" + [bmp[i + 2], bmp[i + 1], bmp[i]].map((v) => v.toString(16).padStart(2, "0")).join("");
   };
-  const [download] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
+  const [download] = await exportZip();
   const zip = fs.readFileSync(await download.path());
   const base = download.suggestedFilename().replace(/\.zip$/, "");    // the program's name (web_test, saved above)
   const inZip = unzip(zip);
@@ -356,7 +364,7 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
 
   // a program that says things: a console program
   await setCode('say.same "hi from"\nsay " the exe"\nsay 6 * 7\n');
-  const [textZip] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
+  const [textZip] = await exportZip();
   const textFiles = unzip(fs.readFileSync(await textZip.path()));
   const textBase = textZip.suggestedFilename().replace(/\.zip$/, ""), textExe = textFiles[`${textBase}/${textBase}.exe`];
   check(!!textExe && subsystem(textExe) === 3 && !(`${textBase}/SDL2.dll` in textFiles),
@@ -509,7 +517,7 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
 
   // an exported 3D game: the 3D engine (gl.h) compiles too, and its model goes in the zip
   await setCode('window(300, 200)\nsky("black")\ncamera(0, 1, 4, 0, 0, 0)\nmodel("house.obj", 0, 0, 0, 2)\nshow()\n');
-  const [zip3d] = await Promise.all([page.waitForEvent("download"), page.click("#btn-export")]);
+  const [zip3d] = await exportZip();
   const files3d = unzip(fs.readFileSync(await zip3d.path()));
   const base3d = zip3d.suggestedFilename().replace(/\.zip$/, "");
   check([`${base3d}/${base3d}.exe`, `${base3d}/SDL2.dll`, `${base3d}/house.obj`, `${base3d}/house.mtl`].every((n) => n in files3d),
