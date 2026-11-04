@@ -26,6 +26,8 @@ jobs:
         run: python3 tests/run_tests.py
       - name: Test Flaux Studio, the app (a real window, on a pretend screen)
         run: python3 tests/studio_app_test.py
+      - name: Check every course question's answer (runs each program)
+        run: python3 -m flauxc.studio.make_course --verify
       - name: Install a browser for the block editor test
         run: |
           npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright

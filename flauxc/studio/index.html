@@ -136,6 +136,7 @@ main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr
 #console .err { color: var(--console-err); }
 #console .in { color: var(--accent); font-weight: 700; }
 #console .note { color: var(--muted); font-family: var(--font); font-style: italic; }
+#console .good { color: var(--ok); font-weight: 700; font-family: var(--font); }
 #console .hello { color: var(--muted); font-family: var(--font); white-space: normal; }
 #input-row { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); background: var(--panel); }
 #input-row input { flex: 1; font: inherit; font-size: 16px; padding: 9px 12px; border: 2px solid var(--accent-2);
@@ -198,6 +199,53 @@ html.web .native-only { display: none !important; }
 #game-screen.fake-full #game-exit { display: inline-block; }
 a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
             padding: 7px 12px; white-space: nowrap; align-items: center; }
+/* ------------------------------------------------------------- course */
+#course-dialog { width: min(1120px, 96vw); height: min(780px, 92vh); }
+#course-dialog[open] { display: grid; grid-template-columns: 290px 1fr; }
+.c-side { border-right: 1px solid var(--line); background: var(--bg); padding: 16px; display: flex;
+          flex-direction: column; gap: 8px; min-height: 0; }
+.c-side h2 { margin: 0; font-size: 18px; }
+.c-total { color: var(--muted); font-size: 13.5px; }
+.c-units { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+.c-units button { text-align: left; border: 0; background: transparent; padding: 7px 10px; display: flex; gap: 8px;
+                  border-radius: 8px; }
+.c-units button.active { background: var(--panel); box-shadow: 0 1px 4px var(--shadow); font-weight: 600; }
+.c-units .n { color: var(--muted); margin-left: auto; font-weight: 400; font-size: 13px; }
+.c-units .tick { width: 1em; color: var(--ok); }
+.c-main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.c-head { padding: 16px 20px 0; display: flex; align-items: flex-start; gap: 12px; }
+.c-head h2 { margin: 0; font-size: 20px; }
+.c-goal { color: var(--muted); margin: 2px 0 10px; }
+.c-close { margin-left: auto; }
+.c-tabs { display: flex; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.c-tabs button { border: 0; border-radius: 8px 8px 0 0; background: transparent; padding: 9px 16px; font-weight: 600;
+                 color: var(--muted); }
+.c-tabs button.active { background: var(--bg); color: var(--text); }
+.c-body { flex: 1; overflow: auto; padding: 16px 22px; background: var(--panel); min-height: 0; }
+.c-body h3 { margin: 18px 0 6px; font-size: 16px; }
+.c-body h3:first-child { margin-top: 0; }
+.c-body p { margin: 0 0 8px; line-height: 1.5; }
+.c-body code { font-family: var(--mono); font-size: .92em; color: var(--accent); }
+.c-body pre, .q-code { margin: 6px 0 12px; background: var(--ed-bg); color: var(--ed-text); border-radius: 10px;
+                       padding: 10px 14px; font-family: var(--mono); font-size: 14.5px; overflow: auto; }
+.c-foot { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--bg); }
+.c-foot .spacer { flex: 1; }
+.c-big { font-size: 18px; font-weight: 600; margin: 4px 0 10px; }
+.c-muted { color: var(--muted); font-size: 13.5px; }
+.answers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+.answers button { text-align: left; padding: 10px 14px; white-space: pre-wrap; border-radius: 10px; min-height: 44px; }
+.answers.mono button { font-family: var(--mono); font-size: 14.5px; }
+.answers button.right { background: var(--ok); border-color: var(--ok); color: #fff; }
+.answers button.wrong { background: var(--error); border-color: var(--error); color: #fff; }
+.answers button:disabled { cursor: default; }
+.c-feedback { font-weight: 700; margin-top: 4px; }
+.c-feedback.good { color: var(--ok); } .c-feedback.bad { color: var(--error); }
+.run.c-go { background: var(--run); color: #fff; border-color: var(--run); font-weight: 600; }
+@media (max-width: 760px) {
+  #course-dialog[open] { grid-template-columns: 1fr; grid-template-rows: 30% 1fr; }
+  .c-side { border-right: 0; border-bottom: 1px solid var(--line); }
+  .answers { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
@@ -207,6 +255,7 @@ a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--l
   <button id="btn-open" title="Open a program (Ctrl+O)">Open</button>
   <button id="btn-save" title="Save (Ctrl+S)">Save</button>
   <button id="btn-export" title="Make a .zip of your program that runs without Flaux Studio (double-click the .exe inside)">&#11015; Export</button>
+  <button id="btn-course" title="The Flaux course: lessons, quizzes (1000+ questions) and challenges">&#9733; Course</button>
   <div class="mode" role="group" aria-label="Write with code or blocks">
     <button id="mode-code" class="active" title="Write your program as text">&#9998; Code</button>
     <button id="mode-blocks" title="Build your program from blocks">&#9638; Blocks</button>
@@ -306,6 +355,28 @@ a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--l
     <input type="file" id="picture-files" accept="image/png,image/jpeg,image/gif,image/bmp,.obj,.mtl" multiple hidden>
     <div class="spacer"></div>
     <button id="open-cancel">Cancel</button>
+  </div>
+</dialog>
+
+<dialog id="course-dialog">
+  <div class="c-side">
+    <h2>The Flaux course</h2>
+    <div class="c-total" id="c-total"></div>
+    <div class="c-units" id="c-units"></div>
+    <button id="c-mixed">&#9733; Quiz me on everything</button>
+  </div>
+  <div class="c-main">
+    <div class="c-head">
+      <div><h2 id="c-title"></h2><div class="c-goal" id="c-goal"></div></div>
+      <button class="c-close" id="c-close" title="Close the course">&#10005;</button>
+    </div>
+    <nav class="c-tabs">
+      <button data-ctab="learn" class="active">Learn</button>
+      <button data-ctab="quiz">Quiz</button>
+      <button data-ctab="challenge">Challenge</button>
+    </nav>
+    <div class="c-body" id="c-body"></div>
+    <div class="c-foot" id="c-foot"></div>
   </div>
 </dialog>
 
@@ -704,7 +775,7 @@ async function run() {
     return;
   }
   showProblem(null);
-  state.run = r.run; state.from = 0; state.errText = ""; state.runtimeLine = null; render();
+  state.run = r.run; state.from = 0; state.errText = ""; state.runtimeLine = null; state.said = ""; render();
   $("btn-run").hidden = true; $("btn-stop").hidden = false;
   $("input-row").hidden = false; $("input").value = "";
   status("Running... (programs that ask questions wait for you to type below)");
@@ -725,6 +796,7 @@ async function poll() {
     const clean = text.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "");
     pieces.push([clean, stream === "err" ? "err" : ""]);
     if (stream === "err") errs += clean;
+    else state.said = (state.said || "") + clean;
   }
   printMany(pieces);
   if (errs && !state.runtimeLine) {
@@ -742,11 +814,12 @@ async function poll() {
 }
 
 function finish(exit) {
-  if (exit === 0) print("\n— Finished —\n", "note");
+  if (state.challenge && exit !== null && Course.finished(exit)) exit = "done";
+  else if (exit === 0) print("\n— Finished —\n", "note");
   else if (exit !== null) print(`\n— Stopped${state.runtimeLine ? " (see the highlighted line)" : ""} —\n`, "note");
   state.run = null;
   $("btn-run").hidden = false; $("btn-stop").hidden = true; $("input-row").hidden = true;
-  status(exit === 0 ? "Finished" : "Stopped", exit === 0 ? "good" : "bad");
+  if (exit !== "done") status(exit === 0 ? "Finished" : "Stopped", exit === 0 ? "good" : "bad");
 }
 
 // Export: a .zip that runs the program without Flaux Studio. The web version
@@ -879,7 +952,7 @@ $("open-folder").addEventListener("click", () => api("/api/folder", {}));
 
 function newFile() {
   if (!confirmLose()) return;
-  state.path = null; state.example = false; state.lastChecked = null;
+  state.path = null; state.example = false; state.lastChecked = null; state.challenge = null;
   setContent('say "Hello!"\n'); setDirty(false);
   if (state.mode === "blocks") showAsBlocks();
   else goToLine(1, 13);
@@ -976,11 +1049,15 @@ window.addEventListener("resize", () => { if (state.mode === "blocks") FlauxBloc
 // ------------------------------------------------------------------ learn
 function buildLearn(info) {
   const panel = $("learn-panel");
-  panel.innerHTML = "<h3>Lessons</h3><div class='list' id='learn-lessons'></div>" +
+  panel.innerHTML = "<h3>The Flaux course</h3><div class='snippet'><div class='snippet-head'>" +
+    "<span>18 units: lessons, quizzes (1000+ questions) and challenges</span>" +
+    "<button id='learn-course'>&#9733; Open the course</button></div></div>" +
+    "<h3>Lessons</h3><div class='list' id='learn-lessons'></div>" +
     "<h3>Games</h3><div class='list' id='learn-games'></div>" +
     "<h3>Code you can add</h3><div id='learn-snippets'></div>";
   fillList("learn-lessons", info.lessons, lessonName);
   fillList("learn-games", info.games);
+  $("learn-course").addEventListener("click", () => Course.open());
   const box = $("learn-snippets");
   for (const [title, snippet] of SNIPPETS) {
     const div = document.createElement("div");
@@ -1009,6 +1086,205 @@ function showTab(name) {
   $("learn-panel").hidden = name !== "learn";
 }
 document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+
+// ----------------------------------------------------------------- course
+// The course (course.json, made by make_course.py): units with a lesson, a quiz
+// and a challenge. What you've done is kept in this browser (localStorage).
+const Course = (() => {
+  const QUIZ = 10;
+  let data = null, unit = null, tab = "learn", quiz = [], at = 0, right = 0, quizUnit = null, chosen = null;
+  let progress = { answers: {}, challenges: [] };
+  try { progress = Object.assign(progress, JSON.parse(localStorage.getItem("flaux-course") || "{}")); } catch (e) {}
+  const keep = () => { try { localStorage.setItem("flaux-course", JSON.stringify(progress)); } catch (e) {} };
+  const byUnit = (id) => data.questions.filter((q) => q.unit === id);
+  const rightIn = (qs) => qs.filter((q) => progress.answers[q.id] === 1).length;
+  const inline = (t) => esc(t).replace(/`([^`]*)`/g, "<code>$1</code>");
+  const codeHTML = (c) => c.split("\n").map((l) => lineHTML(l)).join("\n");
+
+  async function load() {
+    if (!data) {
+      const r = await fetch("course.json");
+      data = await r.json();
+    }
+    return data;
+  }
+  async function open() {
+    try { await load(); } catch (e) { return status("The course didn't load: " + e.message, "bad"); }
+    if (!unit) unit = data.units[0];
+    units(); show(tab);
+    $("course-dialog").showModal();
+  }
+  function units() {
+    const list = $("c-units");
+    list.innerHTML = "";
+    data.units.forEach((u, i) => {
+      const qs = byUnit(u.id), r = rightIn(qs), done = progress.challenges.includes(u.id);
+      const b = document.createElement("button");
+      b.className = u === unit ? "active" : "";
+      b.dataset.unit = u.id;
+      b.innerHTML = `<span class="tick">${r >= 0.8 * qs.length && done ? "\u2713" : ""}</span>` +
+        `<span>${i + 1}. ${esc(u.title)}</span><span class="n">${r}/${qs.length}</span>`;
+      b.addEventListener("click", () => { unit = u; quiz = []; units(); show(tab === "quiz" ? "quiz" : tab); });
+      list.appendChild(b);
+    });
+    const total = rightIn(data.questions), ch = progress.challenges.length;
+    $("c-total").textContent = `${data.units.length} units, ${data.questions.length} questions. ` +
+      `You've got ${total} right and done ${ch} challenge${ch === 1 ? "" : "s"}.`;
+    $("c-title").textContent = `${data.units.indexOf(unit) + 1}. ${unit.title}`;
+    $("c-goal").textContent = unit.goal;
+  }
+  function show(which) {
+    tab = which;
+    document.querySelectorAll(".c-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.ctab === which));
+    if (which === "learn") learn();
+    else if (which === "quiz") { if (quiz.length) question(); else quizStart(); }
+    else challenge();
+    $("c-body").scrollTop = 0;
+  }
+  function foot(...buttons) {
+    const f = $("c-foot");
+    f.innerHTML = "";
+    for (const b of buttons) f.appendChild(b);
+  }
+  function button(text, onClick, cls = "") {
+    const b = document.createElement(text === "|" ? "div" : "button");
+    if (text === "|") { b.className = "spacer"; return b; }
+    b.innerHTML = text; b.className = cls;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  function learn() {
+    $("c-body").innerHTML = unit.pages.map(([h, t, c]) =>
+      `<h3>${esc(h)}</h3><p>${inline(t)}</p><pre>${codeHTML(c)}</pre>`).join("");
+    const parts = [];
+    if (unit.lesson) parts.push(button("Open the lesson program", () => {
+      const f = (state.info && state.info.lessons || []).find((l) => l.name === unit.lesson);
+      if (f && confirmLose()) { $("course-dialog").close(); openFile(f.path); }
+    }));
+    parts.push(button("|"), button("Quiz me &#9654;", () => startQuiz(unit.id), "run c-go"));
+    foot(...parts);
+  }
+
+  function quizStart() {
+    const qs = byUnit(unit.id);
+    $("c-body").innerHTML = `<div class="c-big">${qs.length} questions about ${esc(unit.title.toLowerCase())}.</div>` +
+      `<p>You've got ${rightIn(qs)} right so far. A quiz is ${QUIZ} of them: new ones first, then the ones you got wrong.</p>`;
+    foot(button("Start the quiz &#9654;", () => startQuiz(unit.id), "run c-go"));
+  }
+  function pick(pool) {
+    const shuffle = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    const groups = [pool.filter((q) => !(q.id in progress.answers)), pool.filter((q) => progress.answers[q.id] === 0),
+                    pool.filter((q) => progress.answers[q.id] === 1)];
+    let out = [];
+    for (const g of groups) out = out.concat(shuffle(g).slice(0, QUIZ - out.length));
+    return shuffle(out);
+  }
+  function startQuiz(id) {
+    quizUnit = id;
+    quiz = pick(id ? byUnit(id) : data.questions); at = 0; right = 0;
+    show("quiz");
+  }
+  function question() {
+    const q = quiz[at];
+    chosen = null;
+    const title = data.units.find((u) => u.id === q.unit).title;
+    $("c-body").innerHTML = `<div class="c-muted">Question ${at + 1} of ${quiz.length} &middot; ${esc(title)} &middot; ` +
+      `${right} right so far</div><div class="c-big">${inline(q.q)}</div>` +
+      (q.code ? `<pre class="q-code">${codeHTML(q.code)}</pre>` : "") +
+      `<div class="answers${q.mono ? " mono" : ""}"></div><div class="c-feedback"></div><p class="c-why"></p>`;
+    const box = $("c-body").querySelector(".answers");
+    q.choices.forEach((c, i) => {
+      const b = document.createElement("button");
+      b.textContent = c;
+      b.addEventListener("click", () => choose(i));
+      box.appendChild(b);
+    });
+    foot();
+  }
+  function choose(i) {
+    if (chosen !== null) return;
+    const q = quiz[at];
+    chosen = i;
+    const ok = i === q.answer;
+    progress.answers[q.id] = ok ? 1 : 0; keep();
+    if (ok) right++;
+    const buttons = $("c-body").querySelectorAll(".answers button");
+    buttons.forEach((b, k) => { b.disabled = true; if (k === q.answer) b.classList.add("right"); else if (k === i) b.classList.add("wrong"); });
+    const fb = $("c-body").querySelector(".c-feedback");
+    fb.className = "c-feedback " + (ok ? "good" : "bad");
+    fb.textContent = ok ? "\u2713 Right!" : "\u2717 Not quite. The right answer is lit up in green.";
+    $("c-body").querySelector(".c-why").innerHTML = inline(q.why || "");
+    const last = at + 1 >= quiz.length;
+    foot(button(last ? "See how you did &#9654;" : "Next &#9654;", next, "run c-go"));
+    units();
+  }
+  function next() {
+    at++;
+    if (at < quiz.length) return question();
+    const n = quiz.length;
+    const cheer = right === n ? "Perfect!" : right >= 0.8 * n ? "Great work!" : right >= 0.5 * n ? "Good going!"
+                : "Keep practising: the ones you missed come back.";
+    $("c-body").innerHTML = `<div class="c-muted">Quiz finished</div><div class="c-big">You got ${right} of ${n} right. ${cheer}</div>`;
+    quiz = [];
+    const parts = [button("10 more questions &#9654;", () => startQuiz(quizUnit), "run c-go")];
+    if (quizUnit) parts.push(button("Back to the lesson", () => show("learn")));
+    foot(...parts);
+  }
+
+  function challenge() {
+    const ch = unit.challenge, done = progress.challenges.includes(unit.id);
+    $("c-body").innerHTML = `<div class="c-feedback ${done ? "good" : ""}">${done ? "\u2713 Challenge done!" : "Challenge"}</div>` +
+      `<div class="c-big">${inline(ch.task)}</div><p class="c-muted">Press Start: the challenge goes into the editor. ` +
+      `Write your program, then press Run. ${ch.expected !== null ? "When it says the right thing" : "When it runs without a problem"}, ` +
+      `the challenge is done.</p><div id="c-solution"></div>`;
+    foot(button("Start the challenge in the editor", startChallenge, "run c-go"),
+         button("Show me a way to do it", () => {
+           $("c-solution").innerHTML = `<pre>${codeHTML(ch.solution.replace(/\n+$/, ""))}</pre>`;
+         }));
+  }
+  async function startChallenge() {
+    if (!confirmLose()) return;
+    if (state.mode === "blocks") await setMode("code");
+    const ch = unit.challenge;
+    state.path = null; state.example = false; state.lastChecked = null;
+    setContent("# Challenge: " + ch.task.replace(/`/g, "") + "\n\n" + (ch.starter || ""));
+    setDirty(false);
+    state.challenge = unit.id;
+    $("course-dialog").close();
+    code.focus();
+    code.selectionStart = code.selectionEnd = code.value.length;
+    status(`Challenge: ${unit.title}. Press Run when your program is ready.`);
+  }
+  // the challenge's program finished: true if that did it (then the usual "Finished" isn't shown)
+  function finished(exit) {
+    const u = data && data.units.find((x) => x.id === state.challenge);
+    if (!u) return false;
+    const ch = u.challenge;
+    const said = (state.said || "").replace(/\r/g, "").replace(/^\n+|\n+$/g, "").split("\n").map((l) => l.replace(/\s+$/, "")).join("\n");
+    const ok = exit === 0 && (ch.expected === null || said === ch.expected);
+    if (ok) {
+      if (!progress.challenges.includes(u.id)) progress.challenges.push(u.id);
+      keep();
+      print(`\n\u2605 Challenge done: ${u.title}! \u2605\n`, "good");
+      status(`Challenge done: ${u.title}!`, "good");
+      state.challenge = null;
+      return true;
+    }
+    if (exit === 0) {
+      print("\n— Finished —\n", "note");
+      print("Not quite yet: for the challenge it should say\n" + ch.expected + "\n", "note");
+    }
+    return false;
+  }
+
+  $("c-close").addEventListener("click", () => $("course-dialog").close());
+  $("c-mixed").addEventListener("click", () => startQuiz(null));
+  document.querySelectorAll(".c-tabs button").forEach((b) => b.addEventListener("click", () => show(b.dataset.ctab)));
+  return { open, finished, startQuiz, choose: (i) => choose(i), current: () => quiz[at], data: () => data, progress: () => progress,
+           pickUnit: (id) => { unit = data.units.find((u) => u.id === id); units(); show(tab); }, startChallenge };
+})();
+$("btn-course").addEventListener("click", () => Course.open());
 
 // ------------------------------------------------------------- the rest
 function status(text, kind = "") {

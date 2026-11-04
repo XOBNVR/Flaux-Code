@@ -7,6 +7,7 @@
 tests/programs/NAME.flx   is run, and its output must match NAME.out exactly.
                           If NAME.in exists it is used as the typed input.
 examples/**/*.flx         must compile (they're used in the README).
+flauxc/studio/course.json the course: up to date, and its answers right (see "course" below).
 tests/graphics/NAME.flx   graphics programs, run without a real screen. Header
                           lines: `# frames: N` (stop after N frames), `# hold: keys`
                           (pretend these keys are held), `# buttons: a,b` (pretend
@@ -337,6 +338,24 @@ def main():
         problems = studio_checks()
         if problems:
             failures.append(("studio", "\n".join(problems)))
+        else:
+            passed += 1
+
+    # The course (flauxc/studio/course.json): it's up to date with course_units.py and
+    # course_questions.py, every answer that needs no running is right, the challenges'
+    # solutions do them, and a sample of the "what does it show?" programs say their answer.
+    # (All of them run in `python3 -m flauxc.studio.make_course --verify`, on Linux in CI.)
+    if pattern in "course":
+        from flauxc.studio import make_course
+        found = [] if make_course.up_to_date() else ["course.json is out of date: run python3 -m flauxc.studio.make_course"]
+        questions = make_course.collect()
+        ran = [q for q in questions if q["check"] in ("run", "ends")]
+        sample = [q for q in questions if q["check"] not in ("run", "ends", None)] + ran[::max(1, len(ran) // 25)]
+        found += make_course.check_all(sample, workers=4)
+        if len(questions) < 1000:
+            found.append(f"only {len(questions)} questions")
+        if found:
+            failures.append(("course", "\n\n".join(found)))
         else:
             passed += 1
 

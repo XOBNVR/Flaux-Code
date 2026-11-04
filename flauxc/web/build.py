@@ -80,7 +80,7 @@ def build(out, pyodide, tcc=None):
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as fh:
         fh.write(page())
-    for name in ("blocks.js", "icon.png"):
+    for name in ("blocks.js", "icon.png", "course.json"):
         shutil.copyfile(os.path.join(STUDIO, name), os.path.join(out, name))
     for name in ("fx.js", "fx3d.js", "web.js"):
         shutil.copyfile(os.path.join(HERE, name), os.path.join(out, name))

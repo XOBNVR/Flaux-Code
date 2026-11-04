@@ -464,6 +464,9 @@ def make_handler(studio):
             if url.path == "/icon.png":
                 with open(os.path.join(HERE, "icon.png"), "rb") as fh:
                     return self.send(200, fh.read(), "image/png")
+            if url.path == "/course.json":
+                with open(os.path.join(HERE, "course.json"), "rb") as fh:
+                    return self.send(200, fh.read(), "application/json")
             if url.path == "/blocks.js":
                 with open(os.path.join(HERE, "blocks.js"), "rb") as fh:
                     return self.send(200, fh.read(), "text/javascript")

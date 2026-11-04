@@ -6,7 +6,7 @@
 //
 // Checks: Flaux starts in the page, a program runs and asks a question, say.same, a
 // problem while running is explained, Apply fix, Blocks mode, saving in the
-// browser, the graphics pixel tests from tests/graphics, pictures, keys,
+// browser, the Course (a quiz, and a challenge), the graphics pixel tests from tests/graphics, pictures, keys,
 // fullscreen (size, keys and mouse positions, drawn at the screen's resolution,
 // triangles without seams), Export, the Stop button, and
 // mouse look (lock_mouse() asks for pointer lock, again on a click; mouse
@@ -143,6 +143,39 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.click("#save-ok");
   await page.waitForFunction(() => (localStorage.getItem("flaux-web-programs") || "").includes("web_test.flx"));
   check(true, "a program is saved in the browser");
+
+  // the Course: a quiz question answered right and one wrong, then a challenge done in the editor
+  const savedPath = await page.evaluate(() => state.path);
+  await page.click("#btn-course");
+  await page.waitForFunction(() => document.querySelectorAll("#c-units button").length === 18, null, { timeout: 30000 });
+  const courseSize = await page.evaluate(() => Course.data().questions.length);
+  check(courseSize >= 1000, `the Course opens (18 units, ${courseSize} questions)`);
+  await page.click('.c-tabs button[data-ctab="quiz"]');
+  await page.click("#c-foot button");
+  let answer = await page.evaluate(() => Course.current().answer);
+  await page.click(`.answers button:nth-child(${answer + 1})`);
+  const rightText = await page.textContent(".c-feedback");
+  await page.click("#c-foot button");
+  answer = await page.evaluate(() => Course.current().answer);
+  await page.click(`.answers button:nth-child(${(answer + 1) % 2 + 1})`);
+  const wrongText = await page.textContent(".c-feedback");
+  check(rightText.includes("Right") && wrongText.includes("Not quite"),
+        `a quiz question answered right, and one wrong (${JSON.stringify(rightText)}, ${JSON.stringify(wrongText)})`);
+  const saved = await page.evaluate(() => Object.values(JSON.parse(localStorage.getItem("flaux-course")).answers).sort());
+  check(JSON.stringify(saved) === "[0,1]", `the answers are kept in the browser (${JSON.stringify(saved)})`);
+  await page.evaluate(() => Course.pickUnit("say"));
+  await page.click('.c-tabs button[data-ctab="challenge"]');
+  await page.click("#c-foot button");
+  await page.waitForFunction(() => !document.getElementById("course-dialog").open);
+  const started_ = await page.evaluate(() => code.value);
+  await setCode(started_ + 'say "My robot is Bolt"\nsay "Beep boop!"\n');
+  await page.click("#btn-run");
+  await page.waitForFunction(() => /Challenge done|Stopped|Finished/.test(document.getElementById("console").textContent), null, { timeout: 60000 });
+  const challengeOut = await consoleText();
+  const chDone = await page.evaluate(() => JSON.parse(localStorage.getItem("flaux-course")).challenges);
+  check(started_.startsWith("# Challenge:") && challengeOut.includes("Challenge done: Saying things") && chDone.includes("say"),
+        `a challenge done in the editor (${JSON.stringify(challengeOut.slice(-60))})`);
+  await page.evaluate(async (p) => { state.dirty = false; await openFile(p); }, savedPath);   // (back to the saved program)
 
   // graphics: the same pixels as the desktop tests
   await setCode(read("shapes.flx"));

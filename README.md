@@ -23,7 +23,7 @@ build it by snapping blocks together.
 ## Contents
 
 1. [Install Flaux on Windows](#install-flaux-on-windows) (or [put it on your website](#flaux-studio-on-your-website))
-2. [Flaux Studio](#flaux-studio)
+2. [Flaux Studio](#flaux-studio) (and [the Flaux course](#the-flaux-course): 18 units, 1,133 quiz questions)
 3. [Run your program with a batch file](#run-your-program-with-a-batch-file)
 4. [Learn Flaux in 14 lessons](#learn-flaux-in-14-lessons) (13 is 3D, 14 is shaders)
 5. [VR and AR](#vr-and-ar)
@@ -114,6 +114,9 @@ their own.
   bottom and press **Enter**.
 - **Mistakes are underlined while you type.** The yellow box explains what's
   wrong and how to fix it. Click **Apply fix** and Flaux fixes it for you.
+- **&#9733; Course** opens the Flaux course: 18 units, each with a lesson, a
+  quiz and a challenge, and more than 1,000 quiz questions (see
+  [The Flaux course](#the-flaux-course)).
 - **Learn** (on the right) has all the lessons, the example games, and
   bits of code you can add to your program with one click.
 - **Open** shows your programs, the lessons and the games.
@@ -170,6 +173,37 @@ saved as a normal `.flx` file, and every lesson and game opens as blocks too.
 - **Right-click** a block to copy or delete it (and to add **else** to an
   **if**, or items to a list). Or drag it back onto the menus (the bin, on
   the website) to throw it away.
+
+### The Flaux course
+
+Click **&#9733; Course** at the top (in the Windows app and on the website) for
+the whole course: **18 units**, from saying things to 3D and shaders, with
+**1,133 quiz questions**.
+
+![The Flaux course: a quiz question about loops, answered](docs/images/course.png)
+
+Each unit has three parts:
+
+- **Learn**: a short explanation with examples, and the lesson program to
+  open and run.
+- **Quiz**: 10 questions at a time, like "What does this program show?",
+  "Which line has the mistake?" or "Which name is allowed?". Click an answer
+  and you see straight away if it's right, and why. New questions come first,
+  then the ones you got wrong, so you keep practising what you missed.
+  **&#9733; Quiz me on everything** mixes questions from every unit.
+- **Challenge**: a small program to write. **Start the challenge** puts it in
+  the editor; press **Run**, and when your program does it, the challenge is
+  done. Stuck? **Show me a way to do it**.
+
+The units list shows how many questions you've got right, with a &#10003; when
+you've got most of them and done the challenge. Your progress is kept on
+your computer (on the website, in your browser).
+
+Every answer is checked with Flaux itself: each program in a "What does it
+show?" question is really run, and each "Which line has the mistake?" is
+checked against the line Flaux points at (`python3 -m flauxc.studio.make_course`
+makes the course from [`course_units.py`](flauxc/studio/course_units.py) and
+[`course_questions.py`](flauxc/studio/course_questions.py)).
 
 ---
 
@@ -935,6 +969,9 @@ command line:
 | **Doodle**: draw with the mouse | `./flaux examples/games/doodle.flx` |
 | **Picture**: a drawing with no loop at all | `./flaux examples/games/picture.flx` |
 | **Space Dodge**: steer a spaceship past falling rocks (uses pictures) | `./flaux examples/games/space_dodge.flx` |
+| **Dino Dash**: a dinosaur runs by itself; jump boulders, stumps and logs, duck the bugs, grab gems, from day to night | `./flaux examples/games/dino_dash.flx` |
+
+![Dino Dash, a running game made with Flaux](docs/images/dino_dash.png)
 
 And in 3D:
 
@@ -947,6 +984,9 @@ And in 3D:
 | **Block world**: fly over 6,400 blocks with grass, dirt and stone | `./flaux examples/3d/block_world.flx` |
 | **VR garden**: grow flowers with your hands in a VR headset | `./flaux examples/3d/vr_garden.flx` |
 | **Model viewer**: a rocket loaded from a 3D model file | `./flaux examples/3d/model_viewer.flx` |
+| **Ocean**: an endless sea drawn by one shader: waves, sky reflections, sun glitter and foam, at four times of day | `./flaux examples/3d/ocean.flx` |
+
+![Ocean: a sea at sunset, drawn by one shader written in Flaux](docs/images/ocean.png)
 
 ![Blockhaven, a first-person block-building game made with Flaux](docs/images/blockhaven.png)
 

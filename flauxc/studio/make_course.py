@@ -3,6 +3,7 @@
 
     python3 -m flauxc.studio.make_course            check everything, then write course.json
     python3 -m flauxc.studio.make_course --quick    write it without running the programs
+    python3 -m flauxc.studio.make_course --verify   check everything (and that course.json is up to date)
 
 Every answer is checked with the real Flaux compiler first: programs whose
 output is the answer are run, "which line is the mistake?" is checked against
@@ -194,8 +195,23 @@ def check_all(questions, workers=8, progress=True):
     return found
 
 
+def up_to_date():
+    """True if course.json is what course_units.py and course_questions.py make."""
+    try:
+        with open(OUT, encoding="utf-8") as fh:
+            return json.load(fh) == build(collect())
+    except (OSError, ValueError):
+        return False
+
+
 def main():
     questions = collect()
+    if "--verify" in sys.argv:       # (for the tests: check everything, write nothing)
+        found = check_all(questions)
+        if not up_to_date():
+            found.append("course.json is out of date: run python3 -m flauxc.studio.make_course")
+        print("\n\n".join(found) if found else f"All {len(questions)} questions and {len(UNITS)} units check out.")
+        sys.exit(1 if found else 0)
     if "--quick" not in sys.argv:
         found = check_all(questions)
         if found:
