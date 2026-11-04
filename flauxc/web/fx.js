@@ -247,6 +247,7 @@
     // and shapes (triangles, circles, lines) are smooth paths at the full resolution.
     let sx = 1, sy = 1, styled = null;
     let keysNow = new Set(), keysPrev = new Set(), mouseNow = false, mousePrev = false;
+    let buttonsNow = 0, buttonsPrev = 0;     // every mouse button: 1 left, 2 middle, 4 right
     let moveX = 0, moveY = 0, movedX = 0, movedY = 0;       // mouse movement (see readInput)
     const pictures = new Map();
     fx.setupGraphics = (c, f) => { colors = c; font = f; };
@@ -404,6 +405,8 @@
     function readInput() {
       keysPrev = keysNow; keysNow = new Set(io.keys);
       mousePrev = mouseNow; mouseNow = !!(io.mouse.down || io.mouse.pressed);
+      buttonsPrev = buttonsNow; buttonsNow = (io.mouse.buttons || 0) | (io.mouse.clicks || 0) | (mouseNow ? 1 : 0);
+      io.mouse.clicks = 0;
       io.mouse.pressed = false;     // a click quicker than a frame still counts
       // mouse movement: whole pixels this frame, the rest is kept for the next one (like graphics.h)
       moveX += io.mouse.mx || 0; moveY += io.mouse.my || 0;
@@ -413,6 +416,14 @@
       readPads();
     }
     function present() { win.screen.getContext("2d").drawImage(back, 0, 0); dirty = false; }
+    function mouseBit(name, line) {
+      const k = squash(name);
+      if (k === "left" || k === "") return 1;
+      if (k === "right") return 4;
+      if (k === "middle" || k === "wheel") return 2;
+      fail(line, 'Mouse buttons are "left", "right" and "middle", like mouse_clicked("right").',
+        `A mouse doesn't have a "${name}" button.`);
+    }
     function keyName(name, line) {
       let k = squash(name);
       k = { "return": "enter", esc: "escape", control: "ctrl" }[k] || k;
@@ -515,7 +526,9 @@
       key_down: ([name], line) => keysNow.has(keyName(name, line)),
       key_pressed: ([name], line) => { const k = keyName(name, line); return keysNow.has(k) && !keysPrev.has(k); },
       mouse_x: () => Math.round(io.mouse.x), mouse_y: () => Math.round(io.mouse.y),
-      mouse_down: () => mouseNow, mouse_clicked: () => mouseNow && !mousePrev,
+      mouse_down: ([b], line) => (b === undefined ? mouseNow : !!(buttonsNow & mouseBit(b, line))),
+      mouse_clicked: ([b], line) => (b === undefined ? mouseNow && !mousePrev
+                                     : !!(buttonsNow & mouseBit(b, line)) && !(buttonsPrev & mouseBit(b, line))),
       beep: ([pitch, seconds]) => io.beep(pitch, seconds === undefined ? 0.1 : seconds),
       fullscreen: (_, line) => { needWindow(line); if (io.fullscreen) io.fullscreen(); },
       mouse_moved_x: () => movedX, mouse_moved_y: () => movedY,

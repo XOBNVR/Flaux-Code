@@ -194,9 +194,17 @@ window.FlauxWeb = (() => {
       game.mouse.y = Math.max(0, Math.min(game.H - 1, y));
     };
     canvas.addEventListener("mousemove", where);
+    // which buttons are held: 1 left, 2 middle, 4 right (like the desktop version); `pressed`
+    // remembers a press quicker than a frame
+    const BUTTON_BITS = [1, 2, 4];
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());   // right-click is for the game
     canvas.addEventListener("mousedown", (e) => {
       if (!mouseLocked()) where(e);
-      game.mouse.down = game.mouse.pressed = true; canvas.focus();
+      const bit = BUTTON_BITS[e.button] || 0;
+      game.mouse.buttons = (game.mouse.buttons || 0) | bit;
+      game.mouse.clicks = (game.mouse.clicks || 0) | bit;
+      if (e.button === 0) game.mouse.down = game.mouse.pressed = true;
+      canvas.focus();
       if (full.wanted) enterFullscreen();          // the program asked: a click is allowed to do it
       if (look.wanted && !mouseLocked()) askLock(); // the same for lock_mouse() (and after Esc let go)
     });
@@ -220,7 +228,10 @@ window.FlauxWeb = (() => {
     canvas.addEventListener("touchmove", touch, { passive: false });
     canvas.addEventListener("touchend", touch, { passive: false });
     if (!game.listening) {          // (just once: each window gets a fresh canvas)
-      window.addEventListener("mouseup", () => { game.mouse.down = false; });
+      window.addEventListener("mouseup", (e) => {
+        game.mouse.buttons = (game.mouse.buttons || 0) & ~([1, 2, 4][e.button] || 0);
+        if (e.button === 0) game.mouse.down = false;
+      });
       setUpFullscreen();
       setUpSharpness();
       game.listening = true;

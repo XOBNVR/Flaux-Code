@@ -1990,13 +1990,23 @@ class Compiler:
         self.arity(e, args, 0)
         return self.graphics_call("fx_mouse_y()", INT)
 
+    def mouse_button(self, e, args, what):
+        """mouse_down() / mouse_down("right"): the left button, or the one named."""
+        self.arity(e, args, 0, 1)
+        if not args:
+            return self.graphics_call(f"fx_{what}()", BOOL)
+        c, t = args[0]
+        if t != TEXT:
+            raise self.err(e.args[0], f"`{what}` takes the name of a mouse button, in quotes.",
+                           hint="The buttons are \"left\", \"right\" and \"middle\":",
+                           example=f'if {what}("right")\n    say "right-click!"\nend')
+        return self.graphics_call(f"fx_{what}_of({c}, {e.line})", BOOL)
+
     def b_mouse_down(self, e, args):
-        self.arity(e, args, 0)
-        return self.graphics_call("fx_mouse_down()", BOOL)
+        return self.mouse_button(e, args, "mouse_down")
 
     def b_mouse_clicked(self, e, args):
-        self.arity(e, args, 0)
-        return self.graphics_call("fx_mouse_clicked()", BOOL)
+        return self.mouse_button(e, args, "mouse_clicked")
 
     def b_mouse_moved_x(self, e, args):
         self.arity(e, args, 0)

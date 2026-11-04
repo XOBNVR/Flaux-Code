@@ -535,6 +535,7 @@ showing it until you close it.
 | `mouse_x()`, `mouse_y()` | where the mouse is in the window |
 | `mouse_down()` | true while the left mouse button is held |
 | `mouse_clicked()` | true only on the frame of a click |
+| `mouse_down("right")`, `mouse_clicked("right")` | the same for the `"right"` (or `"middle"`, or `"left"`) button. On the web, right-clicking a game doesn't open the browser's menu |
 | `mouse_moved_x()`, `mouse_moved_y()` | how far the mouse moved since the last frame, in screen pixels (see [Mouse look](#mouse-look)) |
 | `lock_mouse()`, `unlock_mouse()` | hide the pointer and keep it in the window, and give it back |
 | `mouse_locked()` | true while the mouse is locked |

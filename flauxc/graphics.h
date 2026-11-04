@@ -84,6 +84,7 @@ static int fx_win_w, fx_win_h;
 static bool fx_dirty;              /* something drawn since the last show() */
 static uint8_t fx_keys_now[SDL_NUM_SCANCODES], fx_keys_prev[SDL_NUM_SCANCODES];
 static bool fx_mouse_now, fx_mouse_prev;
+static Uint32 fx_buttons_now, fx_buttons_prev;   /* every mouse button (SDL_BUTTON_LMASK, ...) */
 static int fx_mouse_xv, fx_mouse_yv;
 static double fx_move_x, fx_move_y;        /* mouse movement since the last frame, screen pixels */
 static int64_t fx_moved_xv, fx_moved_yv;   /* ... as the program sees it this frame */
@@ -461,7 +462,15 @@ static void fx_read_input(void) {
     if (fx_keys_now[SDL_SCANCODE_LALT] || fx_keys_now[SDL_SCANCODE_RALT])
         fx_keys_now[SDL_SCANCODE_RETURN] = fx_keys_now[SDL_SCANCODE_KP_ENTER] = 0;
     fx_mouse_prev = fx_mouse_now;
-    fx_mouse_now = (fx_read_mouse() & SDL_BUTTON_LMASK) != 0;
+    fx_buttons_prev = fx_buttons_now;
+    fx_buttons_now = fx_read_mouse();
+    const char *held_mouse = getenv("FLAUX_HOLD_MOUSE");   /* for tests: "left", "right", "middle" */
+    if (held_mouse && *held_mouse) {
+        if (strstr(held_mouse, "left")) fx_buttons_now |= SDL_BUTTON_LMASK;
+        if (strstr(held_mouse, "right")) fx_buttons_now |= SDL_BUTTON_RMASK;
+        if (strstr(held_mouse, "middle")) fx_buttons_now |= SDL_BUTTON_MMASK;
+    }
+    fx_mouse_now = (fx_buttons_now & SDL_BUTTON_LMASK) != 0;
     /* mouse movement: whole pixels this frame, the rest is kept for the next one */
     const char *move = getenv("FLAUX_MOUSE_MOVE"); /* for tests */
     if (move && *move) {
@@ -481,6 +490,23 @@ static int64_t fx_mouse_x(void) { return fx_mouse_xv; }
 static int64_t fx_mouse_y(void) { return fx_mouse_yv; }
 static bool fx_mouse_down(void) { return fx_mouse_now; }
 static bool fx_mouse_clicked(void) { return fx_mouse_now && !fx_mouse_prev; }
+
+/* mouse_down("right"), mouse_clicked("middle"), ... */
+static Uint32 fx_mouse_mask(fx_text name, int line) {
+    char key[40];
+    fx_squash(name, key, sizeof key);
+    if (!strcmp(key, "left") || !key[0]) return SDL_BUTTON_LMASK;
+    if (!strcmp(key, "right")) return SDL_BUTTON_RMASK;
+    if (!strcmp(key, "middle") || !strcmp(key, "wheel")) return SDL_BUTTON_MMASK;
+    fx_fail(line, "Mouse buttons are \"left\", \"right\" and \"middle\", like mouse_clicked(\"right\").",
+            "A mouse doesn't have a \"%.*s\" button.", (int)name.n, name.p);
+    return 0;
+}
+static bool fx_mouse_down_of(fx_text name, int line) { return (fx_buttons_now & fx_mouse_mask(name, line)) != 0; }
+static bool fx_mouse_clicked_of(fx_text name, int line) {
+    Uint32 m = fx_mouse_mask(name, line);
+    return (fx_buttons_now & m) && !(fx_buttons_prev & m);
+}
 static int64_t fx_mouse_moved_x(void) { return fx_moved_xv; }
 static int64_t fx_mouse_moved_y(void) { return fx_moved_yv; }
 

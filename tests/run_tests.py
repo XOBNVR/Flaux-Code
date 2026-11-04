@@ -304,6 +304,7 @@ def main():
                    "FLAUX_FRAMES": header.get("frames", ["1"])[0], "FLAUX_SCREENSHOT": shot,
                    "FLAUX_HOLD_KEYS": ",".join(header.get("hold", [])),
                    "FLAUX_HOLD_BUTTONS": ",".join(header.get("buttons", [])),
+                   "FLAUX_HOLD_MOUSE": header.get("hold_mouse", [""])[0],
                    "FLAUX_MOUSE": header.get("mouse", [""])[0],
                    "FLAUX_MOUSE_MOVE": header.get("mouse_move", [""])[0],
                    "FLAUX_SCREEN": header.get("screen", [""])[0], "FLAUX_SCREENSHOT_FULL": full_shot}

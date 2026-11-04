@@ -1,0 +1,6 @@
+# expect: A mouse doesn't have a "back" button.
+# expect: mouse_clicked("right")
+window(100, 100)
+if mouse_clicked("back")
+    say "?"
+end

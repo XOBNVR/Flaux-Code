@@ -33,7 +33,7 @@ out vec3 v_normal;
 out vec2 v_uv;
 out vec2 v_tile;
 out vec3 v_color;
-out vec4 v_extra;
+flat out vec4 v_extra;   // (flat: the same exact numbers for the whole shape, never blended)
 void main() {
     vec4 p = vec4(a_pos, 1.0);
     v_world = vec3(dot(a_row0, p), dot(a_row1, p), dot(a_row2, p));
@@ -56,7 +56,7 @@ in vec3 v_normal;
 in vec2 v_uv;
 in vec2 v_tile;
 in vec3 v_color;
-in vec4 v_extra;
+flat in vec4 v_extra;
 out vec4 o_color;
 uniform sampler2D u_tex;
 uniform int u_textured;
@@ -75,9 +75,12 @@ uniform vec2 u_fog;          // where fog starts and where it's complete (0 = no
 uniform float u_time;
 
 float fx_shadow(vec3 n) {
-    vec4 s = u_shadow_mat * vec4(v_world + n * 0.03, 1.0);
-    vec3 p = s.xyz / s.w * 0.5 + 0.5;
     vec2 texel = 1.0 / vec2(textureSize(u_shadow_map, 0));
+    // look up the shadow a little out from the surface: at least two of the shadow map's
+    // pixels (their size in the world comes from the matrix), so flat ground doesn't shade itself
+    float world_per_uv = 2.0 / length(vec3(u_shadow_mat[0][0], u_shadow_mat[1][0], u_shadow_mat[2][0]));
+    vec4 s = u_shadow_mat * vec4(v_world + n * max(0.03, texel.x * world_per_uv * 2.5), 1.0);
+    vec3 p = s.xyz / s.w * 0.5 + 0.5;
     float sum = 0.0;
     for (int i = -1; i <= 1; i++)
         for (int j = -1; j <= 1; j++)

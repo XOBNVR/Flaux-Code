@@ -1,0 +1,599 @@
+# Blockhaven: an island made of blocks. Explore it, dig it up and build on it.
+#
+#   Mouse ............ look around (click the game first)
+#   W A S D or arrows  walk                  Space ... jump (and swim up)
+#   Shift ............ run                   F11 ..... fullscreen
+#   Left click ....... dig a block (you keep it)
+#   Right click or E . put the block you've picked
+#   1 to 9 ........... pick a block          C ....... make 4 planks from a trunk
+#   Esc .............. let go of the mouse
+#
+# A game controller works too: the left stick walks, the right stick looks,
+# A jumps, RT digs, LT builds, and LB / RB pick a block.
+#
+# The world is 64 by 64 blocks and 40 high, kept in one list. Only blocks
+# that touch the air are drawn, all with one shader (`block`, below), which
+# paints each kind of block from the number `kind`.
+
+# ---------------------------------------------------------------- the look
+
+shader block
+    # (a hair inside the face, so each little square has one colour)
+    set px to x - nx * 0.01
+    set py to y - ny * 0.01
+    set pz to z - nz * 0.01
+    # a speckle from 0 to 1, the same across each little square (whole numbers, so it's exact)
+    set a to floor(px * 8)
+    set b to floor(py * 8)
+    set c to floor(pz * 8)
+    set h to (a * 127 + b * 311 + c * 523) mod 1009
+    set h to (h * h + a * 17 + c * 29) mod 1009
+    set n to ((h * h) mod 1009) / 1009
+    set up to py + 0.5 - floor(py + 0.5)
+    if kind = 1
+        if ny > 0.5 or (up > 0.84 and ny > -0.5)
+            return rgb(74 + n * 30, 158 + n * 35, 62 + n * 18)
+        end
+        return rgb(122 + n * 28, 86 + n * 20, 58 + n * 14)
+    end
+    if kind = 2
+        return rgb(122 + n * 28, 86 + n * 20, 58 + n * 14)
+    end
+    if kind = 3
+        return rgb(112 + n * 44, 114 + n * 44, 124 + n * 44)
+    end
+    if kind = 4
+        return rgb(222 + n * 20, 204 + n * 20, 150 + n * 16)
+    end
+    if kind = 5
+        if ny > 0.5 or ny < -0.5
+            set ring to sin(distance(px - floor(px + 0.5), pz - floor(pz + 0.5), 0, 0) * 40)
+            return rgb(170 + ring * 18, 132 + ring * 14, 84 + ring * 10)
+        end
+        return rgb(92 + n * 30, 64 + n * 20, 40 + n * 12)
+    end
+    if kind = 6
+        return rgb(44 + n * 40, 118 + n * 54, 50 + n * 30)
+    end
+    if kind = 7
+        if py * 4 - floor(py * 4) < 0.07
+            return rgb(118, 80, 44)
+        end
+        return rgb(192 + n * 18, 148 + n * 14, 90 + n * 10)
+    end
+    if kind = 8
+        set row to floor(py * 4)
+        set along to (px + pz) * 2 + row * 0.5
+        if py * 4 - row < 0.12 or along - floor(along) < 0.07
+            return rgb(196, 190, 180)
+        end
+        return rgb(168 + n * 30, 68 + n * 22, 54 + n * 16)
+    end
+    if kind = 9
+        if u < 0.07 or u > 0.93 or v < 0.07 or v > 0.93
+            return rgb(232, 244, 252)
+        end
+        return rgb(166 + n * 12, 212 + n * 12, 236)
+    end
+    if kind = 10
+        set wave to sin(px * 3 + time * 2) * sin(pz * 3 + time * 1.7)
+        return rgb(40 + wave * 12, 110 + wave * 22, 200 + wave * 22)
+    end
+    if kind = 11
+        return rgb(255, 226 + n * 28, 140 + n * 30)
+    end
+    return rgb(56 + n * 22, 52 + n * 22, 62 + n * 22)
+end
+
+# Under water, everything looks blue.
+shader underwater
+    return rgb(red * 0.45, green * 0.65 + 20, blue * 0.8 + 60)
+end
+
+# ------------------------------------------------------------- the world
+
+# kinds: 0 air, 1 grass, 2 earth, 3 stone, 4 sand, 5 trunk, 6 leaves,
+# 7 planks, 8 brick, 9 glass, 10 water, 11 lamp, 12 bedrock
+
+function cell(w, x, y, z)
+    # what's at block (x, y, z): outside the world is air
+    if x < 0 or x > 63 or z < 0 or z > 63 or y < 0 or y > 39
+        return 0
+    end
+    return w[x + z * 64 + y * 4096 + 1]
+end
+
+function put(w, x, y, z, kind)
+    if x >= 0 and x <= 63 and z >= 0 and z <= 63 and y >= 0 and y <= 39
+        set w[x + z * 64 + y * 4096 + 1] to kind
+    end
+end
+
+function see_through(kind)
+    return kind = 0 or kind = 6 or kind = 9 or kind = 10
+end
+
+function exposed(w, x, y, z)
+    # does block (x, y, z) need drawing? Only if you could see it.
+    set kind to cell(w, x, y, z)
+    if kind = 0
+        return false
+    end
+    if kind = 10
+        return cell(w, x, y + 1, z) = 0
+    end
+    if see_through(cell(w, x + 1, y, z)) or see_through(cell(w, x - 1, y, z))
+        return true
+    end
+    if see_through(cell(w, x, y + 1, z)) or see_through(cell(w, x, y - 1, z))
+        return true
+    end
+    return see_through(cell(w, x, y, z + 1)) or see_through(cell(w, x, y, z - 1))
+end
+
+function refresh(w, shown, x, y, z)
+    # after a block changes: it and the six next to it may now be (un)seen
+    repeat with d from 0 to 6
+        set ax to x
+        set ay to y
+        set az to z
+        if d = 1
+            add 1 to ax
+        end
+        if d = 2
+            subtract 1 from ax
+        end
+        if d = 3
+            add 1 to ay
+        end
+        if d = 4
+            subtract 1 from ay
+        end
+        if d = 5
+            add 1 to az
+        end
+        if d = 6
+            subtract 1 from az
+        end
+        if ax >= 0 and ax <= 63 and az >= 0 and az <= 63 and ay >= 0 and ay <= 39
+            if exposed(w, ax, ay, az)
+                set shown[ax + az * 64 + ay * 4096 + 1] to 1
+            else
+                set shown[ax + az * 64 + ay * 4096 + 1] to 0
+            end
+        end
+    end
+end
+
+function solid(w, x, y, z)
+    # can you walk into block (x, y, z)? The edge of the world is a wall.
+    if x < 0 or x > 63 or z < 0 or z > 63 or y < 0
+        return true
+    end
+    set kind to cell(w, x, y, z)
+    return kind != 0 and kind != 10
+end
+
+function hits(w, x, y, z)
+    # does a player standing at (x, y, z) (their feet) overlap a solid block?
+    repeat with cx from floor(x + 0.2) to floor(x + 0.799)
+        repeat with cy from floor(y + 0.5) to floor(y + 2.249)
+            repeat with cz from floor(z + 0.2) to floor(z + 0.799)
+                if solid(w, cx, cy, cz)
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+function ground(w, x, z)
+    # the top of the highest solid block in column (x, z)
+    set y to 39
+    repeat while y > 0 and not solid(w, x, y, z)
+        subtract 1 from y
+    end
+    return y
+end
+
+window(1280, 720, "Blockhaven")
+say "Making the island..."
+set world to 163840 copies of 0
+
+repeat with x from 0 to 63
+    repeat with z from 0 to 63
+        set edge to distance(x, z, 32, 32)
+        set h to 15 + sin(x * 0.17) * 2.5 + cos(z * 0.13) * 2.5 + sin((x + z) * 0.07) * 3
+        if edge > 18
+            set h to h - (edge - 18) * 0.7
+        end
+        set top to max(2, floor(h))
+        repeat with y from 0 to top
+            set kind to 3
+            if y = 0
+                set kind to 12
+            end
+            if y > top - 3 and y > 0
+                set kind to 2
+            end
+            if y = top
+                set kind to 1
+                if top <= 13
+                    set kind to 4
+                end
+            end
+            put(world, x, y, z, kind)
+        end
+        repeat with y from top + 1 to 12
+            put(world, x, y, z, 10)
+        end
+    end
+end
+
+# trees on the grass
+repeat 34 times
+    set tx to random(4, 59)
+    set tz to random(4, 59)
+    set ty to ground(world, tx, tz)
+    if cell(world, tx, ty, tz) = 1
+        set tall to random(4, 6)
+        repeat with y from ty + 1 to ty + tall
+            put(world, tx, y, tz, 5)
+        end
+        repeat with lx from -2 to 2
+            repeat with lz from -2 to 2
+                repeat with ly from tall - 1 to tall + 1
+                    if abs(lx) + abs(lz) + abs(ly - tall) <= 3 and cell(world, tx + lx, ty + ly, tz + lz) = 0
+                        put(world, tx + lx, ty + ly, tz + lz, 6)
+                    end
+                end
+            end
+        end
+        put(world, tx, ty + tall + 1, tz, 6)
+    end
+end
+
+# a few boulders of stone
+repeat 10 times
+    set rx to random(6, 57)
+    set rz to random(6, 57)
+    set ry to ground(world, rx, rz)
+    if ry > 12
+        repeat with ox from -1 to 1
+            repeat with oz from -1 to 1
+                put(world, rx + ox, ry + 1, rz + oz, 3)
+            end
+        end
+        put(world, rx, ry + 2, rz, 3)
+    end
+end
+
+# which blocks are drawn
+set shown to 163840 copies of 0
+repeat with y from 0 to 39
+    repeat with z from 0 to 63
+        repeat with x from 0 to 63
+            if exposed(world, x, y, z)
+                set shown[x + z * 64 + y * 4096 + 1] to 1
+            end
+        end
+    end
+end
+
+# ------------------------------------------------------------- the player
+
+# start on the highest ground near the middle
+set best to 0
+set px to 32.0
+set pz to 32.0
+repeat with x from 24 to 40
+    repeat with z from 24 to 40
+        if ground(world, x, z) > best and cell(world, x, ground(world, x, z), z) = 1
+            set best to ground(world, x, z)
+            set px to x * 1.0
+            set pz to z * 1.0
+        end
+    end
+end
+set py to best + 0.5
+set vy to 0.0
+set on_ground to false
+set yaw to 0.0
+set pitch to -0.25
+
+set hotbar to [2, 3, 4, 5, 6, 7, 8, 9, 11]
+set counts to [0, 20, 20, 12, 8, 12, 30, 30, 20, 0, 6, 0]
+set names to ["grass", "earth", "stone", "sand", "trunk", "leaves", "planks", "brick", "glass", "water", "lamp", "bedrock"]
+set swatch to ["#4a9e3e", "#7a563a", "#7a7c86", "#decc96", "#5c4028", "#2c7632", "#c0945a", "#a84436", "#a6d4ec", "#286ec8", "#ffe28c", "#38343e"]
+set pick to 1
+set message to "Welcome to Blockhaven! Click the game to look around."
+set message_until to 6.0
+set bloops to []
+repeat 6 times      # bloops: small round creatures that wander about
+    set bx to random(10, 53) * 1.0
+    set bz to random(10, 53) * 1.0
+    add bx to bloops
+    add bz to bloops
+    add random(0, 628) / 100.0 to bloops
+end
+
+lock_mouse()
+
+repeat forever
+    # ---------------------------------------------------- looking
+    set yaw to yaw - mouse_moved_x() * 0.0035 - stick_x("right") * 0.05
+    set pitch to pitch - mouse_moved_y() * 0.0035 + stick_y("right") * 0.04
+    if key_down("left")
+        add 0.04 to yaw
+    end
+    if key_down("right")
+        subtract 0.04 from yaw
+    end
+    set pitch to max(-1.5, min(1.5, pitch))
+
+    # ---------------------------------------------------- moving
+    set fx to -sin(yaw)
+    set fz to -cos(yaw)
+    set forward to stick_y()
+    set side to stick_x()
+    if key_down("w") or key_down("up")
+        set forward to 1.0
+    end
+    if key_down("s") or key_down("down")
+        set forward to -1.0
+    end
+    if key_down("d")
+        set side to 1.0
+    end
+    if key_down("a")
+        set side to -1.0
+    end
+    set in_water to cell(world, floor(px + 0.5), floor(py + 1.0), floor(pz + 0.5)) = 10
+    set speed to 0.075
+    if key_down("shift")
+        set speed to 0.12
+    end
+    if in_water
+        set speed to speed * 0.55
+    end
+    set mx to (fx * forward + cos(yaw) * side) * speed
+    set mz to (fz * forward - sin(yaw) * side) * speed
+    if not hits(world, px + mx, py, pz)
+        add mx to px
+    end
+    if not hits(world, px, py, pz + mz)
+        add mz to pz
+    end
+
+    # falling, jumping and swimming
+    if in_water
+        set vy to vy * 0.9 - 0.004
+        if key_down("space") or button_down("a")
+            set vy to 0.07
+        end
+    else
+        set vy to max(-0.6, vy - 0.013)
+        if on_ground and (key_down("space") or button_down("a"))
+            set vy to 0.215
+        end
+    end
+    set on_ground to false
+    if hits(world, px, py + vy, pz)
+        if vy < 0
+            set on_ground to true
+            set landing to floor(py + 0.5) - 0.5
+            if not hits(world, px, landing, pz)
+                set py to landing
+            end
+        end
+        set vy to 0.0
+    else
+        add vy to py
+    end
+    if py < -10
+        set py to ground(world, 32, 32) + 1.5
+    end
+
+    # ---------------------------------------------------- what you're looking at
+    set ex to px
+    set ey to py + 1.62
+    set ez to pz
+    set dx to -sin(yaw) * cos(pitch)
+    set dy to sin(pitch)
+    set dz to -cos(yaw) * cos(pitch)
+    set found to false
+    set hx to 0
+    set hy to 0
+    set hz to 0
+    set lx to floor(ex + 0.5)
+    set ly to floor(ey + 0.5)
+    set lz to floor(ez + 0.5)
+    set t to 0.0
+    repeat while t < 6 and not found
+        set qx to floor(ex + dx * t + 0.5)
+        set qy to floor(ey + dy * t + 0.5)
+        set qz to floor(ez + dz * t + 0.5)
+        set k to cell(world, qx, qy, qz)
+        if k != 0 and k != 10
+            set found to true
+            set hx to qx
+            set hy to qy
+            set hz to qz
+        else
+            set lx to qx
+            set ly to qy
+            set lz to qz
+        end
+        add 0.04 to t
+    end
+
+    # ---------------------------------------------------- digging and building
+    repeat with i from 1 to 9
+        if key_pressed(text(i))
+            set pick to i
+        end
+    end
+    if button_pressed("rb")
+        set pick to pick mod 9 + 1
+    end
+    if button_pressed("lb")
+        set pick to (pick + 7) mod 9 + 1
+    end
+    set want to hotbar[pick]
+
+    if found and (mouse_clicked() or button_pressed("rt"))
+        set k to cell(world, hx, hy, hz)
+        if k = 12
+            set message to "Bedrock is too hard to dig."
+            set message_until to seconds() + 2
+        else
+            set got to k
+            if k = 1
+                set got to 2
+            end
+            add 1 to counts[got]
+            set left to 0
+            # water next to the hole runs into it
+            if cell(world, hx + 1, hy, hz) = 10 or cell(world, hx - 1, hy, hz) = 10 or cell(world, hx, hy + 1, hz) = 10
+                set left to 10
+            end
+            if cell(world, hx, hy, hz + 1) = 10 or cell(world, hx, hy, hz - 1) = 10
+                set left to 10
+            end
+            put(world, hx, hy, hz, left)
+            refresh(world, shown, hx, hy, hz)
+            beep(180 + k * 20, 0.04)
+        end
+    end
+    if found and (mouse_clicked("right") or key_pressed("e") or button_pressed("lt"))
+        if counts[want] <= 0
+            set message to "You have no {names[want]} left. Dig some up!"
+            set message_until to seconds() + 2
+        else
+            put(world, lx, ly, lz, want)
+            if hits(world, px, py, pz)
+                put(world, lx, ly, lz, 0)        # (not inside yourself)
+            else
+                subtract 1 from counts[want]
+                refresh(world, shown, lx, ly, lz)
+                beep(520, 0.03)
+            end
+        end
+    end
+    if key_pressed("c")
+        if counts[5] > 0
+            subtract 1 from counts[5]
+            add 4 to counts[7]
+            set message to "You made 4 planks from a trunk."
+        else
+            set message to "Planks are made from a trunk: dig a tree first."
+        end
+        set message_until to seconds() + 2
+    end
+
+    # ---------------------------------------------------- the bloops
+    set i to 1
+    repeat while i < length of bloops
+        set bx to bloops[i]
+        set bz to bloops[i + 1]
+        set heading to bloops[i + 2] + (random(0, 100) - 50) / 600.0
+        set nx2 to bx + sin(heading) * 0.03
+        set nz2 to bz + cos(heading) * 0.03
+        if nx2 < 3 or nx2 > 60 or nz2 < 3 or nz2 > 60 or cell(world, floor(nx2 + 0.5), 12, floor(nz2 + 0.5)) = 10
+            set heading to heading + 2.5
+        else
+            set bloops[i] to nx2
+            set bloops[i + 1] to nz2
+        end
+        set bloops[i + 2] to heading
+        add 3 to i
+    end
+
+    # ---------------------------------------------------- the time of day
+    set day to seconds() / 300.0 + 0.3
+    set sun_angle to (day - floor(day)) * 6.2832
+    set height to sin(sun_angle)
+    set light_level to max(0.12, min(1.0, height * 3 + 0.4))
+    set dusk to max(0.0, 1 - abs(height) * 5)
+    set top_r to 12 + 70 * light_level
+    set top_g to 16 + 140 * light_level
+    set top_b to 40 + 195 * light_level
+    sky(rgb(top_r, top_g, top_b), rgb(top_r + 60 * light_level + 90 * dusk, top_g + 50 * light_level + 30 * dusk,
+                                      top_b + 20 * light_level))
+    fog(55, rgb(top_r + 50 * light_level, top_g + 40 * light_level, top_b + 15 * light_level))
+    if height > -0.05
+        sun(cos(sun_angle), max(0.05, height), 0.35, rgb(255, 235 - 60 * dusk, 210 - 110 * dusk))
+    else
+        sun(-cos(sun_angle), -height, 0.35, rgb(70, 80, 120))
+    end
+
+    # ---------------------------------------------------- drawing
+    camera(ex, ey, ez, ex + dx, ey + dy, ez + dz, 75)
+    set lamps to 0
+    set i to 1
+    repeat with y from 0 to 39
+        repeat with z from 0 to 63
+            repeat with x from 0 to 63
+                if shown[i] = 1 and abs(x - px) < 48 and abs(z - pz) < 48
+                    set kind to world[i]
+                    cube(x, y, z, 1, block)
+                    if kind = 11 and lamps < 8 and light_level < 0.8
+                        light(x, y, z, "#ffd890", 9)
+                        add 1 to lamps
+                    end
+                end
+                add 1 to i
+            end
+        end
+    end
+    set i to 1
+    repeat while i < length of bloops
+        set bx to bloops[i]
+        set bz to bloops[i + 1]
+        set gy to ground(world, floor(bx + 0.5), floor(bz + 0.5)) + 0.5
+        set hop to abs(sin(seconds() * 6 + i)) * 0.25
+        ball(bx, gy + 0.35 + hop, bz, 0.35, "#f4f0ff")
+        ball(bx + sin(bloops[i + 2] + 0.4) * 0.3, gy + 0.5 + hop, bz + cos(bloops[i + 2] + 0.4) * 0.3, 0.07, "black")
+        ball(bx + sin(bloops[i + 2] - 0.4) * 0.3, gy + 0.5 + hop, bz + cos(bloops[i + 2] - 0.4) * 0.3, 0.07, "black")
+        add 3 to i
+    end
+    if found      # a thin dark frame around the block you're looking at
+        repeat with a from -1 to 1 step 2
+            repeat with b from -1 to 1 step 2
+                box(hx, hy + a * 0.5, hz + b * 0.5, 1.02, 0.03, 0.03, "#202020")
+                box(hx + a * 0.5, hy, hz + b * 0.5, 0.03, 1.02, 0.03, "#202020")
+                box(hx + a * 0.5, hy + b * 0.5, hz, 0.03, 0.03, 1.02, "#202020")
+            end
+        end
+    end
+    if cell(world, floor(ex + 0.5), floor(ey + 0.5), floor(ez + 0.5)) = 10
+        effect(underwater)
+    end
+
+    # ---------------------------------------------------- on the screen
+    rect(637, 352, 6, 16, "white")
+    rect(632, 357, 16, 6, "white")
+    set left_edge to 640 - 9 * 31
+    repeat with s from 1 to 9
+        set k to hotbar[s]
+        set sx to left_edge + (s - 1) * 62
+        if s = pick
+            rect(sx - 4, 638, 60, 60, "white")
+        end
+        rect(sx, 642, 52, 52, "#202028")
+        rect(sx + 6, 648, 40, 40, swatch[k])
+        write(text(counts[k]), sx + 4, 680, "white", 2)
+        write(text(s), sx + 40, 644, "#c0c0c8", 1)
+    end
+    write(names[want], 640 - text_width(names[want], 2) / 2, 616, "white", 2)
+    write("{fps()} fps", 10, 10, "white", 2)
+    if seconds() < message_until
+        write(message, 640 - text_width(message, 2) / 2, 120, "white", 2)
+    end
+    if not mouse_locked()
+        set hint to "Click to look around  -  F11: fullscreen"
+        write(hint, 640 - text_width(hint, 2) / 2, 160, "#ffe28c", 2)
+    end
+    show()
+end

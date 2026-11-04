@@ -1,0 +1,16 @@
+# frames: 2
+# hold_mouse: right
+# pixel: 10 10 #e8303a
+# pixel: 50 50 #000000
+# mouse_down("right") and mouse_clicked("right"): the right button (here pretend-held);
+# mouse_down() on its own is still the left one.
+window(100, 100)
+repeat 2 times
+    set right to mouse_clicked("right")
+    say right, mouse_down()
+    clear("black")
+    if mouse_down("right") and not mouse_down("left")
+        rect(0, 0, 20, 20, "red")
+    end
+    show()
+end

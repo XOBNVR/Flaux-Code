@@ -941,10 +941,13 @@ And in 3D:
 
 | 3D | Run it with |
 |---|---|
+| **Blockhaven**: a first-person island of blocks: walk, jump, swim, dig and build, with day and night (mouse, keys or a controller; F11 for fullscreen) | `./flaux examples/3d/blockhaven.flx` |
 | **3D Runner**: dodge the blocks on a shader-painted road (keys or a controller) | `./flaux examples/3d/runner.flx` |
 | **Block world**: fly over 6,400 blocks with grass, dirt and stone | `./flaux examples/3d/block_world.flx` |
 | **VR garden**: grow flowers with your hands in a VR headset | `./flaux examples/3d/vr_garden.flx` |
 | **Model viewer**: a rocket loaded from a 3D model file | `./flaux examples/3d/model_viewer.flx` |
+
+![Blockhaven, a first-person block-building game made with Flaux](docs/images/blockhaven.png)
 
 ![A world of 6,400 blocks drawn every frame](docs/images/block_world.png)
 

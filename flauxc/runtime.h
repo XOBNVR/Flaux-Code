@@ -551,6 +551,8 @@ static void fx_init(const char *file, const char *const *lines, int nlines) {
     pid = (uint64_t)getpid();
 #endif
     fx_rng_state ^= (uint64_t)(fx_t0 * 1e9) * 0x9E3779B97F4A7C15ull ^ (uint64_t)time(NULL) ^ (pid << 32);
+    const char *seed = getenv("FLAUX_SEED");     /* for tests: the same random numbers every time */
+    if (seed && *seed) fx_rng_state = (uint64_t)atoll(seed) * 0x9E3779B97F4A7C15ull + 12345;
     if (!fx_rng_state) fx_rng_state = 1;
     for (int i = 0; i < 256; i++) { fx_chars[2 * i] = (char)i; fx_chars[2 * i + 1] = 0; }
     /* Flaux Studio reads the output as it comes, so don't hold it back */

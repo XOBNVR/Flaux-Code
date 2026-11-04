@@ -16,7 +16,10 @@ const [moveX, moveY] = (process.env.FLAUX_MOUSE_MOVE || "0,0").split(",").map(Nu
 let shown = 0, locked = false;
 const nothing = () => new Proxy({}, { get: (t, k) => (k in t ? t[k] : () => {}) });  // draws nothing
 const fakeCanvas = (w, h) => ({ width: w, height: h, getContext: nothing });
-const mouse = { x: 0, y: 0, down: false, mx: moveX, my: moveY };
+// FLAUX_HOLD_MOUSE=right (or left, middle): pretend those mouse buttons are held
+const held = process.env.FLAUX_HOLD_MOUSE || "";
+const mouse = { x: 0, y: 0, down: held.includes("left"), mx: moveX, my: moveY,
+                buttons: (held.includes("left") ? 1 : 0) | (held.includes("middle") ? 2 : 0) | (held.includes("right") ? 4 : 0) };
 const io = {
   write: (stream, text) => (stream === "err" ? process.stderr : process.stdout).write(text),
   ask: async (prompt) => {

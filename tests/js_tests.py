@@ -74,7 +74,8 @@ def main():
                 if l.startswith("# ") and ":" in l:
                     key, _, value = l[2:].partition(":")
                     header.setdefault(key.strip(), value.strip())
-            env = {"FLAUX_FRAMES": header.get("frames", "1"), "FLAUX_MOUSE_MOVE": header.get("mouse_move", "")}
+            env = {"FLAUX_FRAMES": header.get("frames", "1"), "FLAUX_MOUSE_MOVE": header.get("mouse_move", ""),
+                   "FLAUX_HOLD_MOUSE": header.get("hold_mouse", "")}
             code, out, err = run(path, "", tmp, env)
             if code != 0 or out != expected:
                 failures.append((path, f"exit {code}\n--- expected\n{expected}--- got\n{out}{err}"))
