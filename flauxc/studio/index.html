@@ -48,8 +48,8 @@ button:hover { border-color: var(--accent-2); }
 button:focus-visible, input:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 1px; }
 
 /* ------------------------------------------------------------- header */
-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel);
-         border-bottom: 1px solid var(--line); }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; background: var(--panel);
+         border-bottom: 1px solid var(--line); }   /* too many buttons for one row: they go on to a second row */
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 17px; margin-right: 10px; }
 .logo { width: 32px; height: 32px; border-radius: 8px; display: block; }
 #filename { color: var(--muted); margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -69,6 +69,10 @@ header button, .brand { white-space: nowrap; flex: none; }
 main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr); gap: 12px; padding: 12px;
        min-height: 0; }
 #left { display: grid; grid-template-rows: 1fr auto; gap: 12px; min-height: 0; min-width: 0; }
+/* not room for both side by side (phones, narrow windows): the code on top, what it says underneath */
+@media (max-width: 760px) {
+  main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; padding: 10px; }
+}
 .mode { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-left: 6px; }
 .mode button { border: 0; border-radius: 0; padding: 7px 14px; background: var(--panel); color: var(--muted); font-weight: 600; }
 .mode button.active { background: var(--accent); color: #fff; }
@@ -590,6 +594,32 @@ code.addEventListener("input", () => {
   clearTimeout(state.checkTimer);
   state.checkTimer = setTimeout(check, 600);
 });
+
+// How many letters fit across the editor right now (between 24 and 70)
+function editorColumns() {
+  const style = getComputedStyle(code), probe = document.createElement("span");
+  probe.style.cssText = `font: ${style.font}; letter-spacing: 0; position: absolute; visibility: hidden; white-space: pre`;
+  probe.textContent = "0".repeat(20);
+  document.body.appendChild(probe);
+  const each = probe.getBoundingClientRect().width / 20;
+  probe.remove();
+  const room = code.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  return each > 0 && room > 0 ? Math.max(24, Math.min(70, Math.floor(room / each) - 1)) : 60;
+}
+
+// Text as # comment lines that fit the editor, so it doesn't run off the side
+function commentLines(text, width = editorColumns() - 2) {
+  const out = [];
+  for (const para of String(text).split("\n")) {
+    let line = "";
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      if (line && line.length + 1 + word.length > width) { out.push(line); line = word; }
+      else line = line ? line + " " + word : word;
+    }
+    out.push(line);
+  }
+  return out.map((l) => ("# " + l).trimEnd()).join("\n");
+}
 
 function setContent(text) {
   code.value = text; code.scrollTop = 0; code.scrollLeft = 0;
@@ -1253,7 +1283,7 @@ const Course = (() => {
     if (state.mode === "blocks") await setMode("code");
     const ch = unit.challenge;
     state.path = null; state.example = false; state.lastChecked = null;
-    setContent("# Challenge: " + ch.task.replace(/`/g, "") + "\n\n" + (ch.starter || ""));
+    setContent(commentLines("Challenge: " + ch.task.replace(/`/g, "")) + "\n\n" + (ch.starter || ""));
     setDirty(false);
     state.challenge = unit.id;
     $("course-dialog").close();
