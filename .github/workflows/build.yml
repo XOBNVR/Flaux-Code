@@ -21,9 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install gcc, SDL2 and Mesa (OpenGL without a graphics card, for the 3D tests)
-        run: sudo apt-get update && sudo apt-get install -y gcc libsdl2-dev libegl1 libegl-mesa0 libgl1-mesa-dri xvfb
+        run: sudo apt-get update && sudo apt-get install -y gcc libsdl2-dev libegl1 libegl-mesa0 libgl1-mesa-dri xvfb python3-tk
       - name: Run all tests
         run: python3 tests/run_tests.py
+      - name: Test Flaux Studio, the app (a real window, on a pretend screen)
+        run: python3 tests/studio_app_test.py
       - name: Install a browser for the block editor test
         run: |
           npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright

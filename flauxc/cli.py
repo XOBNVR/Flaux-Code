@@ -221,6 +221,16 @@ def cmd_c(args):
 
 
 def cmd_studio(args):
+    # The app (its own window, made with Tk). `--web`, or no Tk on this computer: the
+    # older one, the same page as the website, in a browser window.
+    if not (args.web or args.no_window or args.port):
+        try:
+            from .studio import app
+        except ImportError:
+            app = None
+        if app:
+            app.main(args.file)
+            return
     from .studio import server
     server.main(args.file, port=args.port, show=not args.no_window, keep_running=args.keep_running)
 
@@ -265,6 +275,7 @@ def main(argv=None):
     p.add_argument("--port", type=int, default=0, help=argparse.SUPPRESS)
     p.add_argument("--no-window", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--keep-running", action="store_true", help=argparse.SUPPRESS)  # for tests
+    p.add_argument("--web", action="store_true", help="the Studio as a web page, in a browser window")
     p.set_defaults(func=cmd_studio)
 
     args = parser.parse_args(argv)

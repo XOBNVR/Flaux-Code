@@ -100,13 +100,15 @@ A few things are different in the browser:
 
 Flaux Studio is where you write and run your programs. Open it from the
 **Flaux Studio** icon on your Desktop or in the Start menu. It's a real
-Windows app with its own window (it isn't a web browser, and doesn't use
-Electron): it draws its pages with WebView2, the part of Windows 10 and 11
-that apps use for that.
+Windows app with its own window, made with Tk (the window toolkit that comes
+with Python): no web page, no web browser, no Electron. Its buttons and its
+Open and Save boxes are Windows' own, and your games open in windows of
+their own.
 
 ![Flaux Studio, showing a program with a mistake and the Apply fix button](docs/images/studio.png)
 
-- **Write** your program on the left. Colours show the different parts.
+- **Write** your program on the left. Colours show the different parts, and
+  **Tab** / **Shift+Tab** move lines right and left.
 - **Press the green Run button** (or **F5**). What your program says appears
   on the right. If it asks a question, type your answer in the box at the
   bottom and press **Enter**.
@@ -145,8 +147,9 @@ right-click it and choose **Run with Flaux**.
 
 ### Blocks or code
 
-Click **&#9638; Blocks** at the top to build your program from blocks
-instead of typing it. Drag blocks out of the menus on the left (**Say & Ask**,
+In **Flaux Studio on the web** (the website version), click **&#9638; Blocks**
+at the top to build your program from blocks instead of typing it. (The
+Windows app is for typing code: Blocks mode is on the website.) Drag blocks out of the menus on the left (**Say & Ask**,
 **Variables**, **Control**, **Drawing** and more) and snap them together.
 
 ![Flaux Studio in Blocks mode, with the code the blocks make underneath](docs/images/blocks.png)

@@ -63,34 +63,29 @@ try { Invoke-WebRequest "http://127.0.0.1:8790/" -UseBasicParsing | Out-Null } c
 Check ($code -eq 403) "Flaux Studio is running and protected (answered $code)"
 Stop-Process -Id $studio.Id -Force -ErrorAction SilentlyContinue
 
-# 7. the apps: Flaux Studio, and a game made with Flaux Studio on the web, each in a window of
-#    its own (WebView2, see installer\app). They need the WebView2 runtime (Windows 10 and 11
-#    have it; this computer gets it here if it hasn't).
+# 7. Flaux Studio, the app (a real window, made with Tk): it opens from FlauxStudio.exe, finds a
+#    mistake while typing, fixes it, runs the program and saves it (FLAUX_STUDIO_TEST: it writes
+#    what happened, then closes)
 Check (Test-Path "$app\FlauxStudio.exe") "FlauxStudio.exe installed"
-$guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-$wv2 = @("HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$guid", "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$guid",
-         "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$guid") |
-       ForEach-Object { (Get-ItemProperty $_ -ErrorAction SilentlyContinue).pv } | Where-Object { $_ -and $_ -ne "0.0.0.0" } |
-       Select-Object -First 1
-if (-not $wv2) {
-    Write-Host "Installing the WebView2 runtime..."
-    Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile "$env:TEMP\wv2setup.exe" -UseBasicParsing
-    Start-Process "$env:TEMP\wv2setup.exe" -Wait -ArgumentList "/silent", "/install" | Out-Null
-}
 function Wait-For($file, $seconds) {
     for ($i = 0; $i -lt $seconds -and -not (Test-Path $file); $i++) { Start-Sleep -Seconds 1 }
+    Start-Sleep -Seconds 1
     if (Test-Path $file) { Get-Content $file -Raw -Encoding UTF8 } else { "" }
 }
 $said = "$env:TEMP\flaux-studio-app.json"
 Remove-Item $said -ErrorAction SilentlyContinue
-$env:FLAUX_APP_TEST = $said      # (the app writes what the page says, then closes)
-$studioApp = Start-Process "$app\FlauxStudio.exe" -PassThru
+$env:FLAUX_STUDIO_TEST = $said
+Start-Process "$app\FlauxStudio.exe" | Out-Null
 $text = Wait-For $said 120
-Check ($text -match "Flaux Studio \|") "Flaux Studio opens in its own window ($text)"
-$studioApp.WaitForExit(15000) | Out-Null
-Start-Sleep -Seconds 2
+Remove-Item Env:FLAUX_STUDIO_TEST
+$report = if ($text) { $text | ConvertFrom-Json } else { $null }
+Check ($report -and $report.problem -match "scroe") "Flaux Studio opens and finds a mistake while you type ($($report.problem))"
+Check ($report -and $report.fixed_code -match "say score") "...Apply fix fixes it"
+Check ($report -and $report.output -match "^hi hi hi 10") "...Run runs it ($($report.output))"
+Check ($report -and $report.saved) "...and Save saves it"
+Start-Sleep -Seconds 3
 $left = Get-Process python, pythonw -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$app\*" }
-Check ($studioApp.HasExited -and -not $left) "closing Flaux Studio stops Flaux too"
+Check (-not $left) "closing Flaux Studio leaves nothing running"
 $left | Stop-Process -Force -ErrorAction SilentlyContinue
 
 & "$app\python\python.exe" "$root\installer\app\build_app.py" "$dir\apps" --cxx "$app\toolchain\bin\g++.exe" `

@@ -41,6 +41,20 @@ Get-ChildItem $app -Recurse -Directory -Filter "__pycache__" | Remove-Item -Recu
 Download "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip" "$tmp\python.zip"
 Expand-Archive "$tmp\python.zip" "$app\python"
 
+# 2b. Tk, for Flaux Studio's window (flauxc\studio\app.py). The embeddable Python leaves it out,
+#     so it comes from the same Python's installer part, tcltk.msi (unpacked, not installed).
+Download "https://www.python.org/ftp/python/$PythonVersion/amd64/tcltk.msi" "$tmp\tcltk.msi"
+$msi = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/a", "`"$tmp\tcltk.msi`"", "/qn", "TARGETDIR=`"$tmp\tcltk`""
+if ($msi.ExitCode -ne 0) { throw "Couldn't unpack tcltk.msi (exit code $($msi.ExitCode))" }
+Get-ChildItem "$tmp\tcltk\DLLs" -File | Where-Object { $_.Name -match '^(_tkinter\.pyd|tcl\d+t?\.dll|tk\d+t?\.dll|zlib1\.dll)$' } |
+    Copy-Item -Destination "$app\python\"
+Copy-Item -Recurse "$tmp\tcltk\Lib\tkinter" "$app\python\tkinter"
+Copy-Item -Recurse "$tmp\tcltk\tcl" "$app\python\tcl"
+Remove-Item -Recurse -Force "$app\python\tkinter\test" -ErrorAction SilentlyContinue
+$tk = & "$app\python\python.exe" -c "import tkinter; r = tkinter.Tk(); r.withdraw(); print('Tk', r.tk.call('info', 'patchlevel')); r.destroy()"
+if ($LASTEXITCODE -ne 0) { throw "Tk doesn't work in the bundled Python" }
+Write-Host $tk
+
 # 3. gcc (w64devkit): the newest release for 64-bit Windows
 $release = Invoke-RestMethod "https://api.github.com/repos/skeeto/w64devkit/releases/latest" -Headers $headers
 $asset = $release.assets | Where-Object { $_.name -match '^w64devkit-(x64-)?[\d.]+\.(exe|zip|7z\.exe)$' } | Select-Object -First 1
@@ -100,11 +114,12 @@ Write-Host "OpenXR loader: $($xrAsset.name) ($($xrDll.FullName))"
 & "$app\toolchain\bin\gcc.exe" -municode -O2 -Wall -o "$app\bin\flaux.exe" installer\launcher.c
 if ($LASTEXITCODE -ne 0) { throw "Couldn't build flaux.exe" }
 
-# 6. FlauxStudio.exe: Flaux Studio as a real app with its own window (WebView2, see installer\app)
-& "$app\python\python.exe" installer\app\build_app.py "$tmp\apps" --cxx "$app\toolchain\bin\g++.exe" --windres "$app\toolchain\bin\windres.exe"
+# 6. FlauxStudio.exe: opens Flaux Studio, the app (installer\studio_launcher.c, with the Flaux icon)
+Set-Content -Path "$tmp\studio.rc" -Value "1 ICON `"$($root -replace '\\','/')/assets/flaux.ico`"" -Encoding ASCII
+& "$app\toolchain\bin\windres.exe" "$tmp\studio.rc" -O coff -o "$tmp\studio-res.o"
+if ($LASTEXITCODE -ne 0) { throw "Couldn't add the icon to FlauxStudio.exe" }
+& "$app\toolchain\bin\gcc.exe" -municode -mwindows -O2 -Wall -o "$app\FlauxStudio.exe" installer\studio_launcher.c "$tmp\studio-res.o"
 if ($LASTEXITCODE -ne 0) { throw "Couldn't build FlauxStudio.exe" }
-Copy-Item "$tmp\apps\FlauxStudio.exe" "$app\"
-Write-Host "FlauxStudio.exe: $([math]::Round((Get-Item "$app\FlauxStudio.exe").Length / 1KB)) KB"
 
 Remove-Item -Recurse -Force $tmp
 $size = (Get-ChildItem $app -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
