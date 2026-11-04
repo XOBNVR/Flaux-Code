@@ -83,7 +83,8 @@ jobs:
 
   web:
     name: Flaux Studio on the web
-    runs-on: ubuntu-latest
+    # (24.04: the Emscripten and MinGW that TinyCC for Export is built and tested with)
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Get Pyodide (Python for web pages) and a browser for testing
