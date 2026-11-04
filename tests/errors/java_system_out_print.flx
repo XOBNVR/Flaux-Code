@@ -1,0 +1,4 @@
+# expect: Flaux uses `say.same` instead of `System.out.print`.
+# expect: say.same "x = " + x
+set x to 5
+System.out.print("x = " + x);

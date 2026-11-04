@@ -1,0 +1,33 @@
+repeat with i from 1 to 3
+    say.same "hi "
+end
+say "!"
+say.same "Score:", 10
+say.same " "
+say.same 2.5
+say.same " "
+say.same true
+say ""
+set nums to [1, 2, 3]
+say.same nums
+say " <- list"
+repeat with row from 1 to 4
+    repeat row times
+        say.same "*"
+    end
+    say ""
+end
+say.same "Loading"
+repeat 3 times
+    say.same "."
+end
+say.same("done")
+say ""
+set name to ask("Name:")
+say.same "Hi, "
+say.same name
+say "!"
+say.same "Ask on the same line: "
+set food to ask()
+say "You like {food}."
+say.same "The end"

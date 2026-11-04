@@ -121,7 +121,13 @@
     }
 
     // -------------------------------------------------------------- basics
-    fx.say = (values) => io.write("out", values.map(str).join(" ") + "\n");
+    // say.same leaves its line unfinished, so the next thing said goes right after it
+    let midLine = false;
+    fx.say = (values) => { io.write("out", values.map(str).join(" ") + "\n"); midLine = false; };
+    fx.saySame = (values) => {
+      const text = values.map(str).join(" ");
+      if (text) { io.write("out", text); midLine = !text.endsWith("\n"); }
+    };
     fx.div = (a, b, line) => { if (b === 0) fail(line, FIX_DIVIDE, "You can't divide by zero."); return a / b; };
     fx.floorDiv = (a, b, line) => { if (b === 0) fail(line, FIX_DIVIDE, "You can't divide by zero."); return Math.floor(a / b); };
     fx.mod = (a, b, line) => {
@@ -216,7 +222,11 @@
       whole: ([x], line) => typeof x === "string"
         ? (/^\s*[+-]?\d+\s*$/.test(x) ? parseInt(x, 10) : Math.trunc(toNumber(x, line))) : Math.trunc(x),
       is_number: ([t]) => numberText.test(t),
-      ask: async ([prompt]) => io.ask(prompt === undefined ? "" : str(prompt)),
+      ask: async ([prompt]) => {
+        const answer = await io.ask(prompt === undefined ? "" : str(prompt));
+        midLine = false;   // pressing Enter finished the line
+        return answer;
+      },
       clock: () => (io.now() - start) / 1000,
       length: ([x]) => x.length,
       contains: ([h, n]) => (typeof h === "string" ? h.includes(n) : h.some((v) => v === n)),
@@ -462,7 +472,10 @@
       screenshot: ([name], line) => { needWindow(line); if (io.screenshot) io.screenshot(str(name), back); },
     });
 
-    fx.finish = () => { if (win && dirty) present(); };
+    fx.finish = () => {
+      if (win && dirty) present();
+      if (midLine) { io.write("out", "\n"); midLine = false; }   // like the native version
+    };
     return fx;
   }
 

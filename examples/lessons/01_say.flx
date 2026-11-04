@@ -2,3 +2,9 @@
 say "Hello!"
 say("Hi there!")
 say "I am", 10, "years old"
+
+# say.same stays on the same line: the next thing said goes right after it
+repeat 3 times
+    say.same "hi "
+end
+say "!"

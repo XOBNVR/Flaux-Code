@@ -35,6 +35,8 @@ typedef struct { const char *p; int64_t n; } fx_text;
 static const char *fx_file = "?";
 static const char *const *fx_lines = 0;
 static int fx_nlines = 0;
+static bool fx_mid_line = false;   /* the last thing said was with say.same, so its line isn't finished */
+static bool fx_out_tty = false;    /* the output goes to a terminal (set by fx_init) */
 
 /* ---------------------------------------------------------- errors */
 
@@ -43,6 +45,7 @@ static int fx_nlines = 0;
 __attribute__((noinline, cold, noreturn, format(printf, 3, 4)))
 static void fx_fail(int line, const char *fix, const char *fmt, ...) {
     fflush(stdout);
+    fx_mid_line = false;   /* the problem message starts on a new line */
     bool color = fx_isatty(2);
     const char *red = color ? "\033[1;31m" : "", *bold = color ? "\033[1m" : "";
     const char *dim = color ? "\033[2m" : "", *off = color ? "\033[0m" : "";
@@ -218,10 +221,32 @@ static fx_text fx_text_lower(fx_text t) {
 
 /* ------------------------------------------------------------- say */
 
-static void fx_say_text(fx_text t) { fwrite(t.p, 1, (size_t)t.n, stdout); putchar('\n'); }
-static void fx_say_int(int64_t v) { printf("%" PRId64 "\n", v); }
-static void fx_say_bool(bool b) { puts(b ? "true" : "false"); }
-static void fx_say_float(double v) { char buf[64]; fx_fmt_float(buf, sizeof buf, v); puts(buf); }
+static void fx_say_text(fx_text t) { fwrite(t.p, 1, (size_t)t.n, stdout); putchar('\n'); fx_mid_line = false; }
+static void fx_say_int(int64_t v) { printf("%" PRId64 "\n", v); fx_mid_line = false; }
+static void fx_say_bool(bool b) { puts(b ? "true" : "false"); fx_mid_line = false; }
+static void fx_say_float(double v) { char buf[64]; fx_fmt_float(buf, sizeof buf, v); puts(buf); fx_mid_line = false; }
+
+/* `say.same`: the same, but the line isn't finished, so the next thing said
+ * goes right after it. A terminal only shows a line once it's finished, so
+ * there it's shown straight away instead. */
+static void fx_said_same(bool mid) {
+    fx_mid_line = mid;
+    if (fx_out_tty) fflush(stdout);
+}
+static void fx_say_same_text(fx_text t) {
+    fwrite(t.p, 1, (size_t)t.n, stdout);
+    fx_said_same(t.n ? t.p[t.n - 1] != '\n' : fx_mid_line);
+}
+static void fx_say_same_int(int64_t v) { printf("%" PRId64, v); fx_said_same(true); }
+static void fx_say_same_bool(bool b) { fputs(b ? "true" : "false", stdout); fx_said_same(true); }
+static void fx_say_same_float(double v) { char buf[64]; fx_fmt_float(buf, sizeof buf, v); fputs(buf, stdout); fx_said_same(true); }
+
+/* when the program ends halfway through a line, finish it (so a terminal's
+ * prompt doesn't end up on the same line) */
+static void fx_finish_line(void) {
+    if (fx_mid_line) { putchar('\n'); fx_mid_line = false; }
+    fflush(stdout);
+}
 
 /* ------------------------------------------------------------ maths */
 
@@ -347,6 +372,7 @@ static fx_text fx_ask(fx_text prompt) {
     }
     if (n && buf[n - 1] == '\r') n--;
     buf[n] = 0;
+    fx_mid_line = false;   /* pressing Enter finished the line */
     return (fx_text){ buf, (int64_t)n };
 }
 
@@ -501,6 +527,8 @@ static void fx_init(const char *file, const char *const *lines, int nlines) {
     /* Flaux Studio reads the output as it comes, so don't hold it back */
     const char *unbuffered = getenv("FLAUX_UNBUFFERED");
     if (unbuffered && *unbuffered) setvbuf(stdout, NULL, _IONBF, 0);
+    fx_out_tty = fx_isatty(1);
+    atexit(fx_finish_line);
 #ifdef _WIN32
     /* show letters like é and emoji properly, and allow colours */
     SetConsoleOutputCP(CP_UTF8);

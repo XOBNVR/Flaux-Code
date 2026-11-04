@@ -186,6 +186,7 @@ static bool @N_has(@N *l, @CT v) {
 """
 
 SAY_FUNCS = {INT: "fx_say_int", FLOAT: "fx_say_float", BOOL: "fx_say_bool", TEXT: "fx_say_text"}
+SAY_SAME_FUNCS = {t: f.replace("fx_say_", "fx_say_same_") for t, f in SAY_FUNCS.items()}
 TEXT_FUNCS = {INT: "fx_int_text", FLOAT: "fx_float_text", BOOL: "fx_bool_text"}
 C_COMPARE = {"=": "==", "!=": "!=", "<": "<", ">": ">", "<=": "<=", ">=": ">="}
 RENAME_SUFFIX = {TEXT: "_text", INT: "_number", FLOAT: "_decimal", BOOL: "_check"}
@@ -670,7 +671,8 @@ class Compiler:
     def stmt(self, s):
         getattr(self, "s_" + type(s).__name__)(s)
 
-    def s_Say(self, s):
+    def s_Say(self, s, same=False):
+        funcs = SAY_SAME_FUNCS if same else SAY_FUNCS
         results = []
         for value in s.values:
             c, t = self.expr(value)
@@ -684,16 +686,19 @@ class Compiler:
         if len(results) == 1:
             c, t = results[0]
             if is_list(t):
-                self.emit(f"fx_say_text({self.to_text(c, t)});")
+                self.emit(f"{funcs[TEXT]}({self.to_text(c, t)});")
             else:
-                self.emit(f"{SAY_FUNCS[t]}({c});")
+                self.emit(f"{funcs[t]}({c});")
             return
         parts = []
         for i, (c, t) in enumerate(results):  # several things: put a space between them
             if i:
                 parts.append('FX_LIT(" ")')
             parts.append(self.to_text(c, t))
-        self.emit(f"fx_say_text(fx_join((fx_text[]){{{', '.join(parts)}}}, {len(parts)}));")
+        self.emit(f"{funcs[TEXT]}(fx_join((fx_text[]){{{', '.join(parts)}}}, {len(parts)}));")
+
+    def s_SaySame(self, s):  # say.same: the same, without finishing the line
+        self.s_Say(s, same=True)
 
     def s_Set(self, s):
         target = s.target

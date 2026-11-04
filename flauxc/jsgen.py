@@ -94,6 +94,9 @@ class JsGen:
     def s_Say(self, s):
         self.emit(f"fx.say([{', '.join(self.ex(v) for v in s.values)}]);")
 
+    def s_SaySame(self, s):
+        self.emit(f"fx.saySame([{', '.join(self.ex(v) for v in s.values)}]);")
+
     def s_Set(self, s):
         if isinstance(s.target, N.Name):
             self.emit(f"v_{s.target.name} = {self.ex(s.value)};")

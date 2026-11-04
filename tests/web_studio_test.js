@@ -4,7 +4,7 @@
 //   python3 -m http.server --directory site 8790 &
 //   node tests/web_studio_test.js http://127.0.0.1:8790/
 //
-// Checks: Flaux starts in the page, a program runs and asks a question, a
+// Checks: Flaux starts in the page, a program runs and asks a question, say.same, a
 // problem while running is explained, Apply fix, Blocks mode, saving in the
 // browser, the graphics pixel tests from tests/graphics, pictures, keys,
 // fullscreen (size, keys and mouse positions, drawn at the screen's resolution,
@@ -66,6 +66,16 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.press("#input", "Enter");
   await page.waitForFunction(() => document.getElementById("console").textContent.includes("Finished"), null, { timeout: 60000 });
   check((await consoleText()).includes("Name? Mia\nHi Mia!\n1.5\n3\n4.5"), "a program runs and asks a question");
+
+  // say.same: the line grows while the program runs ("hi", then "hi hi", ...), then a say finishes it
+  await setCode('say "Start"\nrepeat 3 times\n    say.same "hi "\n    wait 0.4s\nend\nsay "!"\nsay "Next line"\n');
+  await page.click("#btn-run");
+  await page.waitForFunction(() => /Start\nhi hi $/.test(document.getElementById("console").textContent), null, { timeout: 60000 });
+  const midway = await consoleText();
+  await page.waitForFunction(() => document.getElementById("console").textContent.includes("Finished"), null, { timeout: 60000 });
+  const same = await consoleText();
+  check(midway.endsWith("Start\nhi hi ") && same.includes("Start\nhi hi hi !\nNext line\n"),
+        `say.same stays on the same line (${JSON.stringify(midway.slice(-14))} while running, then ${JSON.stringify(same.slice(0, 30))})`);
 
   // a problem while running
   await setCode("set nums to [1, 2, 3]\nsay nums[5]\n");

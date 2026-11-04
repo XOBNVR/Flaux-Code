@@ -54,6 +54,12 @@ if score > 10
     say "You win!"
 end"""
 
+SAY_SAME_EXAMPLE = """\
+repeat 3 times
+    say.same "hi "
+end
+say "!"            # shows: hi hi hi !"""
+
 
 class Lexer:
     def __init__(self, src, line=1, col=1, inner=False, full_src=None):
@@ -238,13 +244,28 @@ class Lexer:
         if ch == ".":
             if self.peek(1).isdigit():
                 self.error("Decimal numbers need a digit before the dot.", fix="0.")
+            said = re.search(r"(?<![A-Za-z0-9_])say$", before)
+            if said:  # say.Same, say.line, say.next...
+                other = re.match(r"[A-Za-z0-9_]*", after).group(0)
+                self.error(f"Flaux has `say` and `say.same`, but not `say.{other}`." if other else
+                           "A dot after `say` makes `say.same`.",
+                           col=self.col - 3, length=4 + len(other),
+                           hint="`say.same` says something and stays on the same line, so the next thing said "
+                                "goes right after it. (Plain `say` finishes the line.) Change it to:",
+                           fix="say.same", example=SAY_SAME_EXAMPLE)
             call = re.match(r"((?:[A-Za-z_]+\.)*)([A-Za-z_]+)\((.*)\)\s*;?\s*(#.*)?$", after)
             word = re.search(r"([A-Za-z_][A-Za-z0-9_]*)$", before)
             if call and word:
                 method, inside = call.group(2), call.group(3).strip()
                 start_col = self.col - len(word.group(1))
                 whole = word.group(1) + "." + call.group(1) + method
-                if method in ("log", "WriteLine", "Write", "println", "print", "printf", "info"):
+                if method in ("Write", "write", "print", "Print"):  # these don't finish the line
+                    self.error(f"Flaux uses `say.same` instead of `{whole}`.",
+                               col=start_col, length=len(whole),
+                               hint="`say.same` says something without finishing the line, so the next thing "
+                                    "said goes right after it. Change the line to:",
+                               fix_line=indent + "say.same " + inside)
+                if method in ("log", "WriteLine", "println", "Println", "printf", "info", "puts", "writeln"):
                     self.error(f"Flaux uses `say` instead of `{whole}`.",
                                col=start_col, length=len(whole),
                                hint="Change the line to:", fix_line=indent + "say " + inside)
@@ -333,6 +354,14 @@ class Lexer:
         while self.peek().isascii() and (self.peek().isalnum() or self.peek() == "_"):
             self.advance()
         word = self.src[start:self.i]
+        # `say.same` (says something and stays on the same line) is the one
+        # Flaux word with a dot in it
+        after = self.peek(5)
+        if (word == "say" and self.src.startswith(".same", self.i)
+                and not (after.isascii() and (after.isalnum() or after == "_"))):
+            for _ in range(5):
+                self.advance()
+            word = "say.same"
         self.add("name", word, line, col, len(word))
 
     def string(self):

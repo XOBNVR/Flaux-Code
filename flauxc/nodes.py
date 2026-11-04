@@ -86,6 +86,10 @@ class Say(Node):
     fields = ("values",)  # say a, b  or  say(a, b): shown with spaces between
 
 
+class SaySame(Say):
+    fields = ("values",)  # say.same a, b: the same, but the line isn't finished
+
+
 class If(Node):
     fields = ("branches", "else_body")  # branches: list of (condition, body)
 
