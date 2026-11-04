@@ -49,6 +49,7 @@ os.environ["FLAUX_STRICT_C"] = "1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
+sys.path.insert(0, HERE)   # for blocks_roundtrip (Windows' embeddable Python leaves the script's folder out)
 
 from flauxc.cli import BUNDLED_MESA, BUNDLED_SDL, EXE, compile_c  # noqa: E402
 from flauxc.compiler import compile_source  # noqa: E402
