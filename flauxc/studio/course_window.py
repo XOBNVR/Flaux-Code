@@ -8,6 +8,7 @@ import json
 import os
 import random
 import re
+import textwrap
 
 import tkinter as tk
 from tkinter import ttk
@@ -413,7 +414,9 @@ class CourseWindow:
             return
         ch = self.unit["challenge"]
         starter = ch["starter"] or ""
-        header = "# Challenge: " + ch["task"].replace("`", "") + "\n"
+        # as # lines of at most 60 letters, so the task doesn't run off the side of the editor
+        task = textwrap.wrap("Challenge: " + ch["task"].replace("`", ""), 60)
+        header = "".join("# " + line + "\n" for line in task)
         app.path, app.example, app.dirty = None, False, False
         app.set_code(header + "\n" + starter)
         app.update_title()

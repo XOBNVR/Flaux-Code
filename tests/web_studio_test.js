@@ -177,6 +177,13 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.click("#c-foot button");
   await page.waitForFunction(() => !document.getElementById("course-dialog").open);
   const started_ = await page.evaluate(() => code.value);
+  const fits = await page.evaluate(() => {
+    const c = document.getElementById("code"), h = document.querySelector("header");
+    return { code: c.scrollWidth - c.clientWidth, header: h.scrollWidth - h.clientWidth,
+             run: document.getElementById("btn-run").getBoundingClientRect().right <= innerWidth };
+  });
+  check(fits.code <= 0 && fits.header <= 0 && fits.run,
+        `nothing is cut off: the challenge's text fits the editor, the buttons fit the page (${JSON.stringify(fits)})`);
   await setCode(started_ + 'say "My robot is Bolt"\nsay "Beep boop!"\n');
   await page.click("#btn-run");
   await page.waitForFunction(() => /Challenge done|Stopped|Finished/.test(document.getElementById("console").textContent), null, { timeout: 60000 });
