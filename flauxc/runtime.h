@@ -81,7 +81,7 @@ static void fx_pause(void) {
     if (fx_paused) return;
     fx_paused = true;
     DWORD ids[4], mode;
-    if (GetConsoleProcessList(ids, 4) != 1) return;
+    if (GetConsoleProcessList(ids, 4) != 1 || !GetConsoleWindow()) return;
     if (!GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) ||
         !GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode)) return;
     fputs("\nPress Enter to close this window.", stdout);
@@ -570,7 +570,8 @@ static LONG CALLBACK fx_crash(PEXCEPTION_POINTERS info) {
         err = CreateFileA("CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     }
     WriteFile(err, fx_crash_msg, (DWORD)(sizeof fx_crash_msg - 1), &n, NULL);
-    if (GetConsoleProcessList(ids, 4) == 1) {   /* a window opened just for this program: wait for Enter */
+    if (GetConsoleProcessList(ids, 4) == 1 && GetConsoleWindow() &&
+        GetFileType(GetStdHandle(STD_INPUT_HANDLE)) != FILE_TYPE_PIPE) {   /* a window opened just for this program: wait for Enter */
         static const char wait_msg[] = "\nPress Enter to close this window.";
         WriteFile(err, wait_msg, (DWORD)(sizeof wait_msg - 1), &n, NULL);
         HANDLE in = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
