@@ -63,6 +63,7 @@ def main():
          f"a block dragged out of the menus with the mouse snaps under the last one "
          f"({got.get('blocks_dragged', '')[-40:]!r})"),
         (got.get("night") is True, "Night mode"),
+        ("XOBNVR" in got.get("credit", ""), f"the XOBNVR credit is shown ({got.get('credit')!r})"),
         (got.get("course_units") == 18 and got.get("course_questions", 0) >= 1000,
          f"the Course opens ({got.get('course_units')} units, {got.get('course_questions')} questions)"),
         (got.get("quiz_right", "").startswith("✓") and got.get("quiz_wrong", "").startswith("✗"),

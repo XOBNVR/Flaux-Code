@@ -169,6 +169,14 @@ def lesson_name(name):
     return f"Lesson {int(m.group(1))}: {m.group(2).replace('_', ' ')}" if m else name
 
 
+# Credit (XOBNVR): the author's mark, stored encoded and decoded when the window is built.
+_CREDIT = [17, 61, 56, 57, 124, 62, 37, 124, 4, 19, 30, 18, 10, 14]
+
+
+def credit_text():
+    return "".join(chr(c ^ 0x5c) for c in _CREDIT)
+
+
 class StudioApp:
     def __init__(self, root, open_file=None, home=None):
         self.root = root
@@ -295,6 +303,8 @@ class StudioApp:
         self.status_label.pack(side="left")
         self.where_var = tk.StringVar()
         ttk.Label(status, textvariable=self.where_var, style="Muted.Bar.TLabel").pack(side="right")
+        self.credit_label = ttk.Label(status, text=credit_text(), style="Muted.Bar.TLabel")
+        self.credit_label.pack(side="right", padx=(0, 14))
 
         panes = self.panes = ttk.PanedWindow(root, orient="horizontal")
         panes.pack(fill="both", expand=True)
@@ -1125,6 +1135,7 @@ class StudioApp:
             self.toggle_blocks()
             self.toggle_night()
             report["night"] = self.night
+            report["credit"] = self.credit_label.cget("text")
             # the Course: a quiz question answered right and one wrong, then a challenge done in the editor
             self.dirty = False
             self.open_course()

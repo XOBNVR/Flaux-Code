@@ -144,6 +144,15 @@ function check(ok, what) { console.log((ok ? "OK    " : "FAIL  ") + what); if (!
   await page.waitForFunction(() => (localStorage.getItem("flaux-web-programs") || "").includes("web_test.flx"));
   check(true, "a program is saved in the browser");
 
+  // the author's credit (XOBNVR): shown, and it comes back if removed or changed
+  const creditShown = await page.textContent("#credit");
+  await page.evaluate(() => { const e = document.getElementById("credit"); if (e) e.remove(); });
+  await page.evaluate(() => { const a = document.querySelector("#credit a"); if (a) a.textContent = "x"; });
+  await page.waitForTimeout(150);
+  const creditBack = await page.textContent("#credit").catch(() => "");
+  check(creditShown.includes("XOBNVR") && creditBack.includes("XOBNVR"),
+        `the XOBNVR credit shows and restores itself (${JSON.stringify(creditShown)} -> ${JSON.stringify(creditBack)})`);
+
   // the Course: a quiz question answered right and one wrong, then a challenge done in the editor
   const savedPath = await page.evaluate(() => state.path);
   await page.click("#btn-course");

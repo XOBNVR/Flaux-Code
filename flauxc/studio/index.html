@@ -157,6 +157,10 @@ main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr
 footer { padding: 6px 14px; background: var(--panel); border-top: 1px solid var(--line); color: var(--muted);
          font-size: 13.5px; display: flex; gap: 14px; }
 footer .good { color: var(--ok); font-weight: 600; } footer .bad { color: #b76b00; font-weight: 600; }
+footer .spacer { flex: 1; }
+#credit { color: var(--muted); white-space: nowrap; }
+#credit a { color: inherit; text-decoration: none; font-weight: 600; }
+#credit a:hover { text-decoration: underline; }
 
 /* ------------------------------------------------------------ dialogs */
 dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(560px, 92vw);
@@ -333,7 +337,7 @@ a.get-app { text-decoration: none; color: var(--text); border: 1px solid var(--l
   </section>
 </main>
 
-<footer><span id="status">Ready</span><span id="where"></span></footer>
+<footer><span id="status">Ready</span><span id="where"></span><span class="spacer"></span><span id="credit"></span></footer>
 
 <dialog id="open-dialog">
   <div class="d-body">
@@ -1370,6 +1374,31 @@ if (window.FlauxWeb) {
     });
   });
 }
+
+// Credit (XOBNVR). The author's mark: stored encoded, decoded at load, and put
+// back if the footer line is removed or changed while the page is open. (Flaux is
+// open source, so this stops casual removal, not a determined edit of the source.)
+const _xo = [118,90,95,94,27,89,66,27,99,116,121,117,109,105];
+function _xoText() { return _xo.map((c) => String.fromCharCode(c ^ 0x3b)).join(""); }
+function _xoEnsure() {
+  const foot = document.querySelector("footer");
+  if (!foot) return;
+  let el = document.getElementById("credit");
+  if (!el) { el = document.createElement("span"); el.id = "credit"; foot.appendChild(el); }
+  const want = _xoText(), url = "https://github.com/XOBNVR/Flaux-Code";
+  const a = el.firstChild;
+  if (!a || a.tagName !== "A" || a.textContent !== want || a.getAttribute("href") !== url) {
+    el.textContent = "";
+    const link = document.createElement("a");
+    link.href = url; link.target = "_blank"; link.rel = "noopener"; link.textContent = want;
+    el.appendChild(link);
+  }
+}
+_xoEnsure();
+try {
+  new MutationObserver(_xoEnsure).observe(document.querySelector("footer"),
+    { childList: true, subtree: true, characterData: true, attributes: true });
+} catch (e) {}
 
 (async function start() {
   try { const s = localStorage.getItem("flaux-size"); if (s) setSize(Number(s)); } catch (e) {}
