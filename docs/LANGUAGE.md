@@ -64,6 +64,53 @@ say()                         # an empty line
 
 You can also put values inside text with `{ }` (see [Text](#text)).
 
+### Staying on the same line: `say.same`
+
+`say` finishes its line, so the next thing said starts on a new one.
+`say.same` doesn't: whatever is said next goes right after it, on the
+same line. It adds exactly what you give it, so put a space in the text
+if you want one:
+
+```
+repeat 3 times
+    say.same "hi "
+end
+say "!"                       # hi hi hi !
+```
+
+After the first time round the loop the line says `hi`, after the second
+`hi hi`, and so on. A plain `say` (or `say()` for nothing more) finishes
+the line. It's handy for patterns and for progress dots:
+
+```
+repeat with row from 1 to 3
+    repeat row times
+        say.same "*"
+    end
+    say()
+end
+say.same "Loading"
+repeat 3 times
+    say.same "."
+    wait 0.5s
+end
+say " done!"
+```
+
+shows
+
+```
+*
+**
+***
+Loading... done!
+```
+
+`say.same` takes the same things as `say`: brackets, or several values
+separated by commas (shown with a space between each). An `ask` after it
+asks on the same line. If a program ends halfway through a line, Flaux
+finishes the line for you.
+
 ## Variables
 
 A variable is a name that holds a value. Make one with `set ... to ...`:
@@ -843,7 +890,7 @@ compares with Rust, C++, C# and Python.
 These words have special meanings, so they can't be used as names:
 
 `add` `and` `else` `end` `false` `function` `if` `is` `mod` `not` `or`
-`repeat` `return` `say` `set` `skip` `stop` `subtract` `true` `wait`
+`repeat` `return` `say` `say.same` `set` `skip` `stop` `subtract` `true` `wait`
 
 `shader` starts a shader when it begins a line on its own, like
 `shader glow` (it can still be used as a name elsewhere).

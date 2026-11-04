@@ -1,0 +1,4 @@
+# expect: To stay on the same line, write `say.same`, with a dot.
+# expect: How to fix it:
+# expect: say.same "hi "
+say same "hi "

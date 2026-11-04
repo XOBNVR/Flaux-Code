@@ -300,8 +300,11 @@ class ShaderGen:
         self.has_return = True
         self.emit(f"return {code};")
 
+    def s_SaySame(self, s):
+        self.s_Say(s)
+
     def s_Say(self, s):
-        raise self.why_not(s, "`say`", hint="A shader runs on the graphics card, millions of times a frame, so "
+        raise self.why_not(s, "`say.same`" if isinstance(s, N.SaySame) else "`say`", hint="A shader runs on the graphics card, millions of times a frame, so "
                            "it can't show text. To see a number, turn it into a colour, like "
                            "return rgb(number, 0, 0).")
 

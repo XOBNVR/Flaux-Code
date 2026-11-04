@@ -240,6 +240,19 @@ I am 10 years old
 > Text always goes inside double quotes `" "`. Brackets after `say` are
 > optional. Commas let you say several things on one line.
 
+`say.same` says something **without** finishing the line, so the next thing
+said goes right after it:
+
+```
+repeat 3 times
+    say.same "hi "
+end
+say "!"
+```
+
+Flaux shows `hi hi hi !` on one line (first `hi`, then `hi hi`, then
+`hi hi hi`). A plain `say` finishes the line.
+
 ### Lesson 2: Variables
 
 A **variable** is a box with a name. You put something in it with

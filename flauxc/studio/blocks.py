@@ -168,6 +168,11 @@ class ToBlocks:
             out[0] = first[: len(first) - len(self.trailing[s.line])].rstrip().rstrip("#").rstrip()
         return "\n".join(out)
 
+    def s_SaySame(self, s):
+        if len(s.values) == 1:
+            return self.block("flx_say_same", inputs={"VALUE": self.val(s.values[0])})
+        return None
+
     def s_Say(self, s):
         if not s.values:
             return self.block("flx_say_blank")

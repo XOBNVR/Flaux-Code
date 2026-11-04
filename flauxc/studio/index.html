@@ -347,6 +347,7 @@ const BLOCK_START = /^\s*(if|else|repeat|function|shader)\b/;
 
 const SNIPPETS = [
   ["Say something", 'say "Hello!"'],
+  ["Say on the same line", 'repeat 3 times\n    say.same "hi "\nend\nsay "!"'],
   ["Make a variable", "set score to 0\nadd 1 to score"],
   ["Ask a question", 'set name to ask("What\'s your name?")\nsay "Hi {name}!"'],
   ["If ... else", 'if score > 10\n    say "You win!"\nelse\n    say "Keep going"\nend'],
@@ -412,6 +413,7 @@ function tokens(line) {
     }
     let m;
     if ((m = /^\d[\d_]*(\.\d+)?(e[+-]?\d+)?([smhd](?!\w))?/i.exec(line.slice(i)))) { push("num", m[0]); i += m[0].length; continue; }
+    if ((m = /^say\.same(?!\w)/.exec(line.slice(i))) && !/\w$/.test(line.slice(0, i))) { push("kw", m[0]); i += m[0].length; continue; }
     if ((m = /^[A-Za-z_]\w*/.exec(line.slice(i)))) {
       const w = m[0], next = line.slice(i + w.length);
       let cls = "";

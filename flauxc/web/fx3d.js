@@ -971,11 +971,14 @@
       return hands[s] ? hands[s][k] : camEye[k];
     }
 
+    const finish2d = fx.finish;   // (it also finishes a line say.same left open)
     fx.finish = async () => {
-      if (!gl) return;
-      await waitForLoading();
-      if (dirty) renderFrame();
-      else present();
+      if (gl) {
+        await waitForLoading();
+        if (dirty) renderFrame();
+        else present();
+      }
+      finish2d();
     };
     fx.gl = () => gl;   // for tests
   }

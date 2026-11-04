@@ -1,0 +1,8 @@
+# frames: 1
+# pixel: 5 5 #000000
+# say.same in a 3D program: the line it leaves open is finished at the end.
+window(100, 100)
+sky("black")
+say.same "3D:"
+say.same " ready"
+show()

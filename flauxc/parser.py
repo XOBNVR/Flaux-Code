@@ -28,6 +28,7 @@ from .errors import FlauxError
 RESERVED = {
     "set", "add", "subtract", "say", "if", "else", "end", "repeat", "function",
     "return", "and", "or", "not", "is", "true", "false", "mod", "stop", "skip", "wait",
+    "say.same",
 }
 
 # `wait` units: the word (or letter) after the amount, and the letter it means.
@@ -60,6 +61,7 @@ OTHER_LANGUAGE_WORDS = {
 EXAMPLES = {
     "set": "set score to 0\nset name to \"Sam\"\nset nums to [1, 2, 3]",
     "say": "say \"Hello!\"\nsay(\"Hello!\")\nsay \"Score:\", score\nsay \"Score: {score}\"",
+    "say.same": "repeat 3 times\n    say.same \"hi \"\nend\nsay \"!\"            # shows: hi hi hi !",
     "add": "add 1 to score\nadd \"Sam\" to names",
     "subtract": "subtract 1 from lives",
     "if": "if score > 10\n    say \"You win!\"\nelse\n    say \"Keep going\"\nend",
@@ -367,7 +369,7 @@ class Parser:
         if self.at_shader():
             return self.parse_shader()
         if tok.kind == "name":
-            handler = getattr(self, "stmt_" + tok.value, None)
+            handler = getattr(self, "stmt_" + tok.value.replace(".", "_"), None)
             if handler is not None and tok.value in RESERVED | {"function"}:
                 return handler()
             if (tok.value in OTHER_LANGUAGE_WORDS and tok.value not in self.own_functions
@@ -543,9 +545,29 @@ class Parser:
 
     def stmt_say(self):
         start = self.next()
+        values = self.say_values(start, "say")
+        pos = self.span(start)
+        self.end_of_line()
+        return N.Say(values, **pos)
+
+    def stmt_say_same(self):
+        """`say.same "hi "`: like say, but the line isn't finished, so the
+        next thing said goes on the same line."""
+        start = self.next()
+        values = self.say_values(start, "say.same")
+        if not values:
+            raise self.error(start, "`say.same` needs something to say.",
+                             hint="Put text in quotes, or a variable, inside the brackets:",
+                             example=EXAMPLES["say.same"])
+        pos = self.span(start)
+        self.end_of_line()
+        return N.SaySame(values, **pos)
+
+    def say_values(self, start, word):
+        """What comes after `say` or `say.same`: one or more values."""
         if self.at_line_end():
-            raise self.error(start, "`say` needs something to say.",
-                             hint="Put text in quotes, or a variable, after `say`:", example=EXAMPLES["say"])
+            raise self.error(start, f"`{word}` needs something to say.",
+                             hint=f"Put text in quotes, or a variable, after `{word}`:", example=EXAMPLES[word])
         if self.at_op("(") and self.brackets_fill_line():
             # say("hi") or say("Score:", 10), like print(...) in other languages
             open_tok = self.next()
@@ -564,12 +586,16 @@ class Parser:
             self.next()
         else:
             values = [self.parse_expression()]
+            if (word == "say" and isinstance(values[0], N.Name) and values[0].name == "same"
+                    and values[0].line == start.line and not self.at_line_end() and not self.at_op(",")):
+                raise self.error(start, "To stay on the same line, write `say.same`, with a dot.",
+                                 length=values[0].col + values[0].length - start.col,
+                                 hint="`say.same` says something without finishing the line. Change it to:",
+                                 fix="say.same", example=EXAMPLES["say.same"])
             while self.at_op(","):
                 self.next()
                 values.append(self.parse_expression())
-        pos = self.span(start)
-        self.end_of_line()
-        return N.Say(values, **pos)
+        return values
 
     def brackets_fill_line(self):
         """True if the `(` here closes right at the end of the line, as in

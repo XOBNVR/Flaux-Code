@@ -1,0 +1,8 @@
+# expect: Shaders can't use `say.same`.
+shader glow
+    say.same "hi"
+    return "red"
+end
+window(100, 100)
+cube(0, 0, 0, 1, glow)
+show()
