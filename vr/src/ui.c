@@ -93,20 +93,22 @@ static const char *const ARROW[27] = {
 #define ARROW_W 16
 #define ARROW_H 27
 #define ARROW_UP 8            /* each square of the arrow becomes 8x8 pixels, so its edges stay sharp */
-static GLuint tex_arrow;
+static GLuint tex_arrow, tex_arrow_fill, tex_arrow_edge;
 
-static void make_arrow(void) {
+/* part: 0 the whole arrow (black outline, white inside), 1 just the inside, 2 just the outline (white, to tint) */
+static GLuint make_arrow(int part) {
     const int w = (ARROW_W + 2) * ARROW_UP, h = (ARROW_H + 2) * ARROW_UP;
     unsigned char *px = calloc((size_t)w * h, 4);
     for (int y = 0; y < ARROW_H * ARROW_UP; y++)
         for (int x = 0; x < ARROW_W * ARROW_UP; x++) {
             char c = ARROW[y / ARROW_UP][x / ARROW_UP];
-            if (c == ' ') continue;
+            if (c == ' ' || (part == 1 && c != '.') || (part == 2 && c != 'X')) continue;
             unsigned char *p = px + ((size_t)(y + ARROW_UP) * w + x + ARROW_UP) * 4;
-            p[0] = p[1] = p[2] = c == '.' ? 255 : 0; p[3] = 255;
+            p[0] = p[1] = p[2] = (c == '.' || part == 2) ? 255 : 0; p[3] = 255;
         }
-    glGenTextures(1, &tex_arrow);
-    glBindTexture(GL_TEXTURE_2D, tex_arrow);
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
     glTexImage2D(GL_TEXTURE_2D, 0, g_encode ? GL_RGBA8 : GL_SRGB8_ALPHA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     glGenerateMipmap(GL_TEXTURE_2D);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -114,10 +116,11 @@ static void make_arrow(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     free(px);
+    return tex;
 }
 
 void ui_init(void) {
-    make_arrow();
+    tex_arrow = make_arrow(0); tex_arrow_fill = make_arrow(1); tex_arrow_edge = make_arrow(2);
     prog = gfx_program(VS, FS, "ui");
     verts = malloc(sizeof(float) * VFLOATS * MAX_VERTS);
     glGenVertexArrays(1, &vao); glBindVertexArray(vao);
@@ -174,7 +177,7 @@ void ui_frame(Panel **ps, int count, float dt, double time) {
         if (active_id[h] && !p->down) active_id[h] = 0;
         for (int i = 0; i < npanels; i++) {
             float px, py, t;
-            if (!panels[i]->visible || !ray_panel(panels[i], p->origin, p->dir, &px, &py, &t)) continue;
+            if (!panels[i]->visible || panels[i]->passive || !ray_panel(panels[i], p->origin, p->dir, &px, &py, &t)) continue;
             int held = active_id[h] && active_panel[h] == i;       /* dragging: stay with this panel */
             int inside = px >= 0 && py >= 0 && px <= panels[i]->pw && py <= panels[i]->ph;
             if (held || (inside && t < p->dist && !(active_id[h] && active_panel[h] != i))) {
@@ -376,6 +379,12 @@ void ui_text_fit(float x, float y, float size, float maxw, Col c, const char *s)
         n--;
     }
     ui_text(x, y, size, c, n ? buf : "");
+}
+
+/* another player's arrow: white inside, with an outline in their colour (its tip at x, y) */
+void ui_arrow(float x, float y, float k, Col outline) {
+    ui_image(x, y, (ARROW_W + 2) * k, (ARROW_H + 2) * k, 0, tex_arrow_fill, 0, 0, 1, 1, rgba(0xFFFFFF, 1));
+    ui_image(x, y, (ARROW_W + 2) * k, (ARROW_H + 2) * k, 0, tex_arrow_edge, 0, 0, 1, 1, outline);
 }
 
 void ui_end(void) {

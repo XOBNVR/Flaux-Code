@@ -189,21 +189,38 @@ static void tour(void) {
         Obj *o = NULL;
         for (int i = 0; i < g_obj_count; i++) if (g_obj[i].shape == SH_SPHERE) o = &g_obj[i];
         head(1.2f, 1.7f, 2.2f, o->pos);
-        ed.selected = o->id; ed.tool = -1; ed.xform = 0;
+        ed.selected = o->id; ed.tool = -1; ed.xform = 3;
         fi.hand[0].active = 0;
         aim_world(1, v3(o->pos.x, o->pos.y + 0.4f, o->pos.z)); frames(3);
         V3 was = o->pos;
-        float reach = 0.5f * fmaxf(o->scale.x, fmaxf(o->scale.y, o->scale.z)) + 0.16f + 0.07f * v3len(v3sub(o->pos, ed.head.p));
+        float reach = 0.5f * fmaxf(o->scale.x, fmaxf(o->scale.y, o->scale.z)) + 0.20f + 0.08f * v3len(v3sub(o->pos, ed.head.p));
         V3 handle = v3(o->pos.x + reach, o->pos.y, o->pos.z);
-        aim_world(1, handle); frames(4); shot("16_handles_move");
+        aim_world(1, handle); frames(4); shot("16_handles_all");
         fi.hand[1].trigger = 1; frames(2);
         aim_world(1, v3(handle.x + 1.0f, handle.y, handle.z)); frames(4);
         fi.hand[1].trigger = 0; frames(2);
         fprintf(stderr, "handle drag: x %.2f -> %.2f (y %.2f -> %.2f, z %.2f -> %.2f)\n", (double)was.x, (double)o->pos.x, (double)was.y,
                 (double)o->pos.y, (double)was.z, (double)o->pos.z);
-        ed.xform = 1; aim_world(1, v3(o->pos.x, o->pos.y + 3, o->pos.z)); frames(6); shot("17_handles_turn");
-        ed.xform = 2; frames(6); shot("18_handles_size");
-        ed.xform = 0; ed.selected = 0;
+        {   /* drag the green bead (it turns the shape about y) a quarter of the way round, then stretch it with the red cube */
+            ed.xform = 3; frames(2);
+            float r = (0.5f * fmaxf(o->scale.x, fmaxf(o->scale.y, o->scale.z)) + 0.20f + 0.08f * v3len(v3sub(o->pos, ed.head.p))) * 0.78f;
+            Q4 q0 = o->rot;
+            aim_world(1, v3(o->pos.x + r * 0.7071f, o->pos.y, o->pos.z + r * 0.7071f)); frames(4);
+            fi.hand[1].trigger = 1; frames(2);
+            aim_world(1, v3(o->pos.x + r * 0.7071f, o->pos.y, o->pos.z - r * 0.7071f)); frames(4);
+            shot("17_handles_turning");
+            fi.hand[1].trigger = 0; frames(2);
+            fprintf(stderr, "bead drag: turned %.0f degrees about y\n", (double)(2 * acosf(fabsf(fclamp(q4mul(o->rot, q4conj(q0)).w, -1, 1))) * 57.2958f));
+            float h0 = o->scale.y;                  /* the green cube on top: pull it up half a metre */
+            V3 cube = v3add(o->pos, v3mul(q4rot(o->rot, v3(0, 1, 0)), 0.5f * o->scale.y + 0.05f + 0.03f * v3len(v3sub(o->pos, ed.head.p))));
+            aim_world(1, cube); frames(4);
+            fi.hand[1].trigger = 1; frames(2);
+            aim_world(1, v3add(cube, v3(0, 0.5f, 0))); frames(4);
+            shot("18_handles_stretching");
+            fi.hand[1].trigger = 0; frames(2);
+            fprintf(stderr, "cube drag: height %.2f -> %.2f\n", (double)h0, (double)o->scale.y);
+        }
+        ed.selected = 0;
 
         /* hold a grip on nothing and pull the hand 0.4 m back: you should go 0.4 m forward */
         head(0, 1.6f, 0, v3(0, 1.45f, -1));
@@ -213,6 +230,13 @@ static void tour(void) {
         fi.hand[1].grip.p.z += 0.4f; fi.hand[1].aim.p.z += 0.4f; frames(3);
         fi.hand[1].squeeze = 0; frames(2);
         fprintf(stderr, "grip pull: moved %.2f m forward\n", (double)(rig0.z - ed.rig_pos.z));
+        V3 rig1 = ed.rig_pos;
+        fi.hand[1].squeeze = 1; frames(2); fi.hand[1].grip.p.y -= 0.3f; fi.hand[1].aim.p.y -= 0.3f; frames(3); fi.hand[1].squeeze = 0; frames(2);
+        fprintf(stderr, "grip pull down: floated %.2f m up\n", (double)(ed.rig_pos.y - rig1.y));
+        V3 rig2 = ed.rig_pos; float yaw2 = ed.rig_yaw;
+        fi.hand[0].active = 1; fi.hand[0].sx = 1; fi.hand[0].sy = 1; fi.hand[1].sx = 1; fi.hand[1].sy = 1; frames(20);
+        fi.hand[0].sx = fi.hand[0].sy = fi.hand[1].sx = fi.hand[1].sy = 0; fi.hand[0].active = 0;
+        fprintf(stderr, "thumbsticks: moved %.2f m, turned %.2f\n", (double)v3len(v3sub(ed.rig_pos, rig2)), (double)(ed.rig_yaw - yaw2));
         ed_teleport(v3(0, 0, 2));
     }
     {   /* hold both controllers up in front of the face */
@@ -275,7 +299,7 @@ static void server_room(const char *address, const char *room_code, int first) {
         if (net_mode() != 2) continue;
         if (first && step == 0 && i > 60) { copilot_run("a tower of 3 red cubes"); step = 1; }
         if (!first && step == 0 && i > 260) { copilot_run("a ring of 6 gold balls"); step = 1; }
-        if (first && step == 1 && i == 480) { head(-0.6f, 1.75f, 0.6f, v3(1.1f, 1.1f, -0.6f)); shot("19_other_player"); }
+        if (first && step == 1 && i == 480) { head(-0.4f, 1.7f, 0.2f, v3(0.9f, 1.0f, -1.0f)); shot("19_other_player"); }
         if (first && step == 1 && i == 500) { net_set_lock(1); step = 2; }
         if (first && step == 2 && i == 700) shot("20_other_player_locked");
         if (!first && step == 1 && i == 560) { before_lock = g_obj_count; copilot_run("a wall 3 by 2"); step = 2; }

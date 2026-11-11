@@ -19,7 +19,7 @@
 #include <string.h>
 #include <GLES3/gl3.h>
 
-#define FX_VERSION "2.2.0"
+#define FX_VERSION "2.3.0"
 #define FX_PI 3.14159265358979f
 
 /* ---------- maths ---------- */
@@ -190,6 +190,7 @@ typedef struct {
     float w_m, h_m;            /* size in metres */
     float pw, ph;              /* size in panel pixels */
     int visible;
+    int passive;               /* only for show: lasers pass through it */
 } Panel;
 
 typedef struct {
@@ -201,7 +202,7 @@ typedef struct {
     float px, py, dist;
 } Pointer;
 
-#define UI_MAX_PANELS 4
+#define UI_MAX_PANELS 24
 extern Pointer ui_ptr[2];
 extern float ui_dt;
 extern double ui_time;
@@ -220,6 +221,7 @@ void ui_rect(float x, float y, float w, float h, float radius, Col c);
 void ui_grad(float x, float y, float w, float h, float radius, Col c0, Col c1, int horizontal);
 void ui_frame_rect(float x, float y, float w, float h, float radius, Col fill, float border, Col bcol);
 void ui_glow(float x, float y, float w, float h, float radius, float blur, Col c);
+void ui_arrow(float x, float y, float k, Col outline);     /* the arrow cursor, k panel pixels per square */
 void ui_image(float x, float y, float w, float h, float radius, GLuint tex, float u0, float v0, float u1, float v1, Col tint);
 float ui_text(float x, float y, float size, Col c, const char *s);     /* returns the width */
 float ui_text_bold(float x, float y, float size, Col c, const char *s);

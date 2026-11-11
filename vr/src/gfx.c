@@ -628,11 +628,12 @@ void gfx_ribbons_flush(const Cam *c, int layer) {
     glUniformMatrix4fv(glGetUniformLocation(p_ribbon, "u_vp"), 1, GL_FALSE, c->vp.m);
     glEnable(GL_BLEND); glBlendFunc(GL_ONE, GL_ONE);
     glDepthMask(GL_FALSE); glDisable(GL_CULL_FACE);
+    if (layer == 1) glDisable(GL_DEPTH_TEST);        /* your own lasers: always in front of everything, panels included */
     glBindVertexArray(vao_ribbon);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_ribbon);
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * 8 * (size_t)n), v, GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, n);
-    glDisable(GL_BLEND); glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND); glDepthMask(GL_TRUE); glEnable(GL_DEPTH_TEST);
 }
 
 void gfx_ribbons_clear(void);

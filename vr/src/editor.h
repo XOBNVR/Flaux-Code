@@ -15,7 +15,7 @@ enum { TAB_HOME, TAB_BUILD, TAB_ASSETS, TAB_SCENE, TAB_VIEWER, TAB_ROOMS, TAB_CO
 #define PH 1040.0f
 #define KW 1240.0f
 #define KH 500.0f
-#define SW 520.0f
+#define SW 400.0f
 #define SH 1040.0f
 #define PALETTE_N 20
 #define LOG_N 9

@@ -206,11 +206,11 @@ static void screen_home(void) {
     ui_text_right(CR - 32, 314, 21, C_FAINT, "Saved by itself every few seconds, and when you take the headset off.");
     float x1 = CX + 32, x2 = CX + CW * 0.5f + 12, y = 366;
     key_line(x1, y, "Trigger", "Click, select, place a shape");
-    key_line(x2, y, "Left stick", "Walk around");
-    key_line(x1, y + 64, "Grip", "Grab a shape or the panel. On nothing: pull yourself along");
-    key_line(x2, y + 64, "Right stick", "Turn, and fly up or down");
+    key_line(x2, y, "Grip on nothing", "Pull yourself along: forward, sideways, up");
+    key_line(x1, y + 64, "Grip", "Grab a nearby shape, or this panel");
+    key_line(x2, y + 64, "Trigger on a handle", "Move, turn or stretch the selected shape");
     key_line(x1, y + 128, "Both grips", "Stretch a shape bigger or smaller");
-    key_line(x2, y + 128, "Stick + grab", "Push, pull and spin what you hold");
+    key_line(x2, y + 128, "Right stick click", "Change which handles show");
     key_line(x1, y + 192, "X", "Bring this panel to you");
     key_line(x2, y + 192, "Y", "Hide or show the panel");
     key_line(x1, y + 256, "A", "Undo");
@@ -753,8 +753,11 @@ static void screen_settings(void) {
 
     ui_card(x2, 150, w, 380);
     ui_text_bold(x2 + 28, 170, 28, C_TEXT, "Moving");
-    changed |= ui_slider(x2 + 32, 226, w - 64, "Walking speed", &cfg.speed, 0.5f, 8.0f, "%.1f m/s");
-    changed |= ui_toggle(x2 + 32, 330, w - 64, "Turn in steps (more comfortable)", &cfg.snap_turn);
+    ui_text(x2 + 32, 226, 23, C_TEXT, "You move by pulling, not with the thumbsticks.");
+    ui_text(x2 + 32, 270, 21, C_DIM, "Hold a grip on empty space and move your hand:");
+    ui_text(x2 + 32, 300, 21, C_DIM, "you glide the other way. Pull back to go forward,");
+    ui_text(x2 + 32, 330, 21, C_DIM, "pull down to float up. Let go and you stay there.");
+    ui_text(x2 + 32, 372, 20, C_FAINT, "To turn, turn your body.");
     if (ui_button(x2 + 32, 432, w - 64, 66, "Go back to the middle of the plate", BTN_NORMAL)) {
         ed_teleport(v3(0, 0, 2)); ed_summon_panel();
     }
@@ -783,61 +786,63 @@ static void screen_settings(void) {
 static float scroll_side;
 
 void side_draw(void) {
-    ui_glow(0, 0, SW, SH, 44, 60, rgba(0x22B8EE, 0.22f));
-    ui_grad(0, 0, SW, SH, 44, rgba(0x0D1236, 0.99f), rgba(0x070A1E, 0.99f), 0);
-    ui_frame_rect(0, 0, SW, SH, 44, NONE, 2.5f, rgba(0x4FE3F5, 0.5f));
+    ui_glow(0, 0, SW, SH, 40, 50, rgba(0x22B8EE, 0.22f));
+    ui_grad(0, 0, SW, SH, 40, rgba(0x0D1236, 0.99f), rgba(0x070A1E, 0.99f), 0);
+    ui_frame_rect(0, 0, SW, SH, 40, NONE, 2.5f, rgba(0x4FE3F5, 0.5f));
     char buf[64];
-    ui_text_bold(32, 30, 36, C_TEXT, "Objects");
+    ui_text_bold(26, 28, 34, C_TEXT, "Objects");
     snprintf(buf, sizeof buf, "%d", g_obj_count);
     float cw = ui_text_width(22, buf) + 30;
-    ui_rect(SW - 32 - cw, 34, cw, 36, 18, rgba(0x2A3470, 1));
-    ui_text_center(SW - 32 - cw * 0.5f, 41, 22, C_CYAN, buf);
+    ui_rect(SW - 26 - cw, 32, cw, 36, 18, rgba(0x2A3470, 1));
+    ui_text_center(SW - 26 - cw * 0.5f, 39, 22, C_CYAN, buf);
 
-    /* what the handles on the selected shape do */
-    static const char *modes[3] = {"Move", "Turn", "Size"};
-    ui_text(32, 88, 20, C_DIM, "Handles on the selected shape");
-    for (int i = 0; i < 3; i++)
-        if (ui_button(32 + i * 154.0f, 118, 146, 56, modes[i], ed.xform == i ? BTN_ON : BTN_NORMAL)) ed.xform = i;
+    /* which handles show on the selected shape */
+    static const char *modes[4] = {"All", "Move", "Turn", "Size"};
+    static const int value[4] = {3, 0, 1, 2};
+    ui_text(26, 84, 19, C_DIM, "Handles on the selected shape");
+    for (int i = 0; i < 4; i++)
+        if (ui_button(26 + (i % 2) * 178.0f, 112 + (i / 2) * 58.0f, 170, 50, modes[i], ed.xform == value[i] ? BTN_ON : BTN_NORMAL)) ed.xform = value[i];
 
-    const float top = 196, h = 610, row = 60;
-    ui_frame_rect(20, top - 8, SW - 40, h + 16, 22, rgba(0x18204A, 0.6f), 1.5f, rgba(0xFFFFFF, 0.08f));
+    const float top = 246, h = 560, row = 58;
+    ui_frame_rect(16, top - 8, SW - 32, h + 16, 20, rgba(0x18204A, 0.6f), 1.5f, rgba(0xFFFFFF, 0.08f));
     if (!g_obj_count) {
-        ui_text_center(SW * 0.5f, top + 250, 25, C_DIM, "Nothing on the plate yet.");
-        ui_text_center(SW * 0.5f, top + 288, 20, C_FAINT, "Shapes you place show up here.");
+        ui_text_center(SW * 0.5f, top + 230, 23, C_DIM, "Nothing on the plate yet.");
+        ui_text_center(SW * 0.5f, top + 266, 19, C_FAINT, "Shapes you place show up here.");
     }
-    list_begin(28, top, SW - 56, h, g_obj_count * row, &scroll_side);
+    list_begin(22, top, SW - 44, h, g_obj_count * row, &scroll_side);
     for (int i = 0; i < g_obj_count; i++) {
         Obj *o = &g_obj[i];
         float y = top + i * row - scroll_side;
         if (y < top - row || y > top + h) continue;
         int sel = o->id == ed.selected;
-        int hand = ui_hover(28, y, SW - 84, row - 6);
-        if (ui_press(28, y, SW - 84, row - 6)) { ed.selected = sel ? 0 : o->id; sel = !sel; plat_sound(SND_CLICK); }
-        if (sel) ui_grad(32, y, SW - 88, row - 6, 16, rgba(0x7C3AED, 0.85f), rgba(0x22B8EE, 0.85f), 1);
-        else if (hand >= 0) ui_rect(32, y, SW - 88, row - 6, 16, rgba(0xFFFFFF, 0.08f));
-        ui_image(36, y + 2, 50, 50, 0, ed.thumbs, (float)o->shape / SH_COUNT, 1, (float)(o->shape + 1) / SH_COUNT, 0,
+        int hand = ui_hover(22, y, SW - 70, row - 6);
+        if (ui_press(22, y, SW - 70, row - 6)) { ed.selected = o->id; sel = 1; plat_sound(SND_CLICK); }      /* a click selects it */
+        if (sel) ui_grad(26, y, SW - 74, row - 6, 16, rgba(0x7C3AED, 0.85f), rgba(0x22B8EE, 0.85f), 1);
+        else if (hand >= 0) ui_rect(26, y, SW - 74, row - 6, 16, rgba(0xFFFFFF, 0.08f));
+        ui_image(30, y + 1, 50, 50, 0, ed.thumbs, (float)o->shape / SH_COUNT, 1, (float)(o->shape + 1) / SH_COUNT, 0,
                  rgba((unsigned)(o->r << 16 | o->g << 8 | o->b), 1));
-        ui_text_fit(98, y + 14, 25, 250, C_TEXT, o->name);
-        if (o->flags & OBJ_LOCKED) ui_text_right(SW - 68, y + 17, 19, sel ? C_TEXT : C_AMBER, "locked");
+        ui_text_fit(90, y + 14, 24, (o->flags & OBJ_LOCKED) ? 170 : 240, C_TEXT, o->name);
+        if (o->flags & OBJ_LOCKED) ui_text_right(SW - 56, y + 17, 18, sel ? C_TEXT : C_AMBER, "locked");
     }
     list_end();
 
     Obj *o = scene_find(ed.selected);
-    float y = 836;
+    float y = 830;
     if (o) {
         int locked = o->flags & OBJ_LOCKED;
         snprintf(buf, sizeof buf, "%.2f, %.2f, %.2f", (double)o->pos.x, (double)o->pos.y, (double)o->pos.z);
-        ui_text_fit(32, y, 24, 250, C_TEXT, o->name);
-        ui_text_right(SW - 32, y + 3, 20, C_DIM, buf);
-        if (ui_icon_button(32, y + 40, 146, 58, "\xE2\x9D\x90", "Copy", BTN_NORMAL)) ed_duplicate_selected();
-        if (ui_button(186, y + 40, 146, 58, locked ? "Unlock" : "Lock", locked ? BTN_ON : BTN_NORMAL)) { o->flags ^= OBJ_LOCKED; scene_commit(locked ? "Unlock" : "Lock"); }
-        if (ui_icon_button(340, y + 40, 148, 58, "\xE2\x9C\x95", "Delete", BTN_DANGER)) ed_delete_selected();
+        ui_text_fit(26, y, 24, SW - 52, C_TEXT, o->name);
+        ui_text(26, y + 30, 19, C_DIM, buf);
+        if (ui_button(26, y + 62, 110, 54, "Copy", BTN_NORMAL)) ed_duplicate_selected();
+        if (ui_button(145, y + 62, 110, 54, locked ? "Unlock" : "Lock", locked ? BTN_ON : BTN_NORMAL)) { o->flags ^= OBJ_LOCKED; scene_commit(locked ? "Unlock" : "Lock"); }
+        if (ui_button(264, y + 62, 110, 54, "Delete", BTN_DANGER)) ed_delete_selected();
+        if (ui_button(26, y + 124, 348, 46, "Select nothing", BTN_GHOST)) ed.selected = 0;
     } else {
-        ui_text(32, y + 6, 22, C_DIM, "Tap a shape to select it.");
-        ui_text(32, y + 40, 20, C_FAINT, "Then drag its coloured handles to move,");
-        ui_text(32, y + 68, 20, C_FAINT, "turn or size it along one direction.");
+        ui_text(26, y + 6, 21, C_DIM, "Tap a shape to select it.");
+        ui_text(26, y + 40, 19, C_FAINT, "Drag its cones to move it,");
+        ui_text(26, y + 66, 19, C_FAINT, "its beads to turn it, and");
+        ui_text(26, y + 92, 19, C_FAINT, "its cubes to stretch it.");
     }
-    ui_text_center(SW * 0.5f, SH - 62, 19, C_FAINT, "Click the right stick to change the handles.");
 }
 
 void screens_draw(void) {

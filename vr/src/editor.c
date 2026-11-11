@@ -29,7 +29,7 @@ static float grab_spin[2];
 static int scaling; static float scale_d0; static V3 scale_s0;
 static int panel_grab = -1; static Pose panel_rel;
 static Pose panel_stage;                      /* the panel, measured from the play space: it comes along when you walk with the stick */
-static int panel_placed, turn_latch;
+static int panel_placed;
 static float world_buzz[2];
 static int ghost_on; static V3 ghost_pos;
 static float laser_len[2]; static int laser_hit[2];
@@ -40,6 +40,8 @@ static int climbing[2]; static V3 climb_from[2];
 static int giz_hover[2] = {-1, -1}, giz_hand = -1, giz_axis;
 static float giz_start; static V3 giz_pos0, giz_scale0; static Q4 giz_rot0;
 static const V3 AXES[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+#define CURSORS (MAX_PEERS * 2)
+static Panel cursor_panel[CURSORS]; static unsigned cursor_color[CURSORS];
 
 /* ---------- small helpers ---------- */
 
@@ -357,7 +359,7 @@ void app_init(const char *data_dir) {
     snprintf(ed.project, sizeof ed.project, "My world");
     snprintf(ed.player, sizeof ed.player, "Player");
     snprintf(ed.room_code, sizeof ed.room_code, "FLAUX");
-    ed.tool = -1; ed.color = 7;
+    ed.tool = -1; ed.color = 7; ed.xform = 3;
     ed.rig_pos = v3(0, 0, 2.0f);
     ed.v_yaw = 0.6f; ed.v_pitch = 0.45f; ed.v_dist = 9.0f; ed.v_target = v3(0, 0.8f, 0);
     char dir[320];
@@ -429,12 +431,11 @@ static void place_panels(void) {
         else { ed.main.pose = pose_mul(ed.aim[panel_grab], panel_rel); panel_stage = pose_mul(pose_inv(rig()), ed.main.pose); }
     }
     /* the keyboard hangs below the panel, tipped up towards you */
-    /* the objects list stands at the panel's right edge, turned in towards you */
+    /* the objects list stands beside the panel, facing the same way */
     ed.side.w_m = ed.main.w_m * SW / PW; ed.side.h_m = ed.main.h_m;
     ed.side.visible = ed.main.visible;
     {
-        float turn = 0.50f;
-        Pose rel = {{ed.main.w_m * 0.5f + 0.012f + ed.side.w_m * 0.5f * cosf(turn), 0, ed.side.w_m * 0.5f * sinf(turn)}, q4axis(v3(0, 1, 0), -turn)};
+        Pose rel = {{ed.main.w_m * 0.5f + 0.018f + ed.side.w_m * 0.5f, 0, 0}, q4ident()};
         ed.side.pose = pose_mul(ed.main.pose, rel);
     }
     ed.kb.w_m = 0.66f * cfg.scale; ed.kb.h_m = ed.kb.w_m * KH / KW;
@@ -443,21 +444,24 @@ static void place_panels(void) {
     ed.kb.pose = pose_mul(ed.main.pose, rel);
 }
 
-/* ---------- the handles on the selected shape: move, turn or size it along one axis ---------- */
+/* ---------- the handles on the selected shape ----------
+ * Three kinds, each along three directions (red x, green y, blue z): cones slide it, beads on the
+ * rings turn it, and cubes on its sides stretch it.  ed.xform picks which kinds show: 0 move,
+ * 1 turn, 2 size, 3 all of them. */
 
-static V3 giz_dir(const Obj *o, int a) { return ed.xform == 2 ? q4rot(o->rot, AXES[a]) : AXES[a]; }
+static int giz_kind;
+static int giz_shows(int k) { return ed.xform == 3 || ed.xform == k; }
 static float giz_far(const Obj *o) { return v3len(v3sub(o->pos, ed.head.p)); }
-static float giz_radius(const Obj *o) { return 0.028f + 0.02f * giz_far(o); }
+static float giz_radius(const Obj *o) { return 0.026f + 0.018f * giz_far(o); }
+static V3 giz_extent(const Obj *o) { return v3(o->scale.x, o->scale.y * shape_height(o->shape), o->scale.z); }
+static float giz_reach(const Obj *o) { V3 e = giz_extent(o); return 0.5f * fmaxf(e.x, fmaxf(e.y, e.z)) + 0.20f + 0.08f * giz_far(o); }
 
-static float giz_len(const Obj *o, int a) {
-    V3 e = v3(o->scale.x, o->scale.y * shape_height(o->shape), o->scale.z);
-    float half = ed.xform == 2 ? 0.5f * (a == 0 ? e.x : a == 1 ? e.y : e.z) : 0.5f * fmaxf(e.x, fmaxf(e.y, e.z));
-    return half + 0.16f + 0.07f * giz_far(o);
-}
-
-static V3 giz_handle(const Obj *o, int a) {
-    if (ed.xform == 1) return v3add(o->pos, v3mul(AXES[(a + 2) % 3], giz_len(o, a)));     /* a bead on the ring round axis a */
-    return v3add(o->pos, v3mul(giz_dir(o, a), giz_len(o, a)));
+static V3 giz_handle(const Obj *o, int k, int a) {
+    if (k == 0) return v3add(o->pos, v3mul(AXES[a], giz_reach(o)));
+    if (k == 1) return v3add(o->pos, v3mul(v3add(AXES[(a + 1) % 3], AXES[(a + 2) % 3]), giz_reach(o) * 0.78f * 0.7071f));
+    V3 e = giz_extent(o);
+    float half = 0.5f * (a == 0 ? e.x : a == 1 ? e.y : e.z);
+    return v3add(o->pos, v3mul(q4rot(o->rot, AXES[a]), half + 0.05f + 0.03f * giz_far(o)));
 }
 
 /* how far along the line through c in direction a the laser comes closest */
@@ -484,13 +488,13 @@ static int gizmo_update(int h, V3 ro, V3 rd) {
     Obj *o = scene_find(ed.selected);
     if (giz_hand == h) {
         if (!o || !trig_down[h]) {
-            if (o) scene_commit(ed.xform == 0 ? "Move" : ed.xform == 1 ? "Turn" : "Resize");
+            if (o) scene_commit(giz_kind == 0 ? "Move" : giz_kind == 1 ? "Turn" : "Resize");
             giz_hand = -1;
             return 1;
         }
         float v;
-        V3 a = ed.xform == 2 ? q4rot(giz_rot0, AXES[giz_axis]) : AXES[giz_axis];
-        if (ed.xform == 1) {
+        V3 a = giz_kind == 2 ? q4rot(giz_rot0, AXES[giz_axis]) : AXES[giz_axis];
+        if (giz_kind == 1) {
             if (ring_angle(giz_pos0, giz_axis, ro, rd, &v)) {
                 float d = v - giz_start;
                 if (cfg.snap) d = snapf(d, FX_PI / 12);
@@ -498,7 +502,7 @@ static int gizmo_update(int h, V3 ro, V3 rd) {
             }
         } else if (axis_param(giz_pos0, a, ro, rd, &v)) {
             float d = v - giz_start;
-            if (ed.xform == 0) {
+            if (giz_kind == 0) {
                 if (cfg.snap) d = snapf(d, cfg.snap_size);
                 o->pos = v3add(giz_pos0, v3mul(a, d));
             } else {
@@ -509,27 +513,32 @@ static int gizmo_update(int h, V3 ro, V3 rd) {
                 if (giz_axis == 0) o->scale.x = sn; else if (giz_axis == 1) o->scale.y = sn; else o->scale.z = sn;
             }
         }
-        laser_len[h] = v3len(v3sub(giz_handle(o, giz_axis), ro)); laser_hit[h] = 1;
+        laser_len[h] = v3len(v3sub(giz_handle(o, giz_kind, giz_axis), ro)); laser_hit[h] = 1;
         return 1;
     }
     giz_hover[h] = -1;
     if (!o || (o->flags & OBJ_LOCKED) || ed.tool >= 0 || giz_hand >= 0 || grab_id[0] == o->id || grab_id[1] == o->id) return 0;
-    float best = 1e9f, r = giz_radius(o) * 1.7f;
-    for (int a = 0; a < 3; a++) {
-        V3 oc = v3sub(giz_handle(o, a), ro);
-        float along = v3dot(oc, rd);
-        if (along > 0 && v3dot(oc, oc) - along * along < r * r && along < best) { best = along; giz_hover[h] = a; }
-    }
+    float best = 1e9f, reach = 0, r = giz_radius(o) * 1.6f;
+    for (int k = 0; k < 3; k++)
+        for (int a = 0; a < 3 && giz_shows(k); a++) {       /* the handle the laser passes closest to wins */
+            V3 oc = v3sub(giz_handle(o, k, a), ro);
+            float along = v3dot(oc, rd), miss = v3dot(oc, oc) - along * along;
+            if (along > 0 && miss < r * r && miss < best) { best = miss; reach = along; giz_hover[h] = k * 3 + a; }
+        }
     if (giz_hover[h] < 0) return 0;
-    laser_len[h] = best; laser_hit[h] = 1;
+    laser_len[h] = reach; laser_hit[h] = 1;
     if (trig_pressed[h]) {
-        giz_hand = h; giz_axis = giz_hover[h];
+        giz_hand = h; giz_kind = giz_hover[h] / 3; giz_axis = giz_hover[h] % 3;
         giz_pos0 = o->pos; giz_scale0 = o->scale; giz_rot0 = o->rot; giz_start = 0;
-        if (ed.xform == 1) ring_angle(giz_pos0, giz_axis, ro, rd, &giz_start);
-        else axis_param(giz_pos0, giz_dir(o, giz_axis), ro, rd, &giz_start);
+        if (giz_kind == 1) ring_angle(giz_pos0, giz_axis, ro, rd, &giz_start);
+        else axis_param(giz_pos0, giz_kind == 2 ? q4rot(o->rot, AXES[giz_axis]) : AXES[giz_axis], ro, rd, &giz_start);
         world_buzz[h] = 0.5f; plat_sound(SND_GRAB);
     }
     return 1;
+}
+
+static int giz_hot(int k, int a) {
+    return giz_hover[0] == k * 3 + a || giz_hover[1] == k * 3 + a || (giz_hand >= 0 && giz_kind == k && giz_axis == a);
 }
 
 static void hands_in_world(void) {
@@ -633,7 +642,7 @@ static void hands_in_world(void) {
         }
 
         if (grip_pressed[h]) {
-            Obj *g = o;
+            Obj *g = (o && t < 3.5f) ? o : NULL;        /* far shapes are moved with their handles */
             if (!g)                                 /* or one you're touching */
                 for (int i = 0; i < g_obj_count; i++) {
                     float reach = 0.12f + 0.5f * fmaxf(g_obj[i].scale.x, fmaxf(g_obj[i].scale.y, g_obj[i].scale.z));
@@ -658,34 +667,6 @@ static void hands_in_world(void) {
     }
 }
 
-static void move_around(void) {
-    float yaw = ed_front_yaw();
-    HandIn *l = &in.hand[0], *r = &in.hand[1];
-    if (l->active && !ed.hand_on[0] && !grab_id[0]) {
-        float sx = fabsf(l->sx) > 0.15f ? l->sx : 0, sy = fabsf(l->sy) > 0.15f ? l->sy : 0;
-        V3 fwd = v3(-sinf(yaw), 0, -cosf(yaw)), right = v3(cosf(yaw), 0, -sinf(yaw));
-        ed.rig_pos = v3add(ed.rig_pos, v3mul(v3add(v3mul(fwd, sy), v3mul(right, sx)), cfg.speed * ed.dt));
-    }
-    if (r->active && !ed.hand_on[1] && !grab_id[1]) {
-        float turn = 0;
-        if (cfg.snap_turn) {
-            if (!turn_latch && fabsf(r->sx) > 0.7f) { turn = r->sx > 0 ? -FX_PI / 6 : FX_PI / 6; turn_latch = 1; }
-            if (fabsf(r->sx) < 0.3f) turn_latch = 0;
-        } else if (fabsf(r->sx) > 0.2f) {
-            turn = -r->sx * 1.8f * ed.dt;
-        }
-        if (turn != 0) {                         /* turn about where you're standing, not the room's middle */
-            V3 before = ed.head.p;
-            ed.rig_yaw += turn;
-            V3 after = pose_pt(rig(), in.head.p);
-            ed.rig_pos.x += before.x - after.x; ed.rig_pos.z += before.z - after.z;
-        }
-        if (fabsf(r->sy) > 0.6f && fabsf(r->sx) < 0.5f)
-            ed.rig_pos.y = fclamp(ed.rig_pos.y + r->sy * cfg.speed * 0.7f * ed.dt, 0.0f, 60.0f);
-    }
-    ed.rig_pos.x = fclamp(ed.rig_pos.x, -200, 200); ed.rig_pos.z = fclamp(ed.rig_pos.z, -200, 200);
-}
-
 static void buttons(void) {
     if (btn_hit[1][0]) {                         /* A */
         if (scene_undo()) { ed_toast("Undone."); plat_sound(SND_CLICK); if (!scene_find(ed.selected)) ed.selected = 0; }
@@ -704,7 +685,11 @@ static void buttons(void) {
     }
     if (btn_hit[1][2]) {                         /* right stick click */
         if (ed.tool >= 0) { ed.tool = -1; ed_toast("Stopped placing."); }
-        else { ed.xform = (ed.xform + 1) % 3; ed_toast(ed.xform == 0 ? "Handles: move" : ed.xform == 1 ? "Handles: turn" : "Handles: size"); plat_sound(SND_CLICK); }
+        else {
+            ed.xform = ed.xform == 3 ? 0 : ed.xform + 1;
+            ed_toast(ed.xform == 0 ? "Handles: move" : ed.xform == 1 ? "Handles: turn" : ed.xform == 2 ? "Handles: size" : "Handles: all");
+            plat_sound(SND_CLICK);
+        }
     }
 }
 
@@ -723,7 +708,7 @@ static void queue_lines(void) {
     for (int i = 0; i < MAX_PEERS; i++) {          /* the other players' lasers, each in their own colour */
         Peer *p = &g_peers[i];
         if (!p->used) continue;
-        unsigned pc = PALETTE[(p->id * 5 + 3) % 15];
+        unsigned pc = PALETTE[(p->id * 7 + 1) % 15];       /* the same colour as the outline of their arrow */
         float c0[4] = {((pc >> 16) & 255) / 255.0f, ((pc >> 8) & 255) / 255.0f, (pc & 255) / 255.0f, 0.9f};
         float c1[4] = {c0[0], c0[1], c0[2], 0.5f};
         for (int h = 0; h < 2; h++) if (p->aim_on[h]) gfx_ribbon(p->aim_from[h], p->aim_to[h], 0.014f, c1, c0);
@@ -733,18 +718,21 @@ static void queue_lines(void) {
         static const float GC[3][4] = {{0.96f, 0.25f, 0.37f, 0.95f}, {0.29f, 0.87f, 0.50f, 0.95f}, {0.23f, 0.51f, 0.96f, 0.95f}};
         float w = 0.005f + 0.004f * giz_far(s);
         for (int a = 0; a < 3; a++) {
-            int hot = giz_hover[0] == a || giz_hover[1] == a || (giz_hand >= 0 && giz_axis == a);
-            float c[4] = {GC[a][0], GC[a][1], GC[a][2], hot ? 1.0f : 0.75f};
-            if (ed.xform == 1) {
-                float r = giz_len(s, a);
+            if (giz_shows(0)) {
+                int hot = giz_hot(0, a);
+                float c[4] = {GC[a][0], GC[a][1], GC[a][2], hot ? 1.0f : 0.75f};
+                gfx_ribbon(s->pos, giz_handle(s, 0, a), hot ? w * 1.6f : w, c, c);
+            }
+            if (giz_shows(1)) {
+                int hot = giz_hot(1, a);
+                float c[4] = {GC[a][0], GC[a][1], GC[a][2], hot ? 1.0f : 0.6f};
+                float r = giz_reach(s) * 0.78f;
                 V3 u = AXES[(a + 1) % 3], v = AXES[(a + 2) % 3], prev = v3add(s->pos, v3mul(u, r));
                 for (int k = 1; k <= 48; k++) {
                     float ang = k / 48.0f * 2 * FX_PI;
                     V3 pt = v3add(s->pos, v3add(v3mul(u, cosf(ang) * r), v3mul(v, sinf(ang) * r)));
-                    gfx_ribbon(prev, pt, hot ? w * 1.6f : w, c, c); prev = pt;
+                    gfx_ribbon(prev, pt, hot ? w * 1.5f : w * 0.8f, c, c); prev = pt;
                 }
-            } else {
-                gfx_ribbon(s->pos, giz_handle(s, a), hot ? w * 1.6f : w, c, c);
             }
         }
     }
@@ -761,8 +749,25 @@ void app_update(const FrameIn *fi) {
     if (ed.time - fps_t0 >= 0.5) { ed.fps = (float)(frames / (ed.time - fps_t0)); frames = 0; fps_t0 = ed.time; }
     place_panels();
 
-    Panel *panels[3] = {&ed.main, &ed.kb, &ed.side};
-    ui_frame(panels, 3, ed.dt, ed.time);
+    Panel *panels[3 + CURSORS] = {&ed.main, &ed.kb, &ed.side};
+    for (int i = 0; i < CURSORS; i++) {            /* each other player's arrow, on a little panel of its own that faces you */
+        Peer *p = &g_peers[i / 2];
+        Panel *cp = &cursor_panel[i];
+        panels[3 + i] = cp;
+        cp->visible = p->used && p->aim_on[i % 2];
+        cp->passive = 1; cp->pw = 18 * 4; cp->ph = 29 * 4;
+        if (!cp->visible) continue;
+        V3 at = p->aim_to[i % 2], to_me = v3norm(v3sub(ed.head.p, at));
+        float far = v3len(v3sub(ed.head.p, at));
+        cp->h_m = 0.05f + 0.045f * far; cp->w_m = cp->h_m * 18.0f / 29.0f;      /* the same size to your eye, near or far */
+        Q4 q = q4mul(q4axis(v3(0, 1, 0), atan2f(to_me.x, to_me.z)), q4axis(v3(1, 0, 0), -asinf(fclamp(to_me.y, -1, 1))));
+        cp->pose.q = q;
+        cp->pose.p = v3add(v3add(at, v3mul(to_me, 0.03f)), q4rot(q, v3(cp->w_m * 0.5f, -cp->h_m * 0.5f, 0)));     /* the arrow's tip on the spot */
+        cursor_color[i] = PALETTE[(p->id * 7 + 1) % 15];
+    }
+    ui_frame(panels, 3 + CURSORS, ed.dt, ed.time);
+    for (int i = 0; i < CURSORS; i++)
+        if (cursor_panel[i].visible) { ui_begin(3 + i); ui_arrow(0, 0, 4, rgba(cursor_color[i], 1)); ui_end(); }
     if (ed.main.visible) {
         ui_begin(0); screens_draw(); ui_end();
         ui_begin(2); side_draw(); ui_end();
@@ -771,7 +776,6 @@ void app_update(const FrameIn *fi) {
     net_listen_rooms(ed.main.visible && ed.tab == TAB_ROOMS);
 
     hands_in_world();
-    move_around();
     buttons();
     if (ed.v_follow) ed.v_target = v3lerp(ed.v_target, v3(ed.head.p.x, ed.head.p.y - 0.5f, ed.head.p.z), fclamp(ed.dt * 4, 0, 1));
     if (ed.selected && !scene_find(ed.selected)) ed.selected = 0;
@@ -847,29 +851,22 @@ static void draw_world(const Cam *c, int viewer) {
         static const V3 GC[3] = {{0.96f, 0.25f, 0.37f}, {0.29f, 0.87f, 0.50f}, {0.23f, 0.51f, 0.96f}};
         float r = giz_radius(sel) * 2;
         for (int a = 0; a < 3; a++) {
-            int hot = giz_hover[0] == a || giz_hover[1] == a || (giz_hand >= 0 && giz_axis == a);
-            float k = hot ? 1.35f : 1.0f;
-            V3 at = giz_handle(sel, a);
-            if (ed.xform == 0) {
+            if (giz_shows(0)) {
+                float k = giz_hot(0, a) ? 1.35f : 1.0f;
                 Q4 q = a == 0 ? q4axis(v3(0, 0, 1), -FX_PI / 2) : a == 1 ? q4ident() : q4axis(v3(1, 0, 0), FX_PI / 2);
-                gfx_shape(SH_CONE, at, q, v3(r * k, r * 1.6f * k, r * k), GC[a], 1, hot ? 1.0f : 0.35f);
-            } else if (ed.xform == 1) {
-                gfx_shape(SH_SPHERE, at, q4ident(), v3(r * k, r * k, r * k), GC[a], 1, hot ? 1.0f : 0.35f);
-            } else {
-                gfx_shape(SH_CUBE, at, sel->rot, v3(r * 0.9f * k, r * 0.9f * k, r * 0.9f * k), GC[a], 1, hot ? 1.0f : 0.35f);
+                gfx_shape(SH_CONE, giz_handle(sel, 0, a), q, v3(r * k, r * 1.6f * k, r * k), GC[a], 1, k > 1 ? 1.0f : 0.35f);
+            }
+            if (giz_shows(1)) {
+                float k = giz_hot(1, a) ? 1.35f : 1.0f;
+                gfx_shape(SH_SPHERE, giz_handle(sel, 1, a), q4ident(), v3(r * k, r * k, r * k), GC[a], 1, k > 1 ? 1.0f : 0.35f);
+            }
+            if (giz_shows(2)) {
+                int hot = giz_hot(2, a);
+                float k = hot ? 1.15f : 0.85f;
+                gfx_shape(SH_CUBE, giz_handle(sel, 2, a), sel->rot, v3(r * k, r * k, r * k), GC[a], 1, hot ? 1.0f : 0.35f);
             }
         }
     }
-    for (int i = 0; i < MAX_PEERS; i++)                 /* where each other player's laser lands */
-        if (g_peers[i].used) {
-            unsigned pc = PALETTE[(g_peers[i].id * 5 + 3) % 15];
-            V3 col = v3(((pc >> 16) & 255) / 255.0f, ((pc >> 8) & 255) / 255.0f, (pc & 255) / 255.0f);
-            for (int h = 0; h < 2; h++)
-                if (g_peers[i].aim_on[h]) {
-                    float d = 0.035f + 0.02f * v3len(v3sub(g_peers[i].aim_to[h], c->pos));
-                    gfx_shape(SH_SPHERE, g_peers[i].aim_to[h], q4ident(), v3(d, d, d), col, 1, 1.0f);
-                }
-        }
     gfx_ribbons_flush(c, viewer ? -1 : 0);
     if (!viewer) { ui_render(c); gfx_ribbons_flush(c, 1); }
 }
