@@ -27,6 +27,15 @@ It's a native app (C, OpenGL ES 3 and OpenXR): no game engine, no Java.
 
 It needs the two Touch controllers. Hand tracking isn't supported yet.
 
+### If it won't start
+
+Flaux VR writes down what it's doing as it starts, in
+`Android/data/com.xobnvr.flaux/files/log.txt` on the headset. Plug the headset
+into a computer, allow file access in the headset, and open that file (or run
+`adb logcat -s FlauxVR`). The last line says how far it got; if it crashed,
+the file ends with `CRASH` and where. If there's no `log.txt` at all, the app
+never got as far as running.
+
 ## Controls
 
 | Do this | To |
@@ -72,8 +81,10 @@ ANDROID_NDK=/path/to/android-ndk-r26d ANDROID_SDK=/path/to/android-sdk ./build.s
 
 That makes `build/FlauxVR.apk`, signed with a debug key it creates in
 `build/debug.keystore`. To sign with your own key, set `FLAUX_KEYSTORE` and
-`FLAUX_KEYSTORE_PASS`. The OpenXR loader and headers are downloaded from
-Maven Central the first time (into `third_party/`).
+`FLAUX_KEYSTORE_PASS`. The OpenXR headers are downloaded from Maven Central
+the first time (into `third_party/`). The OpenXR loader is the Khronos one, in
+`prebuilt/arm64-v8a/`, next to a near-empty `classes.dex` (the app is all
+native code).
 
 There's no Gradle: `build.sh` is one C compiler call, then `aapt2`,
 `zipalign` and `apksigner`.
@@ -90,6 +101,11 @@ the keyboard), and saves a picture of every screen in `build/shots/`. It needs
 `cc`, Mesa's EGL and OpenGL ES libraries, and Python with Pillow. It's built
 with the address and undefined-behaviour sanitizers, so memory mistakes stop
 the run.
+
+`./test_xr.sh` goes further: it builds the headset's own OpenXR code
+(`src/xr_main.c`) for your computer and runs it against the Monado OpenXR
+runtime, so the session, the eye pictures and the controls are exercised for
+real. It needs `libopenxr-dev`, `libopenxr1-monado` and `monado-service`.
 
 To test rooms, run two copies:
 
@@ -110,6 +126,6 @@ To test rooms, run two copies:
 | `src/scene.c` | the list of shapes, undo and redo, project files |
 | `src/copilot.c` | the co-pilot's patterns |
 | `src/net.c` | rooms |
-| `src/android_main.c` | the headset: Android, OpenGL ES, OpenXR, sound |
+| `src/xr_main.c` | the headset: Android, OpenGL ES, OpenXR, sound (and the same OpenXR code on a PC, for `test_xr.sh`) |
 | `src/desktop_main.c` | the off-screen test rig |
 | `tools/make_font.py` | makes the font (`assets/ui/font.bin` and `src/font_data.h`) from Inter and DejaVu Sans |

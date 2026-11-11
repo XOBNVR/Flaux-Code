@@ -19,7 +19,7 @@
 #include <string.h>
 #include <GLES3/gl3.h>
 
-#define FX_VERSION "2.0.0"
+#define FX_VERSION "2.0.1"
 #define FX_PI 3.14159265358979f
 
 /* ---------- maths ---------- */

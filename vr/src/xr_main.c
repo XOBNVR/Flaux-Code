@@ -1,36 +1,96 @@
-/* Flaux VR on the headset: Android's NativeActivity, an OpenGL ES context, and OpenXR for the
- * head, the controllers and the two eye pictures.  Everything you see is drawn by editor.c; this
- * file only feeds it input and gives it somewhere to draw. */
+/* Flaux VR on the headset: an OpenGL ES context, and OpenXR for the head, the controllers and the
+ * two eye pictures.  Everything you see is drawn by editor.c; this file only feeds it input and
+ * gives it somewhere to draw.
+ *
+ * It's built two ways.  On Android (a Meta Quest) it's the app.  On a Linux PC (-DFLAUX_PC_XR,
+ * see test_xr.sh) the very same OpenXR code runs against the Monado runtime with the OpenXR
+ * validation layer switched on, so mistakes in how OpenXR is used show up without a headset. */
 #include "editor.h"
 
-#include <android/asset_manager.h>
-#include <android/log.h>
-#include <android_native_app_glue.h>
 #include <EGL/egl.h>
-#include <jni.h>
-#include <SLES/OpenSLES.h>
-#include <SLES/OpenSLES_Android.h>
 #include <time.h>
 #include <unistd.h>
 
+#ifdef __ANDROID__
+#include <android/asset_manager.h>
+#include <android/log.h>
+#include <android_native_app_glue.h>
+#include <jni.h>
+#include <SLES/OpenSLES.h>
+#include <SLES/OpenSLES_Android.h>
 #define XR_USE_PLATFORM_ANDROID
+#else
+#include <EGL/eglext.h>
+#define XR_USE_PLATFORM_EGL
+#endif
 #define XR_USE_GRAPHICS_API_OPENGL_ES
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
-#define TAG "FlauxVR"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+static int g_quit;
+static FILE *g_log;                  /* everything logged also goes to log.txt next to your projects */
 
+static void log_line(int error, const char *fmt, va_list ap) {
+    char msg[1024];
+    vsnprintf(msg, sizeof msg, fmt, ap);
+#ifdef __ANDROID__
+    __android_log_write(error ? ANDROID_LOG_ERROR : ANDROID_LOG_INFO, "FlauxVR", msg);
+#else
+    fprintf(stderr, "%s%s\n", error ? "ERROR: " : "", msg);
+#endif
+    if (g_log) { fprintf(g_log, "%s%s\n", error ? "ERROR: " : "", msg); fflush(g_log); }
+}
+static void LOGI(const char *fmt, ...) { va_list ap; va_start(ap, fmt); log_line(0, fmt, ap); va_end(ap); }
+static void LOGE(const char *fmt, ...) { va_list ap; va_start(ap, fmt); log_line(1, fmt, ap); va_end(ap); }
+void plat_log(const char *fmt, ...) { va_list ap; va_start(ap, fmt); log_line(0, fmt, ap); va_end(ap); }
+
+#ifdef __ANDROID__
 static struct android_app *g_app;
-static int g_resumed, g_quit;
 
-/* ---------- what the app asks of the platform ---------- */
+/* If the app crashes, say where in log.txt (only calls that are safe inside a signal handler). */
+#include <dlfcn.h>
+#include <signal.h>
+#include <ucontext.h>
+static int crash_fd = -1;
+static uintptr_t lib_base;
 
-void plat_log(const char *fmt, ...) {
-    va_list ap; va_start(ap, fmt);
-    __android_log_vprint(ANDROID_LOG_INFO, TAG, fmt, ap);
-    va_end(ap);
+static void crash_hex(const char *label, uintptr_t v) {
+    char buf[40]; int n = 0;
+    while (label[n]) { buf[n] = label[n]; n++; }
+    for (int i = 60; i >= 0; i -= 4) buf[n++] = "0123456789abcdef"[(v >> i) & 15];
+    buf[n++] = '\n';
+    if (write(crash_fd, buf, (size_t)n) < 0) return;
+}
+
+static void on_crash(int sig, siginfo_t *info, void *context) {
+    if (crash_fd >= 0) {
+        static const char head[] = "CRASH\n";
+        if (write(crash_fd, head, sizeof head - 1) < 0) crash_fd = -1;
+        crash_hex("signal  ", (uintptr_t)sig);
+        crash_hex("address ", (uintptr_t)info->si_addr);
+#ifdef __aarch64__
+        ucontext_t *uc = context;
+        crash_hex("pc      ", (uintptr_t)uc->uc_mcontext.pc);
+        crash_hex("lr      ", (uintptr_t)uc->uc_mcontext.regs[30]);
+#endif
+        crash_hex("libbase ", lib_base);
+        fsync(crash_fd);
+    }
+    signal(sig, SIG_DFL);        /* then let Android report it the usual way */
+    raise(sig);
+}
+
+static void watch_for_crashes(void) {
+    Dl_info di;
+    if (dladdr((void *)&watch_for_crashes, &di)) lib_base = (uintptr_t)di.dli_fbase;
+    if (g_log) crash_fd = fileno(g_log);
+    static char stack[32768];
+    stack_t ss = {.ss_sp = stack, .ss_size = sizeof stack};
+    sigaltstack(&ss, NULL);
+    struct sigaction sa; memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = on_crash; sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESETHAND;
+    const int sigs[] = {SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL};
+    for (size_t i = 0; i < sizeof sigs / sizeof sigs[0]; i++) sigaction(sigs[i], &sa, NULL);
 }
 
 void *plat_asset(const char *name, size_t *size) {
@@ -107,6 +167,23 @@ void plat_sound(int id) {
     (*sl_queue[v])->Enqueue(sl_queue[v], snd_data[id], (SLuint32)(sizeof(int16_t) * (size_t)snd_len[id]));
 }
 
+#else   /* a PC: files instead of assets, and no sound */
+
+void *plat_asset(const char *name, size_t *size) {
+    char path[512]; snprintf(path, sizeof path, "%s/%s", getenv("FLAUX_ASSETS") ? getenv("FLAUX_ASSETS") : "assets", name);
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+    void *buf = malloc((size_t)n + 1);
+    if (fread(buf, 1, (size_t)n, f) != (size_t)n) { free(buf); buf = NULL; }
+    fclose(f);
+    if (size) *size = (size_t)n;
+    return buf;
+}
+void plat_sound(int id) { (void)id; }
+static void sound_init(void) {}
+#endif
+
 /* ---------- OpenGL ES ---------- */
 
 static EGLDisplay egl_dpy = EGL_NO_DISPLAY;
@@ -115,17 +192,27 @@ static EGLContext egl_ctx = EGL_NO_CONTEXT;
 static EGLSurface egl_surf = EGL_NO_SURFACE;
 
 static int egl_init(void) {
+#ifdef __ANDROID__
     egl_dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+#else
+    egl_dpy = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
+#endif
     if (egl_dpy == EGL_NO_DISPLAY || !eglInitialize(egl_dpy, NULL, NULL)) { LOGE("eglInitialize failed 0x%x", eglGetError()); return 0; }
+    eglBindAPI(EGL_OPENGL_ES_API);
     const EGLint want[] = {EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8, EGL_DEPTH_SIZE, 0,
                            EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, 0x0040 /* ES3 */, EGL_NONE};
     EGLint n = 0;
-    if (!eglChooseConfig(egl_dpy, want, &egl_cfg, 1, &n) || n < 1) { LOGE("no EGL config 0x%x", eglGetError()); return 0; }
+    if (!eglChooseConfig(egl_dpy, want, &egl_cfg, 1, &n) || n < 1) {
+        LOGI("no exact EGL config (0x%x); taking any OpenGL ES 3 one", eglGetError());
+        const EGLint any[] = {EGL_RENDERABLE_TYPE, 0x0040, EGL_NONE};
+        if (!eglChooseConfig(egl_dpy, any, &egl_cfg, 1, &n) || n < 1) { LOGE("no EGL config 0x%x", eglGetError()); return 0; }
+    }
     const EGLint ctx_attr[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
     egl_ctx = eglCreateContext(egl_dpy, egl_cfg, EGL_NO_CONTEXT, ctx_attr);
     if (egl_ctx == EGL_NO_CONTEXT) { LOGE("eglCreateContext failed 0x%x", eglGetError()); return 0; }
     const EGLint pb[] = {EGL_WIDTH, 16, EGL_HEIGHT, 16, EGL_NONE};
     egl_surf = eglCreatePbufferSurface(egl_dpy, egl_cfg, pb);      /* the eyes get their own pictures from OpenXR */
+    if (egl_surf == EGL_NO_SURFACE) LOGI("no pbuffer surface (0x%x); going without one", eglGetError());
     if (!eglMakeCurrent(egl_dpy, egl_surf, egl_surf, egl_ctx)) { LOGE("eglMakeCurrent failed 0x%x", eglGetError()); return 0; }
     LOGI("OpenGL: %s on %s", (const char *)glGetString(GL_VERSION), (const char *)glGetString(GL_RENDERER));
     return 1;
@@ -145,7 +232,8 @@ static XrSystemId xr_system;
 static XrSession xr_session;
 static XrSpace xr_stage, xr_view, xr_aim[2], xr_grip[2];
 static XrSessionState xr_state = XR_SESSION_STATE_UNKNOWN;
-static int xr_running, xr_focused;
+static int xr_running, xr_focused, g_ready, frames_drawn;
+static uint32_t last_image;
 static Eye eyes[2];
 static GLuint ms_fbo, ms_color, ms_depth;
 static XrActionSet act_set;
@@ -230,6 +318,9 @@ static int xr_make_actions(void) {
 }
 
 static int xr_init(void) {
+    LOGI("OpenXR: starting");
+    XrInstanceCreateInfo ci = {XR_TYPE_INSTANCE_CREATE_INFO};
+#ifdef __ANDROID__
     /* the loader has to be told about Android before anything else */
     XrResult (*init_loader)(const XrLoaderInitInfoBaseHeaderKHR *) = NULL;
     xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction *)&init_loader);
@@ -237,22 +328,27 @@ static int xr_init(void) {
     XrLoaderInitInfoAndroidKHR li = {XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
     li.applicationVM = g_app->activity->vm; li.applicationContext = g_app->activity->clazz;
     if (!XR_OK(init_loader((const XrLoaderInitInfoBaseHeaderKHR *)&li))) return 0;
-
     const char *exts[] = {XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME, XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME};
     XrInstanceCreateInfoAndroidKHR ai = {XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
     ai.applicationVM = g_app->activity->vm; ai.applicationActivity = g_app->activity->clazz;
-    XrInstanceCreateInfo ci = {XR_TYPE_INSTANCE_CREATE_INFO};
     ci.next = &ai;
+#else
+    const char *exts[] = {XR_MNDX_EGL_ENABLE_EXTENSION_NAME, XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME};
+    static const char *const layers[] = {"XR_APILAYER_LUNARG_core_validation"};
+    if (!getenv("FLAUX_NO_VALIDATION")) { ci.enabledApiLayerCount = 1; ci.enabledApiLayerNames = layers; }
+#endif
     snprintf(ci.applicationInfo.applicationName, sizeof ci.applicationInfo.applicationName, "Flaux VR");
     snprintf(ci.applicationInfo.engineName, sizeof ci.applicationInfo.engineName, "Flaux");
     ci.applicationInfo.applicationVersion = 2; ci.applicationInfo.engineVersion = 2;
     ci.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
     ci.enabledExtensionCount = 2; ci.enabledExtensionNames = exts;
     if (!XR_OK(xrCreateInstance(&ci, &xr_instance))) return 0;
+    LOGI("OpenXR: instance made");
 
     XrSystemGetInfo gi = {XR_TYPE_SYSTEM_GET_INFO};
     gi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     if (!XR_OK(xrGetSystem(xr_instance, &gi, &xr_system))) return 0;
+    LOGI("OpenXR: headset found");
 
     /* OpenXR insists on being asked this before a session is made (extension calls are looked up by name) */
     XrResult (*get_requirements)(XrInstance, XrSystemId, XrGraphicsRequirementsOpenGLESKHR *) = NULL;
@@ -260,11 +356,17 @@ static int xr_init(void) {
     XrGraphicsRequirementsOpenGLESKHR req = {XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR};
     if (!get_requirements || !XR_OK(get_requirements(xr_instance, xr_system, &req))) return 0;
 
+#ifdef __ANDROID__
     XrGraphicsBindingOpenGLESAndroidKHR gb = {XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
+#else
+    XrGraphicsBindingEGLMNDX gb = {XR_TYPE_GRAPHICS_BINDING_EGL_MNDX};
+    gb.getProcAddress = eglGetProcAddress;
+#endif
     gb.display = egl_dpy; gb.config = egl_cfg; gb.context = egl_ctx;
     XrSessionCreateInfo sc = {XR_TYPE_SESSION_CREATE_INFO};
     sc.next = &gb; sc.systemId = xr_system;
     if (!XR_OK(xrCreateSession(xr_instance, &sc, &xr_session))) return 0;
+    LOGI("OpenXR: session made");
 
     /* the floor is y = 0 where the headset knows where the floor is */
     uint32_t nspaces = 0; XrReferenceSpaceType spaces[16];
@@ -314,6 +416,7 @@ static int xr_init(void) {
     /* smooth edges: draw into a multisampled buffer, then copy to the eye's picture */
     GLint max_samples = 1; glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
     int samples = max_samples >= 4 ? 4 : max_samples;
+    if (getenv("FLAUX_NO_MSAA")) samples = 1;
     glGenFramebuffers(1, &ms_fbo); glBindFramebuffer(GL_FRAMEBUFFER, ms_fbo);
     glGenRenderbuffers(1, &ms_color); glBindRenderbuffer(GL_RENDERBUFFER, ms_color);
     glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, (GLenum)format, eyes[0].w, eyes[0].h);
@@ -321,10 +424,24 @@ static int xr_init(void) {
     glGenRenderbuffers(1, &ms_depth); glBindRenderbuffer(GL_RENDERBUFFER, ms_depth);
     glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_DEPTH24_STENCIL8, eyes[0].w, eyes[0].h);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ms_depth);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { LOGE("the drawing buffer isn't complete"); return 0; }
+    if (samples < 2 || glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        /* no smooth edges on this headset: draw straight into the eye pictures, with a depth buffer of their own */
+        LOGI("no multisampled buffer (status 0x%x, %d samples); drawing without smooth edges", glCheckFramebufferStatus(GL_FRAMEBUFFER), samples);
+        glDeleteFramebuffers(1, &ms_fbo); ms_fbo = 0;
+        glBindRenderbuffer(GL_RENDERBUFFER, ms_depth);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, eyes[0].w, eyes[0].h);
+        for (int e = 0; e < 2; e++)
+            for (uint32_t i = 0; i < eyes[e].count; i++) {
+                glBindFramebuffer(GL_FRAMEBUFFER, eyes[e].fbo[i]);
+                glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ms_depth);
+            }
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    LOGI("drawing buffers ready (GL error 0x%x)", glGetError());
 
-    return xr_make_actions();
+    int actions = xr_make_actions();
+    LOGI("OpenXR: controls %s", actions ? "ready" : "FAILED");
+    return actions;
 }
 
 static Pose to_pose(XrPosef p) {
@@ -424,8 +541,11 @@ static void xr_frame(void) {
                 hi->stick = get_bool(act_stick_click, h); hi->menu = get_bool(act_menu, h);
             }
 
+            if (frames_drawn < 2) LOGI("frame %d: head at %.2f %.2f %.2f, hands %d %d", frames_drawn, (double)fi.head.p.x, (double)fi.head.p.y,
+                                       (double)fi.head.p.z, fi.hand[0].active, fi.hand[1].active);
             app_update(&fi);
             app_prerender();
+            if (frames_drawn < 2) LOGI("frame %d: updated", frames_drawn);
 
             for (int e = 0; e < 2; e++) {
                 uint32_t index = 0;
@@ -436,14 +556,18 @@ static void xr_frame(void) {
                 ev.pose = to_pose(views[e].pose);
                 ev.l = views[e].fov.angleLeft; ev.r = views[e].fov.angleRight; ev.u = views[e].fov.angleUp; ev.d = views[e].fov.angleDown;
                 ev.w = eyes[e].w; ev.h = eyes[e].h;
-                app_render(&ev, ms_fbo);
-                glBindFramebuffer(GL_READ_FRAMEBUFFER, ms_fbo);
-                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, eyes[e].fbo[index]);
-                glBlitFramebuffer(0, 0, ev.w, ev.h, 0, 0, ev.w, ev.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-                const GLenum drop[2] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
-                glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 2, drop);
+                if (ms_fbo) {
+                    app_render(&ev, ms_fbo);
+                    glBindFramebuffer(GL_READ_FRAMEBUFFER, ms_fbo);
+                    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, eyes[e].fbo[index]);
+                    glBlitFramebuffer(0, 0, ev.w, ev.h, 0, 0, ev.w, ev.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                } else {
+                    app_render(&ev, eyes[e].fbo[index]);
+                }
                 glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                if (frames_drawn < 2) LOGI("frame %d: eye %d drawn (picture %u, GL error 0x%x)", frames_drawn, e, index, glGetError());
                 xrReleaseSwapchainImage(eyes[e].handle, NULL);
+                if (e == 0) last_image = index;
                 pv[e].pose = views[e].pose; pv[e].fov = views[e].fov;
                 pv[e].subImage.swapchain = eyes[e].handle;
                 pv[e].subImage.imageRect.extent.width = ev.w; pv[e].subImage.imageRect.extent.height = ev.h;
@@ -464,18 +588,36 @@ static void xr_frame(void) {
     XrFrameEndInfo end = {XR_TYPE_FRAME_END_INFO};
     end.displayTime = fs.predictedDisplayTime; end.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     if (drawn == 2) {
+        frames_drawn++;
         layer.space = xr_stage; layer.viewCount = 2; layer.views = pv;
         end.layerCount = 1; end.layers = layers;
     }
-    XR_OK(xrEndFrame(xr_session, &end));
+    int ended = XR_OK(xrEndFrame(xr_session, &end));
+    if (frames_drawn <= 2 && drawn == 2) LOGI("frame %d: shown (%s)", frames_drawn - 1, ended ? "ok" : "FAILED");
 }
 
-/* ---------- Android ---------- */
+/* ---------- starting and stopping ---------- */
+
+static void shutdown_all(int ok) {
+    if (ok) {
+        app_pause();
+        if (xr_running && xr_state == XR_SESSION_STATE_STOPPING) xrEndSession(xr_session);
+    }
+    if (xr_session) xrDestroySession(xr_session);
+    if (xr_instance) xrDestroyInstance(xr_instance);
+    if (egl_dpy != EGL_NO_DISPLAY) {
+        eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        if (egl_ctx != EGL_NO_CONTEXT) eglDestroyContext(egl_dpy, egl_ctx);
+        if (egl_surf != EGL_NO_SURFACE) eglDestroySurface(egl_dpy, egl_surf);
+        eglTerminate(egl_dpy);
+    }
+}
+
+#ifdef __ANDROID__
 
 static void on_cmd(struct android_app *app, int32_t cmd) {
     switch (cmd) {
-    case APP_CMD_RESUME: g_resumed = 1; break;
-    case APP_CMD_PAUSE: g_resumed = 0; if (xr_session) app_pause(); break;
+    case APP_CMD_PAUSE: if (g_ready) app_pause(); break;
     case APP_CMD_DESTROY: g_quit = 1; break;
     default: break;
     }
@@ -486,41 +628,74 @@ void android_main(struct android_app *app) {
     app->onAppCmd = on_cmd;
     JNIEnv *env = NULL;
     (*app->activity->vm)->AttachCurrentThread(app->activity->vm, &env, NULL);
+    const char *dir = app->activity->externalDataPath ? app->activity->externalDataPath : app->activity->internalDataPath;
+    if (dir) {
+        char path[512]; snprintf(path, sizeof path, "%s/log.txt", dir);
+        g_log = fopen(path, "w");
+    }
+    watch_for_crashes();
     LOGI("Flaux VR " FX_VERSION " starting");
 
     int ok = egl_init() && xr_init();
     if (ok) {
-        const char *dir = app->activity->externalDataPath ? app->activity->externalDataPath : app->activity->internalDataPath;
         sound_init();
+        LOGI("sound ready; starting the editor");
         app_init(dir ? dir : "/data/local/tmp");
+        g_ready = 1;
         LOGI("ready; projects are kept in %s", dir);
     } else {
         LOGE("Flaux VR couldn't start. It needs a headset with OpenXR (a Meta Quest).");
+        ANativeActivity_finish(app->activity);
     }
 
     while (!app->destroyRequested && !g_quit) {
-        int events; struct android_poll_source *src;
+        int events; struct android_poll_source *src = NULL;
         while (ALooper_pollOnce(ok && xr_running ? 0 : 100, NULL, &events, (void **)&src) >= 0) {
             if (src) src->process(app, src);
+            src = NULL;
             if (app->destroyRequested) break;
         }
-        if (!ok) { if (!app->destroyRequested) ANativeActivity_finish(app->activity); continue; }
+        if (!ok) continue;
         xr_events();
         if (xr_running) xr_frame();
     }
 
-    if (ok) {
-        app_pause();
-        if (xr_running) xrEndSession(xr_session);
-        xrDestroySession(xr_session);
-        xrDestroyInstance(xr_instance);
-    }
-    if (egl_dpy != EGL_NO_DISPLAY) {
-        eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        if (egl_ctx != EGL_NO_CONTEXT) eglDestroyContext(egl_dpy, egl_ctx);
-        if (egl_surf != EGL_NO_SURFACE) eglDestroySurface(egl_dpy, egl_surf);
-        eglTerminate(egl_dpy);
-    }
+    LOGI("closing");
+    shutdown_all(ok);
+    if (g_log) fclose(g_log);
     (*app->activity->vm)->DetachCurrentThread(app->activity->vm);
     _exit(0);       /* a fresh start next time, rather than a half-alive process */
 }
+
+#else   /* the PC test: run some frames against a real OpenXR runtime, then say how it went */
+
+int main(int argc, char **argv) {
+    int want = argc > 2 ? atoi(argv[2]) : 200;
+    const char *dir = argc > 1 ? argv[1] : "build/xr_data";
+    if (!(egl_init() && xr_init())) { LOGE("couldn't start"); shutdown_all(0); return 1; }
+    sound_init();
+    app_init(dir);
+    g_ready = 1;
+    int frames = 0;
+    for (int spins = 0; spins < 3000 && frames < want && !g_quit; spins++) {
+        xr_events();
+        if (xr_running) { xr_frame(); frames += frames_drawn > frames ? 1 : 0; }
+        else usleep(10000);
+    }
+    LOGI("%d frames drawn with both eyes, session state %d, focused %d, GL error 0x%x", frames_drawn, (int)xr_state, xr_focused,
+         glGetError());
+    if (frames_drawn > 0 && argc > 3) {            /* save what the left eye saw */
+        int w = eyes[0].w, h = eyes[0].h;
+        unsigned char *px = malloc((size_t)w * h * 4);
+        glBindFramebuffer(GL_FRAMEBUFFER, eyes[0].fbo[last_image]);
+        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        FILE *f = fopen(argv[3], "wb");
+        fprintf(f, "P6\n%d %d\n255\n", w, h);
+        for (int y = h - 1; y >= 0; y--) for (int x = 0; x < w; x++) fwrite(px + ((size_t)y * w + x) * 4, 1, 3, f);
+        fclose(f); free(px);
+    }
+    shutdown_all(1);
+    return frames_drawn >= want ? 0 : 2;
+}
+
+#endif
