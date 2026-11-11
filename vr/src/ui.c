@@ -83,7 +83,41 @@ static const char *FS = "#version 300 es\nprecision highp float;\n"
     "  o = vec4(u_enc == 1 ? col.rgb : pow(col.rgb, vec3(2.2)), col.a);\n"
     "}\n";
 
+/* the arrow from the first Flaux VR: X is its black outline, a dot is white */
+static const char *const ARROW[27] = {
+    "X               ", "XX              ", "X.X             ", "X..X            ", "X...X           ", "X....X          ",
+    "X.....X         ", "X......X        ", "X.......X       ", "X........X      ", "X.........X     ", "X..........X    ",
+    "X...........X   ", "X............X  ", "X.............X ", "X........XXXXXXX", "X.....XX..X     ", "X....X X..X     ",
+    "X...X  X...X    ", "X..X    X..X    ", "X.X     X...X   ", "XX       X..X   ", "X        X...X  ", "          X..X  ",
+    "          X...X ", "           X..X ", "            XX  "};
+#define ARROW_W 16
+#define ARROW_H 27
+#define ARROW_UP 8            /* each square of the arrow becomes 8x8 pixels, so its edges stay sharp */
+static GLuint tex_arrow;
+
+static void make_arrow(void) {
+    const int w = (ARROW_W + 2) * ARROW_UP, h = (ARROW_H + 2) * ARROW_UP;
+    unsigned char *px = calloc((size_t)w * h, 4);
+    for (int y = 0; y < ARROW_H * ARROW_UP; y++)
+        for (int x = 0; x < ARROW_W * ARROW_UP; x++) {
+            char c = ARROW[y / ARROW_UP][x / ARROW_UP];
+            if (c == ' ') continue;
+            unsigned char *p = px + ((size_t)(y + ARROW_UP) * w + x + ARROW_UP) * 4;
+            p[0] = p[1] = p[2] = c == '.' ? 255 : 0; p[3] = 255;
+        }
+    glGenTextures(1, &tex_arrow);
+    glBindTexture(GL_TEXTURE_2D, tex_arrow);
+    glTexImage2D(GL_TEXTURE_2D, 0, g_encode ? GL_RGBA8 : GL_SRGB8_ALPHA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    free(px);
+}
+
 void ui_init(void) {
+    make_arrow();
     prog = gfx_program(VS, FS, "ui");
     verts = malloc(sizeof(float) * VFLOATS * MAX_VERTS);
     glGenVertexArrays(1, &vao); glBindVertexArray(vao);
@@ -350,9 +384,9 @@ void ui_end(void) {
     for (int i = 0; i < 2; i++) {            /* where each laser lands */
         Pointer *p = &ui_ptr[i];
         if (p->panel != cur) continue;
-        float r = p->down ? 9.0f : 12.0f;
-        ui_glow(p->px - r, p->py - r, r * 2, r * 2, r, 16, rgba(0x4FE3F5, 0.55f));
-        ui_frame_rect(p->px - r, p->py - r, r * 2, r * 2, r, rgba(0xFFFFFF, 0.95f), 3, rgba(0x4FE3F5, 1));
+        float k = p->down ? 1.75f : 2.0f;         /* panel pixels per square of the arrow; its tip is where you point */
+        ui_glow(p->px - 10, p->py - 10, 20, 20, 10, 18, i ? rgba(0x4FE3F5, 0.6f) : rgba(0xA78BFA, 0.6f));
+        ui_image(p->px - k, p->py - k, (ARROW_W + 2) * k, (ARROW_H + 2) * k, 0, tex_arrow, 0, 0, 1, 1, rgba(0xFFFFFF, 1));
     }
     cur = -1;
 }

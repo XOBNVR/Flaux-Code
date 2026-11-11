@@ -19,7 +19,7 @@
 #include <string.h>
 #include <GLES3/gl3.h>
 
-#define FX_VERSION "2.0.1"
+#define FX_VERSION "2.1.0"
 #define FX_PI 3.14159265358979f
 
 /* ---------- maths ---------- */
@@ -170,6 +170,8 @@ void gfx_ribbon(V3 a, V3 b, float width, const float ca[4], const float cb[4]);
 void gfx_ribbons_flush(const Cam *c);
 void gfx_ribbons_clear(void);
 void gfx_wire_box(V3 pos, Q4 rot, V3 scale, float width, const float col[4]);
+int gfx_model_load(const char *asset);          /* -1 if it isn't there */
+void gfx_model(int id, V3 pos, Q4 rot, V3 tint, float glow);
 void gfx_thumbnails(GLuint *tex_out);     /* one picture holding every shape, for the Build tab */
 
 /* ---------- ui.c ---------- */
@@ -303,6 +305,8 @@ void net_init(const char *player_name);
 void net_tick(double time, Pose head, Pose lh, Pose rh);
 int net_host(const char *room_name);
 int net_join(const char *ip);
+int net_join_server(const char *address, const char *room);   /* a server, or a hosting headset's address */
+int net_on_server(void);
 void net_leave(void);
 int net_mode(void);            /* 0 alone, 1 hosting, 2 joined, 3 joining */
 int net_peer_count(void);

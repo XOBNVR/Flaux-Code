@@ -11,6 +11,7 @@ static int nums[4], nnums;
 static V3 anchor, right, fwd;
 static float yaw;
 static int made, rainbow, color;
+static Obj *sink, *last; static int sink_n, sink_max;      /* a preview is built into a list of its own, not the scene */
 
 static int is_word(const char *w) {
     size_t n = strlen(w);
@@ -71,11 +72,21 @@ static int find_shape(int skip_ring) {
 }
 
 static void put(int shape, float x, float y, float z, V3 scale, int col, float turn) {
-    if (g_obj_count >= MAX_OBJ || made >= 400) return;
+    if ((!sink && g_obj_count >= MAX_OBJ) || made >= 400) return;
     if (rainbow) col = (made * 2) % 15;
     unsigned c = PALETTE[col];
     V3 p = v3add(anchor, v3add(v3mul(right, x), v3add(v3mul(fwd, z), v3(0, y, 0))));
-    if (scene_add(shape, p, q4axis(v3(0, 1, 0), yaw + turn), scale, (uint8_t)(c >> 16), (uint8_t)(c >> 8), (uint8_t)c)) made++;
+    Q4 q = q4axis(v3(0, 1, 0), yaw + turn);
+    if (sink) {
+        if (sink_n >= sink_max) return;
+        last = &sink[sink_n++];
+        memset(last, 0, sizeof *last);
+        last->shape = shape; last->pos = p; last->rot = q; last->scale = scale;
+        last->r = (uint8_t)(c >> 16); last->g = (uint8_t)(c >> 8); last->b = (uint8_t)c;
+        made++;
+    } else if ((last = scene_add(shape, p, q, scale, (uint8_t)(c >> 16), (uint8_t)(c >> 8), (uint8_t)c)) != NULL) {
+        made++;
+    }
 }
 
 static int color_named(const char *name) {
@@ -96,8 +107,8 @@ static void tower_part(float x, float z, float r, float h, int wall, int roof) {
 
 void copilot_run(const char *prompt) {
     split(prompt);
-    yaw = ed_front_yaw();
-    anchor = ed_front_point(is_word("castle") ? 5.0f : any("house home hut forest wood rocket spaceship") ? 4.0f : 3.2f);
+    yaw = sink ? 0 : ed_front_yaw();
+    anchor = sink ? v3(0, 0, 0) : ed_front_point(is_word("castle") ? 5.0f : any("house home hut forest wood rocket spaceship") ? 4.0f : 3.2f);
     right = v3(cosf(yaw), 0, -sinf(yaw)); fwd = v3(-sinf(yaw), 0, -cosf(yaw));
     made = 0;
     rainbow = any("rainbow colourful colorful");
@@ -109,17 +120,17 @@ void copilot_run(const char *prompt) {
     const char *what = NULL;
     char desc[64];
 
-    if (any("clear reset") || (any("delete remove erase") && any("everything all"))) {
+    if (!sink && (any("clear reset") || (any("delete remove erase") && any("everything all")))) {
         int had = g_obj_count;
         scene_clear(); scene_commit("Clear"); ed.selected = 0;
         copilot_say(0, had ? "Cleared %d shape%s. Press A if you want them back." : "The plate is already empty.", had, had == 1 ? "" : "s");
         return;
     }
-    if (is_word("undo")) { copilot_say(0, scene_undo() ? "Undone." : "There's nothing to undo."); return; }
-    if (is_word("redo")) { copilot_say(0, scene_redo() ? "Redone." : "There's nothing to redo."); return; }
+    if (!sink && is_word("undo")) { copilot_say(0, scene_undo() ? "Undone." : "There's nothing to undo."); return; }
+    if (!sink && is_word("redo")) { copilot_say(0, scene_redo() ? "Redone." : "There's nothing to redo."); return; }
 
-    Obj *sel = scene_find(ed.selected);
-    if (any("paint color colour recolor recolour make turn") && named >= 0 && (any("everything all") || (sel && any("it this selected that")))) {
+    Obj *sel = sink ? NULL : scene_find(ed.selected);
+    if (!sink && any("paint color colour recolor recolour make turn") && named >= 0 && (any("everything all") || (sel && any("it this selected that")))) {
         unsigned c = PALETTE[named];
         int count = 0;
         for (int i = 0; i < g_obj_count; i++)
@@ -178,7 +189,7 @@ void copilot_run(const char *prompt) {
         put(SH_SPHERE, 0, 1.12f, 0.5f, v3(0.65f, 0.65f, 0.65f), w, 0);
         put(SH_SPHERE, 0, 1.62f, 0.5f, v3(0.45f, 0.45f, 0.45f), w, 0);
         put(SH_CONE, 0, 1.62f, 0.22f, v3(0.09f, 0.3f, 0.09f), color_named("orange"), 0);
-        g_obj[g_obj_count - 1].rot = q4mul(g_obj[g_obj_count - 1].rot, q4axis(v3(1, 0, 0), -FX_PI / 2));
+        if (last) last->rot = q4mul(last->rot, q4axis(v3(1, 0, 0), -FX_PI / 2));
         put(SH_SPHERE, -0.09f, 1.70f, 0.30f, v3(0.05f, 0.05f, 0.05f), color_named("black"), 0);
         put(SH_SPHERE, 0.09f, 1.70f, 0.30f, v3(0.05f, 0.05f, 0.05f), color_named("black"), 0);
         put(SH_CYLINDER, 0, 1.90f, 0.5f, v3(0.34f, 0.22f, 0.34f), color_named("black"), 0);
@@ -259,6 +270,7 @@ void copilot_run(const char *prompt) {
         what = desc;
     }
 
+    if (sink) return;
     if (!what || !made) {
         if (what) copilot_say(0, "The scene is full, so I couldn't add that.");
         else copilot_say(0, "I didn't get that. Try \"a wall 6 by 3\", \"a ring of 12 balls\", \"a castle\" or \"clear\".");
@@ -270,4 +282,13 @@ void copilot_run(const char *prompt) {
     copilot_say(0, "Built %s in front of you (%d shape%s).", what, made, made == 1 ? "" : "s");
     ed_toast("Built %s.", what);
     plat_sound(SND_PLACE);
+}
+
+/* Builds what the words ask for into a list instead of the scene, standing at 0, 0, 0 and facing
+ * you.  The Assets page uses it for its pictures.  Gives back how many shapes it made. */
+int copilot_preview(const char *prompt, Obj *out, int max) {
+    sink = out; sink_n = 0; sink_max = max;
+    copilot_run(prompt);
+    sink = NULL;
+    return sink_n;
 }

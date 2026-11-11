@@ -1,0 +1,9 @@
+{
+  "name": "flaux-vr-server",
+  "version": "1.0.0",
+  "description": "Rooms over the internet for Flaux VR",
+  "private": true,
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}

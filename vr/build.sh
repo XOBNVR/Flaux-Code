@@ -26,13 +26,14 @@ fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT/lib/arm64-v8a" "$OUT/res"
+ANDROID_NDK="$ANDROID_NDK" ./tools/get_mbedtls.sh android
 
 "$TC/bin/aarch64-linux-android29-clang" -std=gnu11 -O2 -fPIC -shared -Wall -Wextra -Wno-unused-parameter \
     -Wno-missing-field-initializers -fvisibility=hidden -ffunction-sections -fdata-sections \
-    -g -I src -I "$OXR/prefab/modules/headers/include" -I "$ANDROID_NDK/sources/android/native_app_glue" \
-    src/gfx.c src/ui.c src/scene.c src/net.c src/editor.c src/screens.c src/copilot.c src/xr_main.c \
+    -g -I src -I third_party/mbedtls/include -I "$OXR/prefab/modules/headers/include" -I "$ANDROID_NDK/sources/android/native_app_glue" \
+    src/gfx.c src/ui.c src/scene.c src/net.c src/editor.c src/screens.c src/copilot.c src/assets.c src/xr_main.c \
     "$ANDROID_NDK/sources/android/native_app_glue/android_native_app_glue.c" \
-    -L prebuilt/arm64-v8a -lopenxr_loader \
+    build/android-mbedtls.a -L prebuilt/arm64-v8a -lopenxr_loader \
     -landroid -llog -lEGL -lGLESv3 -lOpenSLES -lm \
     -u ANativeActivity_onCreate -Wl,--gc-sections -Wl,--no-undefined -Wl,-z,max-page-size=16384 \
     -o "$OUT/lib/arm64-v8a/libflauxvr.so"

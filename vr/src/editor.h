@@ -9,7 +9,7 @@ typedef struct {
     int snap_turn, grid, snap, haptics, sound, shadows;
 } Cfg;
 
-enum { TAB_HOME, TAB_BUILD, TAB_SCENE, TAB_VIEWER, TAB_ROOMS, TAB_COPILOT, TAB_PROJECTS, TAB_SETTINGS, TAB_COUNT };
+enum { TAB_HOME, TAB_BUILD, TAB_ASSETS, TAB_SCENE, TAB_VIEWER, TAB_ROOMS, TAB_COPILOT, TAB_PROJECTS, TAB_SETTINGS, TAB_COUNT };
 
 #define PW 1680.0f
 #define PH 1040.0f
@@ -34,7 +34,7 @@ typedef struct {
     char *edit; int edit_max; unsigned edit_id; int edit_submit, kb_shift, kb_sym;
     char toast[128]; double toast_until;
     char prompt[96]; char log[LOG_N][112]; int log_user[LOG_N]; int log_n;
-    char join_ip[24];
+    char server[96], room_code[24];
 } Ed;
 
 extern Cfg cfg;
@@ -64,5 +64,9 @@ void screens_draw(void);
 void keyboard_draw(void);
 void copilot_run(const char *prompt);
 void copilot_say(int user, const char *fmt, ...);
+int copilot_preview(const char *prompt, Obj *out, int max);
+void assets_prerender(void);
+void screen_assets(void);
+int ed_project_count(const char *name);
 
 #endif

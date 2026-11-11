@@ -25,7 +25,7 @@ It's a native app (C, OpenGL ES 3 and OpenXR): no game engine, no Java.
 > (`adb uninstall com.xobnvr.flaux`): Android won't put an app signed with
 > one key on top of the same app signed with another.
 
-It needs the two Touch controllers. Hand tracking isn't supported yet.
+It needs the two Touch controllers (you see them in your hands, with a laser from each and an arrow where it lands on the panel). Hand tracking isn't supported yet.
 
 ### If it won't start
 
@@ -56,14 +56,17 @@ never got as far as running.
 |---|---|
 | **Home** | the controls, and what's in the scene |
 | **Build** | pick a shape (cube, ball, cylinder, cone, ramp, ring), a colour and a size, then pull the trigger out in the world. Snap to a grid, show or hide grid lines and shadows. |
+| **Assets** | a library of ready-made things: the six shapes, patterns (tower, stairs, pyramid, spiral) and models (tree, house, castle, snowman, rocket, forest). Pick one and it turns in the **asset viewer**; drag to look at it from any side, then place it. |
 | **Objects** | every shape in a list. Rename, move, resize, turn, recolour, lock, copy or delete the one you pick. |
 | **Viewer** | the **scene viewer**: a screen showing your whole build from outside. Drag to look around it, use the thumbstick to zoom, tap a shape to select it, and press **Go there** to jump to that spot. |
-| **Rooms** | build together: one headset opens a room, others on the same Wi-Fi see it and join. |
+| **Rooms** | build together. **On this Wi-Fi**: one headset opens a room, the others see it and join. **Over the internet**: everyone types the same server address and room code (see [the server](server/README.md)). |
 | **Co-pilot** | type what you want ("a tower of 6 red cubes", "a ring of 12 balls", "a castle") and it's built in front of you. It runs on the headset, with no internet. |
 | **Projects** | save, open and delete projects, and write your build as a Flaux program (`.flx`) to open in Flaux Studio. |
 | **Settings** | how far away and how big the panel is, walking speed, turning, star brightness, buzz and sounds. |
 
 ![The scene viewer, showing a castle from outside](../docs/images/flaux_vr_viewer.png)
+
+![The Assets page: a library on the left, the asset viewer on the right](../docs/images/flaux_vr_assets.png)
 
 Your work is saved by itself every few seconds and when you take the headset
 off, so it's there next time. Projects are kept on the headset in
@@ -82,7 +85,7 @@ ANDROID_NDK=/path/to/android-ndk-r26d ANDROID_SDK=/path/to/android-sdk ./build.s
 That makes `build/FlauxVR.apk`, signed with a debug key it creates in
 `build/debug.keystore`. To sign with your own key, set `FLAUX_KEYSTORE` and
 `FLAUX_KEYSTORE_PASS`. The OpenXR headers are downloaded from Maven Central
-the first time (into `third_party/`). The OpenXR loader is the Khronos one, in
+the first time (into `third_party/`), and so is Mbed TLS (for secure connections to room servers). The OpenXR loader is the Khronos one, in
 `prebuilt/arm64-v8a/`, next to a near-empty `classes.dex` (the app is all
 native code).
 
@@ -125,7 +128,10 @@ To test rooms, run two copies:
 | `src/editor.c` | pointing, placing, grabbing, moving around, saving |
 | `src/scene.c` | the list of shapes, undo and redo, project files |
 | `src/copilot.c` | the co-pilot's patterns |
-| `src/net.c` | rooms |
+| `src/assets.c` | the Assets page and its viewer |
+| `src/net.c` | rooms: on the Wi-Fi, and through a server (WebSocket, with TLS from Mbed TLS) |
+| `server/` | the server for rooms over the internet |
+| `models/`, `tools/make_controllers.py` | the controller models, and the tool that turns them into `assets/controllers/*.fxm` |
 | `src/xr_main.c` | the headset: Android, OpenGL ES, OpenXR, sound (and the same OpenXR code on a PC, for `test_xr.sh`) |
 | `src/desktop_main.c` | the off-screen test rig |
 | `tools/make_font.py` | makes the font (`assets/ui/font.bin` and `src/font_data.h`) from Inter and DejaVu Sans |

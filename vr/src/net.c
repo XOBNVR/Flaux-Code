@@ -1,46 +1,81 @@
-/* Flaux VR: rooms.  One headset hosts, others on the same Wi-Fi join, and everyone builds in the
- * same scene.  The host shouts "I'm here" on the network once a second, so rooms show up by
- * themselves; you can also type the host's address.
+/* Flaux VR: rooms.  Everyone in a room builds in the same scene and sees each other.
  *
- * It's all plain text lines over TCP (port 24727):
+ * There are two ways to be in a room:
+ *   - On the same Wi-Fi: one headset hosts, shouting "I'm here" on the network once a second so
+ *     the room shows up on the others by itself (or you type the host's address).
+ *   - Over the internet: every headset connects to a Flaux VR server (see server/) and gives a
+ *     room code.  The server plays the part of the host.  Addresses look like
+ *     ws://192.168.1.5:8080 (a server on your own computer) or wss://my-server.onrender.com.
+ *
+ * Either way it's plain text lines:
+ *     room <code>             joiner -> server: which room (not used with a headset host)
  *     hello <name>            joiner -> host
  *     you <id>                host -> joiner: your player number
  *     full ... endfull        host -> joiner: the whole scene, as obj lines
  *     obj <...>               an object was added or changed
  *     del <id>                an object was removed
  *     pose <id> <name> <21 numbers>   where a player's head and hands are
- * The host passes every line from one joiner on to the others. */
+ * To a headset host the lines go straight down a TCP connection (port 24727).  To a server they
+ * travel inside a WebSocket, with TLS around it for wss:// addresses. */
 #include "fx.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <pthread.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
+
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/error.h>
+#include <mbedtls/ssl.h>
+#include <psa/crypto.h>
 
 #define PORT 24727
 #define BEACON_PORT 24728
 #define RX_MAX 4096
+#define WS_MAX 65536
 
 Peer g_peers[MAX_PEERS];
 Room g_rooms[MAX_ROOMS];
 char g_net_status[96] = "Not in a room";
 
-typedef struct { int fd; char rx[RX_MAX]; int rxn; char *tx; size_t txn, txcap; uint32_t pid; char name[20]; } Conn;
+typedef struct {
+    mbedtls_ssl_context ssl; mbedtls_ssl_config conf;
+    mbedtls_ctr_drbg_context drbg; mbedtls_entropy_context entropy; mbedtls_x509_crt ca;
+    int fd;
+} Tls;
+
+typedef struct {
+    int fd;
+    char rx[RX_MAX]; int rxn;
+    char *tx; size_t txn, txcap, tls_retry;
+    uint32_t pid; char name[20];
+    int ws;                      /* lines travel inside WebSocket frames */
+    Tls *tls;
+    unsigned char *wsbuf; int wsn;
+} Conn;
 
 static int mode;                       /* 0 alone, 1 hosting, 2 joined, 3 joining */
+static int via_server;
 static int listen_fd = -1, beacon_fd = -1, radio_fd = -1;
-static Conn conns[MAX_PEERS];          /* hosting: the joiners.  joined: conns[0] is the host */
+static Conn conns[MAX_PEERS];          /* hosting: the joiners.  joined: conns[0] is the host or the server */
 static uint32_t my_pid = 1, next_pid = 2;
-static char my_name[20] = "Player", room_name[24] = "Room", local_ip[20] = "";
-static double now, last_sync, last_pose, last_beacon, join_started;
+static char my_name[20] = "Player", room_name[40] = "Room", local_ip[20] = "";
+static double now, last_sync, last_pose, last_beacon, last_ping, join_started;
 static Obj *synced; static int synced_count;
 static int in_full;
+static unsigned rng = 0x2545F491u;
 
 int net_mode(void) { return mode; }
+int net_on_server(void) { return mode >= 2 && via_server; }
 
 static void nonblock(int fd) { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK); }
+static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 
 const char *net_local_ip(void) {
     static double asked = -10;
@@ -64,31 +99,136 @@ void net_init(const char *player_name) {
     if (synced) return;                      /* just a new name */
     for (int i = 0; i < MAX_PEERS; i++) conns[i].fd = -1;
     synced = malloc(sizeof(Obj) * MAX_OBJ);
+    struct timeval tv; gettimeofday(&tv, NULL);
+    rng ^= (unsigned)tv.tv_usec * 2654435761u + (unsigned)tv.tv_sec;
+    if (!rng) rng = 1;
 }
 
-/* ---------- sending ---------- */
+/* ---------- TLS (for wss:// servers) ---------- */
+
+static int tls_send(void *ctx, const unsigned char *buf, size_t len) {
+    ssize_t k = send(((Tls *)ctx)->fd, buf, len, MSG_NOSIGNAL);
+    if (k >= 0) return (int)k;
+    return (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) ? MBEDTLS_ERR_SSL_WANT_WRITE : MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+}
+static int tls_recv(void *ctx, unsigned char *buf, size_t len) {
+    ssize_t k = recv(((Tls *)ctx)->fd, buf, len, 0);
+    if (k > 0) return (int)k;
+    if (k == 0) return MBEDTLS_ERR_SSL_CONN_EOF;
+    return (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) ? MBEDTLS_ERR_SSL_WANT_READ : MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+}
+
+static void tls_free(Tls *t) {
+    if (!t) return;
+    mbedtls_ssl_free(&t->ssl); mbedtls_ssl_config_free(&t->conf);
+    mbedtls_ctr_drbg_free(&t->drbg); mbedtls_entropy_free(&t->entropy); mbedtls_x509_crt_free(&t->ca);
+    free(t);
+}
+
+/* a secure connection over fd (blocking, with the socket's timeouts); NULL and a reason if it can't be trusted */
+static Tls *tls_open(int fd, const char *host, char *err, size_t errn) {
+    static int psa_ready;
+    if (!psa_ready) { psa_crypto_init(); psa_ready = 1; }
+    Tls *t = calloc(1, sizeof *t);
+    t->fd = fd;
+    mbedtls_ssl_init(&t->ssl); mbedtls_ssl_config_init(&t->conf);
+    mbedtls_ctr_drbg_init(&t->drbg); mbedtls_entropy_init(&t->entropy); mbedtls_x509_crt_init(&t->ca);
+    int r = mbedtls_ctr_drbg_seed(&t->drbg, mbedtls_entropy_func, &t->entropy, (const unsigned char *)"flauxvr", 7);
+    if (!r) r = mbedtls_ssl_config_defaults(&t->conf, MBEDTLS_SSL_IS_CLIENT, MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
+    if (r) { snprintf(err, errn, "Couldn't start a secure connection"); tls_free(t); return NULL; }
+    /* who to trust: the certificate authorities the system trusts */
+    static const char *const dirs[] = {"/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts"};
+    static const char *const files[] = {"/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem"};
+    int loaded = 0;
+    if (getenv("FLAUX_CA_FILE") && mbedtls_x509_crt_parse_file(&t->ca, getenv("FLAUX_CA_FILE")) >= 0) loaded = 1;
+    for (size_t i = 0; i < 2; i++) if (mbedtls_x509_crt_parse_path(&t->ca, dirs[i]) >= 0 && t->ca.version) loaded = 1;
+    for (size_t i = 0; i < 3 && !loaded; i++) if (mbedtls_x509_crt_parse_file(&t->ca, files[i]) >= 0 && t->ca.version) loaded = 1;
+    if (!loaded || !t->ca.version) { snprintf(err, errn, "No trusted certificates on this device"); tls_free(t); return NULL; }
+    mbedtls_ssl_conf_ca_chain(&t->conf, &t->ca, NULL);
+    mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+    mbedtls_ssl_conf_rng(&t->conf, mbedtls_ctr_drbg_random, &t->drbg);
+    r = mbedtls_ssl_setup(&t->ssl, &t->conf);
+    if (!r) r = mbedtls_ssl_set_hostname(&t->ssl, host);
+    if (r) { snprintf(err, errn, "Couldn't start a secure connection"); tls_free(t); return NULL; }
+    mbedtls_ssl_set_bio(&t->ssl, t, tls_send, tls_recv, NULL);
+    while ((r = mbedtls_ssl_handshake(&t->ssl)) != 0) {
+        if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) { r = -1; }      /* the socket's timeout ran out */
+            else continue;
+        }
+        if (r == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED) snprintf(err, errn, "That server's certificate isn't trusted");
+        else snprintf(err, errn, "The secure connection failed");
+        tls_free(t);
+        return NULL;
+    }
+    return t;
+}
+
+/* ---------- connections ---------- */
 
 static void conn_close(Conn *c) {
+    if (c->tls) { mbedtls_ssl_close_notify(&c->tls->ssl); tls_free(c->tls); }
     if (c->fd >= 0) close(c->fd);
-    free(c->tx);
+    free(c->tx); free(c->wsbuf);
     memset(c, 0, sizeof *c);
     c->fd = -1;
+}
+
+/* >0 bytes, 0 nothing right now, -1 gone */
+static int io_recv(Conn *c, void *buf, size_t n) {
+    if (c->tls) {
+        int r = mbedtls_ssl_read(&c->tls->ssl, buf, n);
+        if (r > 0) return r;
+        return (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE || r == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET) ? 0 : -1;
+    }
+    ssize_t k = recv(c->fd, buf, n, 0);
+    if (k > 0) return (int)k;
+    if (k < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR || (errno == ENOTCONN && mode == 3))) return 0;
+    return -1;
+}
+
+static void tx_append(Conn *c, const void *data, size_t n) {
+    if (c->txn + n > c->txcap) { c->txcap = (c->txn + n) * 2; c->tx = realloc(c->tx, c->txcap); }
+    memcpy(c->tx + c->txn, data, n); c->txn += n;
+}
+
+static void ws_frame(Conn *c, int opcode, const char *data, size_t n) {
+    unsigned char head[14]; size_t h = 0;
+    head[h++] = (unsigned char)(0x80 | opcode);
+    if (n < 126) head[h++] = (unsigned char)(0x80 | n);
+    else if (n < 65536) { head[h++] = 0x80 | 126; head[h++] = (unsigned char)(n >> 8); head[h++] = (unsigned char)n; }
+    else { head[h++] = 0x80 | 127; for (int i = 7; i >= 0; i--) head[h++] = (unsigned char)((uint64_t)n >> (i * 8)); }
+    unsigned char key[4]; unsigned r = rnd(); memcpy(key, &r, 4);       /* what a browser would do: mask what we send */
+    memcpy(head + h, key, 4); h += 4;
+    tx_append(c, head, h);
+    size_t at = c->txn;
+    tx_append(c, data, n);
+    for (size_t i = 0; i < n; i++) c->tx[at + i] ^= (char)key[i & 3];
 }
 
 static void conn_send(Conn *c, const char *s) {
     if (c->fd < 0) return;
     size_t n = strlen(s);
     if (c->txn + n > (4u << 20)) { conn_close(c); return; }     /* hopelessly behind */
-    if (c->txn + n > c->txcap) { c->txcap = (c->txn + n) * 2; c->tx = realloc(c->tx, c->txcap); }
-    memcpy(c->tx + c->txn, s, n); c->txn += n;
+    if (c->ws) ws_frame(c, 1, s, n);
+    else tx_append(c, s, n);
 }
 
 static void conn_flush(Conn *c) {
     while (c->fd >= 0 && c->txn > 0) {
-        ssize_t k = send(c->fd, c->tx, c->txn, MSG_NOSIGNAL);
-        if (k > 0) { memmove(c->tx, c->tx + k, c->txn - (size_t)k); c->txn -= (size_t)k; }
-        else if (k < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR || (errno == ENOTCONN && mode == 3))) break;
-        else { conn_close(c); break; }
+        long k;
+        if (c->tls) {
+            size_t want = c->tls_retry ? c->tls_retry : (c->txn > 16000 ? 16000 : c->txn);    /* a retry must repeat the same bytes */
+            int r = mbedtls_ssl_write(&c->tls->ssl, (const unsigned char *)c->tx, want);
+            if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE) { c->tls_retry = want; break; }
+            c->tls_retry = 0;
+            k = r > 0 ? r : -1;
+        } else {
+            k = send(c->fd, c->tx, c->txn, MSG_NOSIGNAL);
+            if (k < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR || (errno == ENOTCONN && mode == 3))) break;
+        }
+        if (k <= 0) { conn_close(c); break; }
+        memmove(c->tx, c->tx + k, c->txn - (size_t)k); c->txn -= (size_t)k;
     }
 }
 
@@ -187,31 +327,59 @@ static void handle_line(Conn *c, char *line) {
     } else if (mode != 1 && !strcmp(line, "endfull")) {
         in_full = 0;
         scene_commit("Joined a room");
-        snprintf(g_net_status, sizeof g_net_status, "In %s's room", room_name);
+        snprintf(g_net_status, sizeof g_net_status, via_server ? "In room %.40s" : "In %.40s's room", room_name);
         plat_sound(SND_OPEN);
+    } else if (mode != 1 && !strncmp(line, "sorry ", 6)) {        /* the server says no, and why */
+        snprintf(g_net_status, sizeof g_net_status, "%.90s", line + 6);
+        conn_close(c);
+    }
+}
+
+static void feed(Conn *c, const char *data, int n) {       /* bytes of lines, in whatever pieces they arrive */
+    for (int i = 0; i < n && c->fd >= 0; i++) {
+        char ch = data[i];
+        if (ch == '\n') {
+            c->rx[c->rxn] = 0;
+            if (c->rxn && c->rx[c->rxn - 1] == '\r') c->rx[c->rxn - 1] = 0;
+            c->rxn = 0;
+            handle_line(c, c->rx);
+        } else if (c->rxn < RX_MAX - 3) {
+            c->rx[c->rxn++] = ch;
+        }
+    }
+}
+
+static void ws_feed(Conn *c, const unsigned char *data, int n) {
+    if (!c->wsbuf) c->wsbuf = malloc(WS_MAX);
+    if (c->wsn + n > WS_MAX) { conn_close(c); return; }
+    memcpy(c->wsbuf + c->wsn, data, (size_t)n); c->wsn += n;
+    while (c->fd >= 0 && c->wsn >= 2) {
+        unsigned char *b = c->wsbuf;
+        int op = b[0] & 15, masked = b[1] & 0x80;
+        size_t len = b[1] & 127, head = 2;
+        if (len == 126) { if (c->wsn < 4) return; len = ((size_t)b[2] << 8) | b[3]; head = 4; }
+        else if (len == 127) { conn_close(c); return; }          /* nothing we're sent is that big */
+        if (masked) head += 4;
+        if ((size_t)c->wsn < head + len) return;
+        unsigned char *payload = b + head;
+        if (masked) for (size_t i = 0; i < len; i++) payload[i] ^= b[head - 4 + (i & 3)];
+        if (op == 8) { conn_close(c); return; }
+        if (op == 9) ws_frame(c, 10, (const char *)payload, len);            /* ping: answer pong */
+        else if (op <= 2) feed(c, (const char *)payload, (int)len);
+        if (c->fd < 0) return;
+        size_t used = head + len;
+        memmove(c->wsbuf, c->wsbuf + used, (size_t)c->wsn - used); c->wsn -= (int)used;
     }
 }
 
 static void conn_read(Conn *c) {
     while (c->fd >= 0) {
-        ssize_t k = recv(c->fd, c->rx + c->rxn, (size_t)(RX_MAX - 2 - c->rxn), 0);
+        unsigned char buf[4096];
+        int k = io_recv(c, buf, sizeof buf);
         if (k > 0) {
-            c->rxn += (int)k;
-            int start = 0;
-            for (int i = 0; i < c->rxn; i++)
-                if (c->rx[i] == '\n') {
-                    char line[RX_MAX];
-                    int len = i - start;
-                    memcpy(line, c->rx + start, (size_t)len); line[len] = 0;
-                    if (len && line[len - 1] == '\r') line[len - 1] = 0;
-                    handle_line(c, line);
-                    start = i + 1;
-                    if (c->fd < 0) return;
-                }
-            memmove(c->rx, c->rx + start, (size_t)(c->rxn - start)); c->rxn -= start;
-            if (c->rxn >= RX_MAX - 2) c->rxn = 0;      /* a line far too long: drop it */
-        } else if (k < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR || (errno == ENOTCONN && mode == 3))) {
-            break;                                  /* nothing yet (or still connecting) */
+            if (c->ws) ws_feed(c, buf, k); else feed(c, (const char *)buf, k);
+        } else if (k == 0) {
+            break;
         } else {
             if (mode == 1) snprintf(g_net_status, sizeof g_net_status, "%s left", c->name[0] ? c->name : "A player");
             conn_close(c);
@@ -219,15 +387,105 @@ static void conn_read(Conn *c) {
     }
 }
 
+/* ---------- joining a server: done on the side, so a slow network never freezes your view ---------- */
+
+typedef struct {
+    char host[128], path[128], room[24], err[96];
+    int port, secure;
+    volatile int done, ok, cancelled;
+    int fd; Tls *tls;
+    unsigned char extra[2048]; int extra_n;       /* anything the server said straight after its welcome */
+} Job;
+static Job *job;
+
+static int job_write(Job *j, const char *data, size_t n) {
+    while (n > 0) {
+        long k = j->tls ? mbedtls_ssl_write(&j->tls->ssl, (const unsigned char *)data, n) : send(j->fd, data, n, MSG_NOSIGNAL);
+        if (k <= 0) return 0;
+        data += k; n -= (size_t)k;
+    }
+    return 1;
+}
+static int job_read(Job *j, unsigned char *buf, size_t n) {
+    if (j->tls) {
+        int r;
+        do r = mbedtls_ssl_read(&j->tls->ssl, buf, n); while (r == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET);
+        return r > 0 ? r : -1;
+    }
+    ssize_t k = recv(j->fd, buf, n, 0);
+    return k > 0 ? (int)k : -1;
+}
+
+static void *job_run(void *arg) {
+    Job *j = arg;
+    char port[12]; snprintf(port, sizeof port, "%d", j->port);
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_STREAM;
+    j->fd = -1;
+    if (getaddrinfo(j->host, port, &hints, &res) != 0 || !res) {
+        snprintf(j->err, sizeof j->err, "Can't find %.40s. Check the address.", j->host);
+    } else {
+        struct timeval tv = {8, 0};
+        for (struct addrinfo *a = res; a && j->fd < 0; a = a->ai_next) {
+            int fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+            if (fd < 0) continue;
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv); setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+            if (connect(fd, a->ai_addr, a->ai_addrlen) == 0) j->fd = fd; else close(fd);
+        }
+        freeaddrinfo(res);
+        if (j->fd < 0) snprintf(j->err, sizeof j->err, "No answer from %.60s", j->host);
+    }
+    if (j->fd >= 0 && j->secure) {
+        j->tls = tls_open(j->fd, j->host, j->err, sizeof j->err);
+        if (!j->tls) { close(j->fd); j->fd = -1; }
+    }
+    if (j->fd >= 0) {                              /* ask to switch from web page talk to a WebSocket */
+        char req[512];
+        int n = snprintf(req, sizeof req,
+                         "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                         "Sec-WebSocket-Key: RmxhdXhWUiByb29tIGtleQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", j->path, j->host);
+        unsigned char buf[2048]; int got = 0, end = -1;
+        if (job_write(j, req, (size_t)n))
+            while (got < (int)sizeof buf - 1 && end < 0) {
+                int k = job_read(j, buf + got, sizeof buf - 1 - (size_t)got);
+                if (k <= 0) break;
+                got += k; buf[got] = 0;
+                char *e = strstr((char *)buf, "\r\n\r\n");
+                if (e) end = (int)(e - (char *)buf) + 4;
+            }
+        if (end > 0 && !strncmp((char *)buf, "HTTP/1.1 101", 12)) {
+            j->extra_n = got - end; memcpy(j->extra, buf + end, (size_t)j->extra_n);
+            int one = 1; setsockopt(j->fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+            struct timeval none = {0, 0};
+            setsockopt(j->fd, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof none); setsockopt(j->fd, SOL_SOCKET, SO_SNDTIMEO, &none, sizeof none);
+            nonblock(j->fd);
+            j->ok = 1;
+        } else {
+            snprintf(j->err, sizeof j->err, end > 0 ? "%.60s isn't a Flaux VR server" : "%.60s stopped answering", j->host);
+            if (j->tls) tls_free(j->tls);
+            close(j->fd); j->fd = -1; j->tls = NULL;
+        }
+    }
+    j->done = 1;
+    if (j->cancelled) {                            /* nobody is waiting any more: tidy up here */
+        if (j->tls) tls_free(j->tls);
+        if (j->fd >= 0) close(j->fd);
+        free(j);
+    }
+    return NULL;
+}
+
 /* ---------- rooms ---------- */
 
 void net_leave(void) {
+    if (job) { if (job->done) { if (job->tls) tls_free(job->tls); if (job->fd >= 0) close(job->fd); free(job); } else job->cancelled = 1; job = NULL; }
     for (int i = 0; i < MAX_PEERS; i++) conn_close(&conns[i]);
     if (listen_fd >= 0) close(listen_fd);
     if (beacon_fd >= 0) close(beacon_fd);
     listen_fd = beacon_fd = -1;
     memset(g_peers, 0, sizeof g_peers);
-    mode = 0; my_pid = 1; in_full = 0;
+    mode = 0; my_pid = 1; in_full = 0; via_server = 0;
     snprintf(g_net_status, sizeof g_net_status, "Not in a room");
 }
 
@@ -253,12 +511,12 @@ int net_host(const char *name) {
     return 1;
 }
 
-int net_join(const char *ip) {
+int net_join(const char *ip) {           /* a headset that's hosting on this Wi-Fi */
     net_leave();
     struct sockaddr_in a; memset(&a, 0, sizeof a);
     a.sin_family = AF_INET; a.sin_port = htons(PORT);
     if (inet_pton(AF_INET, ip, &a.sin_addr) != 1) {
-        snprintf(g_net_status, sizeof g_net_status, "\"%s\" isn't an address like 192.168.1.20", ip);
+        snprintf(g_net_status, sizeof g_net_status, "\"%.40s\" isn't an address like 192.168.1.20", ip);
         return 0;
     }
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -266,7 +524,7 @@ int net_join(const char *ip) {
     nonblock(fd);
     int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
     if (connect(fd, (struct sockaddr *)&a, sizeof a) != 0 && errno != EINPROGRESS) {
-        snprintf(g_net_status, sizeof g_net_status, "Couldn't reach %s", ip);
+        snprintf(g_net_status, sizeof g_net_status, "Couldn't reach %.40s", ip);
         close(fd);
         return 0;
     }
@@ -277,7 +535,50 @@ int net_join(const char *ip) {
     char hello[64]; snprintf(hello, sizeof hello, "hello %s\n", my_name);
     conn_send(&conns[0], hello);
     mode = 3; join_started = now; in_full = 1;       /* don't send our scene: we're about to get theirs */
-    snprintf(g_net_status, sizeof g_net_status, "Joining %s...", ip);
+    snprintf(g_net_status, sizeof g_net_status, "Joining %.40s...", ip);
+    return 1;
+}
+
+/* Join a room on a server.  The address can be ws://host:port, wss://host, host:port (taken as
+ * ws://) or just a host name (taken as wss://).  A bare number address like 192.168.1.20 is a
+ * headset hosting on this Wi-Fi. */
+int net_join_server(const char *address, const char *room) {
+    char addr[160]; snprintf(addr, sizeof addr, "%s", address);
+    char *s = addr;
+    while (*s == ' ') s++;
+    for (char *e = s + strlen(s); e > s && (e[-1] == ' ' || e[-1] == '/'); ) *--e = 0;
+    struct in_addr probe;
+    if (inet_pton(AF_INET, s, &probe) == 1) return net_join(s);
+    net_leave();
+    Job *j = calloc(1, sizeof *j);
+    j->secure = 1; j->port = 443;
+    if (!strncmp(s, "wss://", 6)) s += 6;
+    else if (!strncmp(s, "https://", 8)) s += 8;
+    else if (!strncmp(s, "ws://", 5)) { s += 5; j->secure = 0; j->port = 80; }
+    else if (!strncmp(s, "http://", 7)) { s += 7; j->secure = 0; j->port = 80; }
+    else if (strchr(s, ':')) { j->secure = 0; j->port = 80; }
+    char *slash = strchr(s, '/');
+    snprintf(j->path, sizeof j->path, "%.120s", slash ? slash : "/");
+    if (slash) *slash = 0;
+    char *colon = strrchr(s, ':');
+    if (colon) { *colon = 0; j->port = atoi(colon + 1); }
+    snprintf(j->host, sizeof j->host, "%.120s", s);
+    int k = 0;
+    for (const char *r = room; *r && k < 20; r++)
+        if ((*r >= 'a' && *r <= 'z') || (*r >= 'A' && *r <= 'Z') || (*r >= '0' && *r <= '9') || *r == '-' || *r == '_')
+            j->room[k++] = (char)((*r >= 'a' && *r <= 'z') ? *r - 32 : *r);
+    if (!j->host[0] || j->port <= 0 || j->port > 65535) {
+        snprintf(g_net_status, sizeof g_net_status, "Type the server's address, like my-server.onrender.com");
+        free(j); return 0;
+    }
+    if (!k) { snprintf(g_net_status, sizeof g_net_status, "Type a room code: letters and numbers, like FLAUX"); free(j); return 0; }
+    pthread_t t;
+    if (pthread_create(&t, NULL, job_run, j) != 0) { snprintf(g_net_status, sizeof g_net_status, "Couldn't start connecting"); free(j); return 0; }
+    pthread_detach(t);
+    job = j;
+    snprintf(room_name, sizeof room_name, "%s", j->room);
+    mode = 3; via_server = 1; join_started = now; in_full = 1;
+    snprintf(g_net_status, sizeof g_net_status, "Connecting to %.60s...", j->host);
     return 1;
 }
 
@@ -322,6 +623,29 @@ void net_tick(double time, Pose head, Pose lh, Pose rh) {
     hear_rooms();
     if (mode == 0) return;
 
+    if (job) {                                   /* still finding and greeting the server */
+        if (!job->done) {
+            if (now - join_started > 25.0) { net_leave(); snprintf(g_net_status, sizeof g_net_status, "The server took too long to answer"); }
+            return;
+        }
+        Job *j = job; job = NULL;
+        if (!j->ok) {
+            char why[96]; snprintf(why, sizeof why, "%s", j->err);
+            free(j); net_leave();
+            snprintf(g_net_status, sizeof g_net_status, "%s", why);
+            plat_sound(SND_ERROR);
+            return;
+        }
+        Conn *c = &conns[0];
+        c->fd = j->fd; c->tls = j->tls; c->ws = 1;
+        if (j->extra_n) ws_feed(c, j->extra, j->extra_n);
+        char hello[96]; snprintf(hello, sizeof hello, "room %s\nhello %s\n", j->room, my_name);
+        free(j);
+        conn_send(c, hello);
+        join_started = now;
+        snprintf(g_net_status, sizeof g_net_status, "Joining room %.40s...", room_name);
+    }
+
     if (mode == 1) {
         for (;;) {
             int fd = accept(listen_fd, NULL, NULL);
@@ -346,13 +670,16 @@ void net_tick(double time, Pose head, Pose lh, Pose rh) {
 
     if (mode >= 2 && conns[0].fd < 0) {            /* the host went away, or never answered */
         int was = mode;
+        char said[96]; snprintf(said, sizeof said, "%s", g_net_status);
+        int refused = strncmp(said, "Joining", 7) != 0 && strncmp(said, "In ", 3) != 0 && strncmp(said, "Connecting", 10) != 0;
         net_leave();
-        snprintf(g_net_status, sizeof g_net_status, was == 3 ? "Couldn't join that room" : "The room closed");
+        if (refused) snprintf(g_net_status, sizeof g_net_status, "%s", said);       /* the server gave its reason */
+        else snprintf(g_net_status, sizeof g_net_status, was == 3 ? "Couldn't join that room" : "The room closed");
         return;
     }
     if (mode == 3) {
         if (my_pid != 1) mode = 2;
-        else if (now - join_started > 6.0) { net_leave(); snprintf(g_net_status, sizeof g_net_status, "No answer from that room"); return; }
+        else if (now - join_started > 8.0) { net_leave(); snprintf(g_net_status, sizeof g_net_status, "No answer from that room"); return; }
     }
 
     if ((mode == 1 || mode == 2) && !in_full) {
@@ -369,6 +696,7 @@ void net_tick(double time, Pose head, Pose lh, Pose rh) {
             snprintf(line + n, sizeof line - (size_t)n, "\n");
             send_all(line, NULL);
         }
+        if (via_server && now - last_ping > 20.0) { last_ping = now; ws_frame(&conns[0], 9, "", 0); }    /* keep the line open */
     }
     for (int i = 0; i < MAX_PEERS; i++) {
         if (g_peers[i].used && now - g_peers[i].seen > 3.0) g_peers[i].used = 0;

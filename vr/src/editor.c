@@ -35,6 +35,7 @@ static int ghost_on; static V3 ghost_pos;
 static float laser_len[2]; static int laser_hit[2];
 static double last_autosave; static unsigned autosave_hash;
 static int frames; static double fps_t0;
+static int controller_model[2] = {-1, -1};
 
 /* ---------- small helpers ---------- */
 
@@ -256,6 +257,17 @@ int ed_project_list(char names[][32], int max) {
     return n;
 }
 
+int ed_project_count(const char *name) {      /* how many shapes a saved project holds */
+    char path[400], line[256];
+    project_path(path, sizeof path, name);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    int n = 0;
+    while (fgets(line, sizeof line, f)) if (!strncmp(line, "obj ", 4)) n++;
+    fclose(f);
+    return n;
+}
+
 int ed_project_export(void) {
     char clean[32], path[400];
     clean_name(clean, sizeof clean, ed.project);
@@ -277,6 +289,8 @@ void ed_save_settings(void) {
     fprintf(f, "snap_turn %d\ngrid %d\nsnap %d\nhaptics %d\nsound %d\nshadows %d\ncolor %d\n", cfg.snap_turn, cfg.grid, cfg.snap,
             cfg.haptics, cfg.sound, cfg.shadows, ed.color);
     fprintf(f, "project %s\nplayer %s\n", ed.project, ed.player);
+    if (ed.server[0]) fprintf(f, "server %s\n", ed.server);
+    if (ed.room_code[0]) fprintf(f, "room %s\n", ed.room_code);
     fclose(f);
 }
 
@@ -306,6 +320,8 @@ static void load_settings(void) {
         else if (!strcmp(line, "color")) ed.color = (int)fclamp(x, 0, PALETTE_N - 1);
         else if (!strcmp(line, "project")) snprintf(ed.project, sizeof ed.project, "%s", v);
         else if (!strcmp(line, "player")) snprintf(ed.player, sizeof ed.player, "%s", v);
+        else if (!strcmp(line, "server")) snprintf(ed.server, sizeof ed.server, "%s", v);
+        else if (!strcmp(line, "room")) snprintf(ed.room_code, sizeof ed.room_code, "%s", v);
     }
     fclose(f);
 }
@@ -336,6 +352,7 @@ void app_init(const char *data_dir) {
     snprintf(ed.data_dir, sizeof ed.data_dir, "%s", data_dir);
     snprintf(ed.project, sizeof ed.project, "My world");
     snprintf(ed.player, sizeof ed.player, "Player");
+    snprintf(ed.room_code, sizeof ed.room_code, "FLAUX");
     ed.tool = -1; ed.color = 7;
     ed.rig_pos = v3(0, 0, 2.0f);
     ed.v_yaw = 0.6f; ed.v_pitch = 0.45f; ed.v_dist = 9.0f; ed.v_target = v3(0, 0.8f, 0);
@@ -351,6 +368,9 @@ void app_init(const char *data_dir) {
     net_init(ed.player);
     rt_create(&ed.viewer, 1308, 816, 4);
     gfx_thumbnails(&ed.thumbs);
+    controller_model[0] = gfx_model_load("controllers/left.fxm");
+    controller_model[1] = gfx_model_load("controllers/right.fxm");
+    if (controller_model[0] < 0 || controller_model[1] < 0) plat_log("controller models missing: drawing simple ones");
 
     ed.main.pw = PW; ed.main.ph = PH; ed.kb.pw = KW; ed.kb.ph = KH;
     ed.main.pose = pose_ident(); ed.kb.pose = pose_ident();
@@ -617,6 +637,10 @@ static void draw_person(Pose head, Pose lh, Pose rh, V3 color) {
 static void draw_controller(int h) {
     Pose g = ed.grip[h];
     V3 body = v3(0.13f, 0.14f, 0.24f), accent = h ? v3(0.25f, 0.85f, 0.95f) : v3(0.62f, 0.45f, 1.0f);
+    if (controller_model[h] >= 0) {             /* the real controller, where your hand is */
+        gfx_model(controller_model[h], g.p, g.q, accent, trig_down[h] || grip_down[h] ? 1.0f : 0.0f);
+        return;
+    }
     gfx_shape(SH_CYLINDER, pose_pt(g, v3(0, 0, 0.02f)), q4mul(g.q, q4axis(v3(1, 0, 0), FX_PI / 2)), v3(0.034f, 0.115f, 0.034f), body, 1, 0);
     gfx_shape(SH_TORUS, pose_pt(g, v3(0, 0.012f, -0.05f)), q4mul(g.q, q4axis(v3(1, 0, 0), 0.9f)), v3(0.085f, 0.06f, 0.085f), body, 1, 0.25f);
     gfx_shape(SH_SPHERE, ed.aim[h].p, ed.aim[h].q, v3(0.018f, 0.018f, 0.018f), accent, 1, 1.0f);
@@ -677,6 +701,7 @@ void ed_viewer_pick(float u, float v) {
 }
 
 void app_prerender(void) {
+    assets_prerender();
     if (!ed.main.visible || ed.tab != TAB_VIEWER) return;
     Cam c = ed_viewer_cam();
     rt_begin(&ed.viewer);

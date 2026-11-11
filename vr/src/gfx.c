@@ -138,6 +138,32 @@ static const char *FS_SHAPE = GLSL_HEAD GLSL_OUT
     "  o = fx_out(c, u_alpha);\n"
     "}\n";
 
+static const char *VS_MODEL = GLSL_HEAD
+    "layout(location = 0) in vec3 a_pos; layout(location = 1) in vec3 a_nrm; layout(location = 2) in vec2 a_uv;\n"
+    "uniform mat4 u_vp, u_model; uniform mat3 u_nrm;\n"
+    "out vec3 v_w, v_n; out vec2 v_uv;\n"
+    "void main() {\n"
+    "  vec4 w = u_model * vec4(a_pos, 1.0);\n"
+    "  v_w = w.xyz; v_n = u_nrm * a_nrm; v_uv = a_uv;\n"
+    "  gl_Position = u_vp * w;\n"
+    "}\n";
+
+static const char *FS_MODEL = GLSL_HEAD GLSL_OUT
+    "in vec3 v_w, v_n; in vec2 v_uv; out vec4 o;\n"
+    "uniform sampler2D u_tex; uniform vec3 u_cam, u_tint; uniform float u_glow;\n"
+    "void main() {\n"
+    "  vec3 n = normalize(v_n), v = normalize(u_cam - v_w);\n"
+    "  if (!gl_FrontFacing) n = -n;\n"
+    "  vec3 base = texture(u_tex, v_uv).rgb;\n"                 /* an sRGB picture: already linear here */
+    "  vec3 l1 = normalize(vec3(0.45, 0.80, 0.35)), l2 = normalize(vec3(-0.6, 0.25, -0.5));\n"
+    "  vec3 amb = mix(vec3(0.16, 0.15, 0.26), vec3(0.42, 0.48, 0.66), n.y * 0.5 + 0.5);\n"
+    "  vec3 c = base * (amb + vec3(1.0, 0.96, 0.90) * max(dot(n, l1), 0.0) * 0.9 + vec3(0.45, 0.35, 0.90) * max(dot(n, l2), 0.0) * 0.4);\n"
+    "  c += vec3(1.0) * pow(max(dot(n, normalize(l1 + v)), 0.0), 40.0) * 0.18;\n"
+    "  float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0);\n"
+    "  c += u_tint * rim * (0.10 + 0.5 * u_glow);\n"
+    "  o = fx_out(c, 1.0);\n"
+    "}\n";
+
 static const char *FS_PLATE = GLSL_HEAD GLSL_OUT
     "in vec3 v_w, v_n, v_l; out vec4 o;\n"
     "uniform vec3 u_cam; uniform float u_half, u_time; uniform int u_grid;\n"
@@ -302,7 +328,8 @@ static void build_meshes(void) {
 
 /* ---------- state ---------- */
 
-static GLuint p_nebula, p_sky, p_stars, p_shape, p_plate, p_shadow, p_ribbon;
+static GLuint p_nebula, p_sky, p_stars, p_shape, p_plate, p_shadow, p_ribbon, p_model;
+static Cam cur_cam;
 static GLuint vao_empty, vao_stars, vao_ribbon, vbo_ribbon, tex_nebula;
 static int star_count;
 static GLint u_shape_model, u_shape_nrm, u_shape_color, u_shape_alpha, u_shape_glow, u_shadow_model;
@@ -375,6 +402,7 @@ void gfx_init(void) {
     p_plate = gfx_program(VS_MESH, FS_PLATE, "plate");
     p_shadow = gfx_program(VS_SHADOW, FS_SHADOW, "shadow");
     p_ribbon = gfx_program(VS_RIBBON, FS_RIBBON, "ribbon");
+    p_model = gfx_program(VS_MODEL, FS_MODEL, "model");
     u_shape_model = glGetUniformLocation(p_shape, "u_model"); u_shape_nrm = glGetUniformLocation(p_shape, "u_nrm");
     u_shape_color = glGetUniformLocation(p_shape, "u_color"); u_shape_alpha = glGetUniformLocation(p_shape, "u_alpha");
     u_shape_glow = glGetUniformLocation(p_shape, "u_glow"); u_shadow_model = glGetUniformLocation(p_shadow, "u_model");
@@ -520,6 +548,7 @@ void gfx_shadows_end(void) {
 }
 
 void gfx_shapes_begin(const Cam *c, float time) {
+    cur_cam = *c;
     glUseProgram(p_shape);
     glUniform1i(glGetUniformLocation(p_shape, "u_enc"), g_encode);
     glUniformMatrix4fv(glGetUniformLocation(p_shape, "u_vp"), 1, GL_FALSE, c->vp.m);
@@ -622,4 +651,59 @@ void gfx_thumbnails(GLuint *tex_out) {
     }
     rt_end(&rt);
     *tex_out = rt.tex;
+}
+
+/* ---------- models: the controllers ---------- */
+
+typedef struct { GLuint vao, tex; int count; } Model;
+static Model models[4];
+static int model_count;
+
+int gfx_model_load(const char *asset) {
+    size_t size = 0;
+    unsigned char *d = plat_asset(asset, &size);
+    uint32_t head[5];
+    if (!d || size < 20 || memcmp(d, "FXM1", 4) != 0 || model_count >= 4) { free(d); return -1; }
+    memcpy(head, d, 20);
+    size_t nv = head[1], ni = head[2], tw = head[3], th = head[4];
+    if (size < 20 + nv * 32 + ni * 4 + tw * th * 4) { free(d); return -1; }
+    Model *m = &models[model_count];
+    GLuint vbo, ibo;
+    glGenVertexArrays(1, &m->vao); glBindVertexArray(m->vao);
+    glGenBuffers(1, &vbo); glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(nv * 32), d + 20, GL_STATIC_DRAW);
+    glGenBuffers(1, &ibo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(ni * 4), d + 20 + nv * 32, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 32, (void *)0);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 32, (void *)12);
+    glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 32, (void *)24);
+    glBindVertexArray(0);
+    glGenTextures(1, &m->tex); glBindTexture(GL_TEXTURE_2D, m->tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, (GLsizei)tw, (GLsizei)th, 0, GL_RGBA, GL_UNSIGNED_BYTE, d + 20 + nv * 32 + ni * 4);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    m->count = (int)ni;
+    free(d);
+    return model_count++;
+}
+
+/* between gfx_shapes_begin() and the next thing: draws a model, then goes back to drawing shapes */
+void gfx_model(int id, V3 pos, Q4 rot, V3 tint, float glow) {
+    if (id < 0 || id >= model_count) return;
+    glUseProgram(p_model);
+    glUniform1i(glGetUniformLocation(p_model, "u_enc"), g_encode);
+    glUniformMatrix4fv(glGetUniformLocation(p_model, "u_vp"), 1, GL_FALSE, cur_cam.vp.m);
+    glUniform3f(glGetUniformLocation(p_model, "u_cam"), cur_cam.pos.x, cur_cam.pos.y, cur_cam.pos.z);
+    glUniform3f(glGetUniformLocation(p_model, "u_tint"), tint.x, tint.y, tint.z);
+    glUniform1f(glGetUniformLocation(p_model, "u_glow"), glow);
+    glUniform1i(glGetUniformLocation(p_model, "u_tex"), 0);
+    set_model(p_model, pos, rot, v3(1, 1, 1));
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, models[id].tex);
+    glDisable(GL_CULL_FACE);
+    glBindVertexArray(models[id].vao);
+    glDrawElements(GL_TRIANGLES, models[id].count, GL_UNSIGNED_INT, (void *)0);
+    glEnable(GL_CULL_FACE);
+    glUseProgram(p_shape);
 }
