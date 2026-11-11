@@ -19,7 +19,7 @@
 #include <string.h>
 #include <GLES3/gl3.h>
 
-#define FX_VERSION "2.1.0"
+#define FX_VERSION "2.2.0"
 #define FX_PI 3.14159265358979f
 
 /* ---------- maths ---------- */
@@ -167,7 +167,8 @@ void gfx_shadows_end(void);
 void gfx_shapes_begin(const Cam *c, float time);
 void gfx_shape(int shape, V3 pos, Q4 rot, V3 scale, V3 color, float alpha, float glow);
 void gfx_ribbon(V3 a, V3 b, float width, const float ca[4], const float cb[4]);
-void gfx_ribbons_flush(const Cam *c);
+void gfx_ribbon_layer(int top);
+void gfx_ribbons_flush(const Cam *c, int layer);     /* layer -1: everything */
 void gfx_ribbons_clear(void);
 void gfx_wire_box(V3 pos, Q4 rot, V3 scale, float width, const float col[4]);
 int gfx_model_load(const char *asset);          /* -1 if it isn't there */
@@ -293,7 +294,14 @@ uint32_t scene_new_id(void);
 
 /* ---------- net.c ---------- */
 
-typedef struct { int used; uint32_t id; char name[20]; Pose head, hand[2]; double seen; } Peer;
+typedef struct {
+    int used; uint32_t id; char name[20]; Pose head, hand[2]; double seen;
+    int aim_on[2]; V3 aim_from[2], aim_to[2];       /* their lasers, while they point into the world */
+} Peer;
+typedef struct { char code[24]; int players, shapes; } PublicRoom;
+#define MAX_PUBLIC 12
+extern PublicRoom g_public[MAX_PUBLIC];
+extern int g_public_count, g_public_state;      /* 0 not asked, 1 asking, 2 here they are, 3 couldn't ask */
 typedef struct { char ip[20]; char name[24]; int players; double seen; } Room;
 #define MAX_PEERS 8
 #define MAX_ROOMS 8
@@ -305,7 +313,13 @@ void net_init(const char *player_name);
 void net_tick(double time, Pose head, Pose lh, Pose rh);
 int net_host(const char *room_name);
 int net_join(const char *ip);
-int net_join_server(const char *address, const char *room);   /* a server, or a hosting headset's address */
+int net_join_server(const char *address, const char *room, int make_public);   /* a server, or a hosting headset's address */
+void net_list_public(const char *address);     /* fills g_public, a moment later */
+void net_set_aim(int hand, int on, V3 from, V3 to);
+int net_is_owner(void);        /* you opened this room */
+int net_locked(void);          /* the owner has stopped guests editing */
+int net_locked_out(void);      /* ...and you're a guest */
+void net_set_lock(int on);
 int net_on_server(void);
 void net_leave(void);
 int net_mode(void);            /* 0 alone, 1 hosting, 2 joined, 3 joining */

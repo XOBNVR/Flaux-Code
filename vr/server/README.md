@@ -48,6 +48,18 @@ page).
 
 To use another port: `PORT=9000 node server.js`.
 
+## Public and private rooms
+
+- With **Public** switched off, a room is private: only people who know its
+  code can join.
+- With **Public** switched on, the room you open is listed under **Public
+  rooms on this server** in everyone's Rooms page, with a **Join** button.
+  A room stays in the list while someone is in it.
+- Whoever opens a room owns it and can **lock editing**: the others can still
+  look around, but can't build, and their lasers are hidden from everyone. If
+  the owner leaves, the player who has been there longest takes over and the
+  room unlocks.
+
 ## Good to know
 
 - A room is made the first time someone joins it, and holds up to 8 players

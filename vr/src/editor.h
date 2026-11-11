@@ -15,6 +15,8 @@ enum { TAB_HOME, TAB_BUILD, TAB_ASSETS, TAB_SCENE, TAB_VIEWER, TAB_ROOMS, TAB_CO
 #define PH 1040.0f
 #define KW 1240.0f
 #define KH 500.0f
+#define SW 520.0f
+#define SH 1040.0f
 #define PALETTE_N 20
 #define LOG_N 9
 
@@ -26,7 +28,9 @@ typedef struct {
     Pose head, aim[2], grip[2];   /* in the world */
     int hand_on[2];
     V3 rig_pos; float rig_yaw;    /* where the play space sits in the world */
-    Panel main, kb;
+    Panel main, kb, side;        /* side: the list of objects, always showing */
+    int xform;                    /* what the handles on the selected shape do: 0 move, 1 turn, 2 size */
+    int room_public;
     char project[32], data_dir[256], player[20];
     double time; float dt, fps;
     RT viewer; float v_yaw, v_pitch, v_dist; V3 v_target; int v_follow;
@@ -61,6 +65,7 @@ int ed_project_list(char names[][32], int max);
 int ed_project_export(void);
 
 void screens_draw(void);
+void side_draw(void);
 void keyboard_draw(void);
 void copilot_run(const char *prompt);
 void copilot_say(int user, const char *fmt, ...);

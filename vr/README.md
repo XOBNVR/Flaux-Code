@@ -4,7 +4,7 @@
 plate floating among the stars, pick shapes from a panel, and build with your
 hands.
 
-![The Build tab of Flaux VR's panel, floating above the plate](../docs/images/flaux_vr.png)
+![The panel, with the objects list always showing at its side](../docs/images/flaux_vr.png)
 
 It's a native app (C, OpenGL ES 3 and OpenXR): no game engine, no Java.
 
@@ -42,6 +42,9 @@ never got as far as running.
 |---|---|
 | **Trigger** | click the panel, select a shape, place a shape |
 | **Grip** | grab a shape and move it; grab the panel to move it |
+| **Grip on nothing** | pull yourself along: hold it, move your hand, and you go the other way |
+| **Trigger on a coloured handle** | move, turn or size the selected shape along one direction (red x, green y, blue z) |
+| **Right stick click** | change what the handles do: move, turn, size |
 | **Both grips** | stretch the shape you're holding bigger or smaller |
 | **Thumbstick while holding** | push it away, pull it in, spin it |
 | **Left stick** | walk |
@@ -52,6 +55,11 @@ never got as far as running.
 
 ## The panel
 
+To the right of the panel, the **objects list** is always showing: every
+shape, the three handle modes (Move, Turn, Size), and Copy, Lock and Delete
+for the shape you've picked. Your lasers are always drawn in front of the
+panels.
+
 | Tab | What it's for |
 |---|---|
 | **Home** | the controls, and what's in the scene |
@@ -59,7 +67,7 @@ never got as far as running.
 | **Assets** | a library of ready-made things: the six shapes, patterns (tower, stairs, pyramid, spiral) and models (tree, house, castle, snowman, rocket, forest). Pick one and it turns in the **asset viewer**; drag to look at it from any side, then place it. |
 | **Objects** | every shape in a list. Rename, move, resize, turn, recolour, lock, copy or delete the one you pick. |
 | **Viewer** | the **scene viewer**: a screen showing your whole build from outside. Drag to look around it, use the thumbstick to zoom, tap a shape to select it, and press **Go there** to jump to that spot. |
-| **Rooms** | build together. **On this Wi-Fi**: one headset opens a room, the others see it and join. **Over the internet**: everyone types the same server address and room code (see [the server](server/README.md)). |
+| **Rooms** | build together. **On this Wi-Fi**: one headset opens a room, the others see it and join. **Over the internet**: everyone types the same server address and room code (see [the server](server/README.md)); switch **Public** on and your room shows in that server's list for anyone to join. You see the other players and their lasers, each in their own colour. Whoever opened the room can **lock editing**: guests can still look around, but can't build, and their lasers are hidden. |
 | **Co-pilot** | type what you want ("a tower of 6 red cubes", "a ring of 12 balls", "a castle") and it's built in front of you. It runs on the headset, with no internet. |
 | **Projects** | save, open and delete projects, and write your build as a Flaux program (`.flx`) to open in Flaux Studio. |
 | **Settings** | how far away and how big the panel is, walking speed, turning, star brightness, buzz and sounds. |

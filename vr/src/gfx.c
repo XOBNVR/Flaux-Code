@@ -577,14 +577,18 @@ void gfx_shape(int shape, V3 pos, Q4 rot, V3 scale, V3 color, float alpha, float
 /* ---------- ribbons: lasers, outlines ---------- */
 
 #define MAX_RIBBONS 1024
-typedef struct { V3 a, b; float width; float ca[4], cb[4]; } Ribbon;
+typedef struct { V3 a, b; float width; float ca[4], cb[4]; int top; } Ribbon;
+static int ribbon_layer;
+
+/* what's queued next goes under the panels (0) or over them (1): your own lasers go over */
+void gfx_ribbon_layer(int top) { ribbon_layer = top; }
 static Ribbon ribbons[MAX_RIBBONS];
 static int ribbon_count;
 
 void gfx_ribbon(V3 a, V3 b, float width, const float ca[4], const float cb[4]) {
     if (ribbon_count >= MAX_RIBBONS) return;
     Ribbon *r = &ribbons[ribbon_count++];
-    r->a = a; r->b = b; r->width = width;
+    r->a = a; r->b = b; r->width = width; r->top = ribbon_layer;
     memcpy(r->ca, ca, sizeof r->ca); memcpy(r->cb, cb, sizeof r->cb);
 }
 
@@ -598,12 +602,13 @@ void gfx_wire_box(V3 pos, Q4 rot, V3 scale, float width, const float col[4]) {
 }
 
 /* draws the ribbons queued so far (the queue is kept: it's the same for both eyes) */
-void gfx_ribbons_flush(const Cam *c) {
+void gfx_ribbons_flush(const Cam *c, int layer) {
     if (!ribbon_count) return;
     static float v[MAX_RIBBONS * 6 * 8];
     int n = 0;
     for (int i = 0; i < ribbon_count; i++) {
         Ribbon *r = &ribbons[i];
+        if (layer >= 0 && r->top != layer) continue;
         V3 side = v3norm(v3cross(v3sub(r->b, r->a), v3sub(c->pos, r->a)));
         side = v3mul(side, r->width * 0.5f);
         V3 p[4] = {v3sub(r->a, side), v3add(r->a, side), v3add(r->b, side), v3sub(r->b, side)};
@@ -617,6 +622,7 @@ void gfx_ribbons_flush(const Cam *c) {
             memcpy(f + 4, col[j], 16);
         }
     }
+    if (!n) return;
     glUseProgram(p_ribbon);
     glUniform1i(glGetUniformLocation(p_ribbon, "u_enc"), g_encode);
     glUniformMatrix4fv(glGetUniformLocation(p_ribbon, "u_vp"), 1, GL_FALSE, c->vp.m);
@@ -630,7 +636,7 @@ void gfx_ribbons_flush(const Cam *c) {
 }
 
 void gfx_ribbons_clear(void);
-void gfx_ribbons_clear(void) { ribbon_count = 0; }
+void gfx_ribbons_clear(void) { ribbon_count = 0; ribbon_layer = 0; }
 
 /* ---------- pictures of the shapes, for the Build tab ---------- */
 

@@ -43,6 +43,8 @@
 Peer g_peers[MAX_PEERS];
 Room g_rooms[MAX_ROOMS];
 char g_net_status[96] = "Not in a room";
+PublicRoom g_public[MAX_PUBLIC];
+int g_public_count, g_public_state;
 
 typedef struct {
     mbedtls_ssl_context ssl; mbedtls_ssl_config conf;
@@ -69,10 +71,16 @@ static char my_name[20] = "Player", room_name[40] = "Room", local_ip[20] = "";
 static double now, last_sync, last_pose, last_beacon, last_ping, join_started;
 static Obj *synced; static int synced_count;
 static int in_full;
+static int room_locked; static uint32_t owner_pid = 1;      /* who may lock the room: the host, or whoever opened it on a server */
+static struct { int on; V3 from, to; } my_aim[2];
 static unsigned rng = 0x2545F491u;
 
 int net_mode(void) { return mode; }
 int net_on_server(void) { return mode >= 2 && via_server; }
+int net_is_owner(void) { return mode == 1 || (mode == 2 && owner_pid == my_pid); }
+int net_locked(void) { return mode != 0 && room_locked; }
+int net_locked_out(void) { return mode == 2 && room_locked && owner_pid != my_pid; }
+void net_set_aim(int hand, int on, V3 from, V3 to) { my_aim[hand].on = on; my_aim[hand].from = from; my_aim[hand].to = to; }
 
 static void nonblock(int fd) { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK); }
 static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
@@ -248,6 +256,12 @@ static void mark_synced(void) { memcpy(synced, g_obj, sizeof(Obj) * (size_t)g_ob
 
 static void sync_scene(void) {            /* tell the others what changed here since last time */
     char line[256];
+    if (net_locked_out()) {                /* not allowed to change anything: put it back as it was */
+        if (g_obj_count != synced_count || memcmp(g_obj, synced, sizeof(Obj) * (size_t)synced_count) != 0) {
+            memcpy(g_obj, synced, sizeof(Obj) * (size_t)synced_count); g_obj_count = synced_count;
+        }
+        return;
+    }
     for (int i = 0; i < g_obj_count; i++) {
         const Obj *o = &g_obj[i];
         const Obj *s = (i < synced_count && synced[i].id == o->id) ? &synced[i] : synced_find(o->id);
@@ -290,8 +304,10 @@ int net_peer_count(void) { int n = 0; for (int i = 0; i < MAX_PEERS; i++) n += g
 static void handle_line(Conn *c, char *line) {
     if (!strncmp(line, "obj ", 4)) {
         Obj o;
+        if (mode == 1 && room_locked) return;                  /* guests can't edit just now */
         if (scene_parse_obj(line, &o)) { apply_obj(&o); if (mode == 1) { strcat(line, "\n"); send_all(line, c); } }
     } else if (!strncmp(line, "del ", 4)) {
+        if (mode == 1 && room_locked) return;
         apply_del((uint32_t)strtoul(line + 4, NULL, 10));
         if (mode == 1) { strcat(line, "\n"); send_all(line, c); }
     } else if (!strncmp(line, "pose ", 5)) {
@@ -311,6 +327,28 @@ static void handle_line(Conn *c, char *line) {
         }
         pr->seen = now;
         if (mode == 1) { strcat(line, "\n"); send_all(line, c); }
+    } else if (!strncmp(line, "aim ", 4)) {                 /* where a player's two lasers start and end */
+        unsigned id; int n = 0;
+        const char *p = line + 4;
+        if (sscanf(p, "%u %n", &id, &n) < 1 || id == my_pid) return;
+        p += n;
+        float f[14];
+        for (int i = 0; i < 14; i++) { char *end; f[i] = strtof(p, &end); if (end == p || !isfinite(f[i])) return; p = end; }
+        Peer *pr = peer_get(id);
+        if (!pr) return;
+        for (int h = 0; h < 2; h++) {
+            pr->aim_on[h] = f[h * 7] > 0.5f;
+            pr->aim_from[h] = v3(f[h * 7 + 1], f[h * 7 + 2], f[h * 7 + 3]);
+            pr->aim_to[h] = v3(f[h * 7 + 4], f[h * 7 + 5], f[h * 7 + 6]);
+        }
+        if (mode == 1) { strcat(line, "\n"); send_all(line, c); }
+    } else if (mode != 1 && !strncmp(line, "owner ", 6)) {
+        owner_pid = (uint32_t)strtoul(line + 6, NULL, 10);
+    } else if (mode != 1 && !strncmp(line, "lock ", 5)) {
+        int was = room_locked;
+        room_locked = atoi(line + 5) != 0;
+        if (room_locked != was && owner_pid != my_pid)
+            snprintf(g_net_status, sizeof g_net_status, room_locked ? "The owner locked editing" : "Editing is unlocked again");
     } else if (mode == 1 && !strncmp(line, "hello ", 6)) {
         c->pid = next_pid++;
         snprintf(c->name, sizeof c->name, "%.19s", line + 6);
@@ -318,6 +356,7 @@ static void handle_line(Conn *c, char *line) {
         snprintf(buf, sizeof buf, "you %u\nfull\n", c->pid); conn_send(c, buf);
         for (int i = 0; i < g_obj_count; i++) { scene_write_obj(&g_obj[i], buf, sizeof buf); conn_send(c, buf); }
         conn_send(c, "endfull\n");
+        conn_send(c, room_locked ? "owner 1\nlock 1\n" : "owner 1\nlock 0\n");
         snprintf(g_net_status, sizeof g_net_status, "%s joined your room", c->name);
         plat_sound(SND_OPEN);
     } else if (mode != 1 && !strncmp(line, "you ", 4)) {
@@ -391,12 +430,13 @@ static void conn_read(Conn *c) {
 
 typedef struct {
     char host[128], path[128], room[24], err[96];
-    int port, secure;
+    int port, secure, make_public, list_only;
+    PublicRoom found[MAX_PUBLIC]; int found_n;
     volatile int done, ok, cancelled;
     int fd; Tls *tls;
     unsigned char extra[2048]; int extra_n;       /* anything the server said straight after its welcome */
 } Job;
-static Job *job;
+static Job *job, *list_job;
 
 static int job_write(Job *j, const char *data, size_t n) {
     while (n > 0) {
@@ -461,6 +501,38 @@ static void *job_run(void *arg) {
             setsockopt(j->fd, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof none); setsockopt(j->fd, SOL_SOCKET, SO_SNDTIMEO, &none, sizeof none);
             nonblock(j->fd);
             j->ok = 1;
+            if (j->list_only) {                    /* ask what public rooms there are, read the answer, hang up */
+                static const unsigned char ask[11] = {0x81, 0x85, 0, 0, 0, 0, 'l', 'i', 's', 't', '\n'};
+                char text[4096]; int tn = 0, finished = 0;
+                unsigned char raw[8192]; int rn = j->extra_n;
+                memcpy(raw, j->extra, (size_t)rn);
+                j->ok = job_write(j, (const char *)ask, sizeof ask);
+                struct timeval wait = {8, 0};
+                fcntl(j->fd, F_SETFL, fcntl(j->fd, F_GETFL, 0) & ~O_NONBLOCK);
+                setsockopt(j->fd, SOL_SOCKET, SO_RCVTIMEO, &wait, sizeof wait);
+                while (j->ok && !finished) {
+                    while (rn >= 2) {              /* whole frames so far (the server never masks) */
+                        size_t len = raw[1] & 127, head = 2;
+                        if (len == 126) { if (rn < 4) break; len = ((size_t)raw[2] << 8) | raw[3]; head = 4; }
+                        else if (len == 127) { j->ok = 0; break; }
+                        if ((size_t)rn < head + len) break;
+                        if ((raw[0] & 15) <= 2 && tn + (int)len < (int)sizeof text - 1) { memcpy(text + tn, raw + head, len); tn += (int)len; }
+                        memmove(raw, raw + head + len, (size_t)rn - head - len); rn -= (int)(head + len);
+                    }
+                    text[tn] = 0;
+                    if (strstr(text, "endrooms")) { finished = 1; break; }
+                    int k = job_read(j, raw + rn, sizeof raw - (size_t)rn);
+                    if (k <= 0) j->ok = 0; else rn += k;
+                }
+                if (finished)
+                    for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n")) {
+                        PublicRoom r;
+                        if (j->found_n < MAX_PUBLIC && sscanf(line, "pub %23s %d %d", r.code, &r.players, &r.shapes) == 3) j->found[j->found_n++] = r;
+                    }
+                else snprintf(j->err, sizeof j->err, "%.60s didn't send its list of rooms", j->host);
+                if (j->tls) tls_free(j->tls);
+                close(j->fd); j->fd = -1; j->tls = NULL;
+            }
         } else {
             snprintf(j->err, sizeof j->err, end > 0 ? "%.60s isn't a Flaux VR server" : "%.60s stopped answering", j->host);
             if (j->tls) tls_free(j->tls);
@@ -485,7 +557,7 @@ void net_leave(void) {
     if (beacon_fd >= 0) close(beacon_fd);
     listen_fd = beacon_fd = -1;
     memset(g_peers, 0, sizeof g_peers);
-    mode = 0; my_pid = 1; in_full = 0; via_server = 0;
+    mode = 0; my_pid = 1; in_full = 0; via_server = 0; room_locked = 0; owner_pid = 1;
     snprintf(g_net_status, sizeof g_net_status, "Not in a room");
 }
 
@@ -505,7 +577,7 @@ int net_host(const char *name) {
     nonblock(listen_fd);
     beacon_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (beacon_fd >= 0) { setsockopt(beacon_fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof one); nonblock(beacon_fd); }
-    mode = 1; my_pid = 1; next_pid = 2;
+    mode = 1; my_pid = 1; next_pid = 2; owner_pid = 1; room_locked = 0;
     mark_synced();
     snprintf(g_net_status, sizeof g_net_status, "Hosting at %s", net_local_ip());
     return 1;
@@ -539,17 +611,13 @@ int net_join(const char *ip) {           /* a headset that's hosting on this Wi-
     return 1;
 }
 
-/* Join a room on a server.  The address can be ws://host:port, wss://host, host:port (taken as
- * ws://) or just a host name (taken as wss://).  A bare number address like 192.168.1.20 is a
- * headset hosting on this Wi-Fi. */
-int net_join_server(const char *address, const char *room) {
+/* Works out where a server is from what was typed.  The address can be ws://host:port,
+ * wss://host, host:port (taken as ws://) or just a host name (taken as wss://). */
+static Job *job_for(const char *address) {
     char addr[160]; snprintf(addr, sizeof addr, "%s", address);
     char *s = addr;
     while (*s == ' ') s++;
     for (char *e = s + strlen(s); e > s && (e[-1] == ' ' || e[-1] == '/'); ) *--e = 0;
-    struct in_addr probe;
-    if (inet_pton(AF_INET, s, &probe) == 1) return net_join(s);
-    net_leave();
     Job *j = calloc(1, sizeof *j);
     j->secure = 1; j->port = 443;
     if (!strncmp(s, "wss://", 6)) s += 6;
@@ -563,23 +631,53 @@ int net_join_server(const char *address, const char *room) {
     char *colon = strrchr(s, ':');
     if (colon) { *colon = 0; j->port = atoi(colon + 1); }
     snprintf(j->host, sizeof j->host, "%.120s", s);
+    if (!j->host[0] || j->port <= 0 || j->port > 65535) { free(j); return NULL; }
+    return j;
+}
+
+static int job_start(Job *j) {
+    pthread_t t;
+    if (pthread_create(&t, NULL, job_run, j) != 0) { free(j); return 0; }
+    pthread_detach(t);
+    return 1;
+}
+
+/* Join a room on a server (making it if it isn't there; make_public puts a new room on the
+ * server's list).  A bare number address like 192.168.1.20 is a headset hosting on this Wi-Fi. */
+int net_join_server(const char *address, const char *room, int make_public) {
+    const char *a = address;
+    while (*a == ' ') a++;
+    struct in_addr probe;
+    if (inet_pton(AF_INET, a, &probe) == 1) return net_join(a);
+    net_leave();
+    Job *j = job_for(address);
+    if (!j) { snprintf(g_net_status, sizeof g_net_status, "Type the server's address, like my-server.onrender.com"); return 0; }
     int k = 0;
     for (const char *r = room; *r && k < 20; r++)
         if ((*r >= 'a' && *r <= 'z') || (*r >= 'A' && *r <= 'Z') || (*r >= '0' && *r <= '9') || *r == '-' || *r == '_')
             j->room[k++] = (char)((*r >= 'a' && *r <= 'z') ? *r - 32 : *r);
-    if (!j->host[0] || j->port <= 0 || j->port > 65535) {
-        snprintf(g_net_status, sizeof g_net_status, "Type the server's address, like my-server.onrender.com");
-        free(j); return 0;
-    }
     if (!k) { snprintf(g_net_status, sizeof g_net_status, "Type a room code: letters and numbers, like FLAUX"); free(j); return 0; }
-    pthread_t t;
-    if (pthread_create(&t, NULL, job_run, j) != 0) { snprintf(g_net_status, sizeof g_net_status, "Couldn't start connecting"); free(j); return 0; }
-    pthread_detach(t);
-    job = j;
+    j->make_public = make_public;
+    char host[128]; snprintf(host, sizeof host, "%s", j->host);
     snprintf(room_name, sizeof room_name, "%s", j->room);
+    if (!job_start(j)) { snprintf(g_net_status, sizeof g_net_status, "Couldn't start connecting"); return 0; }
+    job = j;
     mode = 3; via_server = 1; join_started = now; in_full = 1;
-    snprintf(g_net_status, sizeof g_net_status, "Connecting to %.60s...", j->host);
+    snprintf(g_net_status, sizeof g_net_status, "Connecting to %.60s...", host);
     return 1;
+}
+
+/* asks a server which public rooms it has; g_public is filled in a moment later */
+void net_list_public(const char *address) {
+    if (list_job) return;                          /* already asking */
+    const char *a = address;
+    while (*a == ' ') a++;
+    struct in_addr probe;
+    Job *j = inet_pton(AF_INET, a, &probe) == 1 ? NULL : job_for(address);      /* a bare number is a headset, not a server */
+    if (!j) { g_public_count = 0; g_public_state = 0; return; }
+    j->list_only = 1;
+    if (!job_start(j)) { g_public_state = 3; return; }
+    list_job = j; g_public_state = 1;
 }
 
 void net_listen_rooms(int on) {
@@ -621,6 +719,12 @@ static void hear_rooms(void) {
 void net_tick(double time, Pose head, Pose lh, Pose rh) {
     now = time;
     hear_rooms();
+    if (list_job && list_job->done) {              /* the list of public rooms came back (or didn't) */
+        g_public_count = list_job->ok ? list_job->found_n : 0;
+        memcpy(g_public, list_job->found, sizeof g_public);
+        g_public_state = list_job->ok ? 2 : 3;
+        free(list_job); list_job = NULL;
+    }
     if (mode == 0) return;
 
     if (job) {                                   /* still finding and greeting the server */
@@ -639,7 +743,7 @@ void net_tick(double time, Pose head, Pose lh, Pose rh) {
         Conn *c = &conns[0];
         c->fd = j->fd; c->tls = j->tls; c->ws = 1;
         if (j->extra_n) ws_feed(c, j->extra, j->extra_n);
-        char hello[96]; snprintf(hello, sizeof hello, "room %s\nhello %s\n", j->room, my_name);
+        char hello[112]; snprintf(hello, sizeof hello, "room %s%s\nhello %s\n", j->room, j->make_public ? " public" : "", my_name);
         free(j);
         conn_send(c, hello);
         join_started = now;
@@ -695,6 +799,12 @@ void net_tick(double time, Pose head, Pose lh, Pose rh) {
                               (double)ps[i]->q.w);
             snprintf(line + n, sizeof line - (size_t)n, "\n");
             send_all(line, NULL);
+            n = snprintf(line, sizeof line, "aim %u", my_pid);
+            for (int h = 0; h < 2; h++)
+                n += snprintf(line + n, sizeof line - (size_t)n, " %d %.3f %.3f %.3f %.3f %.3f %.3f", my_aim[h].on, (double)my_aim[h].from.x,
+                              (double)my_aim[h].from.y, (double)my_aim[h].from.z, (double)my_aim[h].to.x, (double)my_aim[h].to.y, (double)my_aim[h].to.z);
+            snprintf(line + n, sizeof line - (size_t)n, "\n");
+            send_all(line, NULL);
         }
         if (via_server && now - last_ping > 20.0) { last_ping = now; ws_frame(&conns[0], 9, "", 0); }    /* keep the line open */
     }
@@ -702,4 +812,11 @@ void net_tick(double time, Pose head, Pose lh, Pose rh) {
         if (g_peers[i].used && now - g_peers[i].seen > 3.0) g_peers[i].used = 0;
         conn_flush(&conns[i]);
     }
+}
+
+/* the room's owner stops (or lets) everyone else edit; a locked guest's lasers vanish for the others */
+void net_set_lock(int on) {
+    if (!net_is_owner()) return;
+    room_locked = on != 0;
+    send_all(room_locked ? "lock 1\n" : "lock 0\n", NULL);
 }

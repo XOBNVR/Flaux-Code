@@ -36,6 +36,10 @@ static float laser_len[2]; static int laser_hit[2];
 static double last_autosave; static unsigned autosave_hash;
 static int frames; static double fps_t0;
 static int controller_model[2] = {-1, -1};
+static int climbing[2]; static V3 climb_from[2];
+static int giz_hover[2] = {-1, -1}, giz_hand = -1, giz_axis;
+static float giz_start; static V3 giz_pos0, giz_scale0; static Q4 giz_rot0;
+static const V3 AXES[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
 
 /* ---------- small helpers ---------- */
 
@@ -373,6 +377,7 @@ void app_init(const char *data_dir) {
     if (controller_model[0] < 0 || controller_model[1] < 0) plat_log("controller models missing: drawing simple ones");
 
     ed.main.pw = PW; ed.main.ph = PH; ed.kb.pw = KW; ed.kb.ph = KH;
+    ed.side.pw = SW; ed.side.ph = SH; ed.side.pose = pose_ident();
     ed.main.pose = pose_ident(); ed.kb.pose = pose_ident();
 
     snprintf(dir, sizeof dir, "%s/autosave.fvr", ed.data_dir);
@@ -424,23 +429,133 @@ static void place_panels(void) {
         else { ed.main.pose = pose_mul(ed.aim[panel_grab], panel_rel); panel_stage = pose_mul(pose_inv(rig()), ed.main.pose); }
     }
     /* the keyboard hangs below the panel, tipped up towards you */
+    /* the objects list stands at the panel's right edge, turned in towards you */
+    ed.side.w_m = ed.main.w_m * SW / PW; ed.side.h_m = ed.main.h_m;
+    ed.side.visible = ed.main.visible;
+    {
+        float turn = 0.50f;
+        Pose rel = {{ed.main.w_m * 0.5f + 0.012f + ed.side.w_m * 0.5f * cosf(turn), 0, ed.side.w_m * 0.5f * sinf(turn)}, q4axis(v3(0, 1, 0), -turn)};
+        ed.side.pose = pose_mul(ed.main.pose, rel);
+    }
     ed.kb.w_m = 0.66f * cfg.scale; ed.kb.h_m = ed.kb.w_m * KH / KW;
     ed.kb.visible = ed.main.visible && ed.edit != NULL;
     Pose rel = {{0, -(ed.main.h_m * 0.5f + ed.kb.h_m * 0.42f + 0.012f), 0.075f}, q4axis(v3(1, 0, 0), -0.62f)};
     ed.kb.pose = pose_mul(ed.main.pose, rel);
 }
 
+/* ---------- the handles on the selected shape: move, turn or size it along one axis ---------- */
+
+static V3 giz_dir(const Obj *o, int a) { return ed.xform == 2 ? q4rot(o->rot, AXES[a]) : AXES[a]; }
+static float giz_far(const Obj *o) { return v3len(v3sub(o->pos, ed.head.p)); }
+static float giz_radius(const Obj *o) { return 0.028f + 0.02f * giz_far(o); }
+
+static float giz_len(const Obj *o, int a) {
+    V3 e = v3(o->scale.x, o->scale.y * shape_height(o->shape), o->scale.z);
+    float half = ed.xform == 2 ? 0.5f * (a == 0 ? e.x : a == 1 ? e.y : e.z) : 0.5f * fmaxf(e.x, fmaxf(e.y, e.z));
+    return half + 0.16f + 0.07f * giz_far(o);
+}
+
+static V3 giz_handle(const Obj *o, int a) {
+    if (ed.xform == 1) return v3add(o->pos, v3mul(AXES[(a + 2) % 3], giz_len(o, a)));     /* a bead on the ring round axis a */
+    return v3add(o->pos, v3mul(giz_dir(o, a), giz_len(o, a)));
+}
+
+/* how far along the line through c in direction a the laser comes closest */
+static int axis_param(V3 c, V3 a, V3 ro, V3 rd, float *out) {
+    V3 w = v3sub(c, ro);
+    float b = v3dot(a, rd), den = 1 - b * b;
+    if (den < 1e-4f) return 0;
+    *out = (b * v3dot(rd, w) - v3dot(a, w)) / den;
+    return 1;
+}
+
+static int ring_angle(V3 c, int a, V3 ro, V3 rd, float *out) {
+    float dn = v3dot(rd, AXES[a]);
+    if (fabsf(dn) < 1e-4f) return 0;
+    float t = v3dot(v3sub(c, ro), AXES[a]) / dn;
+    if (t <= 0) return 0;
+    V3 p = v3sub(v3add(ro, v3mul(rd, t)), c);
+    *out = atan2f(v3dot(p, AXES[(a + 2) % 3]), v3dot(p, AXES[(a + 1) % 3]));
+    return 1;
+}
+
+/* says 1 if this hand is busy with a handle, so nothing else should react to it */
+static int gizmo_update(int h, V3 ro, V3 rd) {
+    Obj *o = scene_find(ed.selected);
+    if (giz_hand == h) {
+        if (!o || !trig_down[h]) {
+            if (o) scene_commit(ed.xform == 0 ? "Move" : ed.xform == 1 ? "Turn" : "Resize");
+            giz_hand = -1;
+            return 1;
+        }
+        float v;
+        V3 a = ed.xform == 2 ? q4rot(giz_rot0, AXES[giz_axis]) : AXES[giz_axis];
+        if (ed.xform == 1) {
+            if (ring_angle(giz_pos0, giz_axis, ro, rd, &v)) {
+                float d = v - giz_start;
+                if (cfg.snap) d = snapf(d, FX_PI / 12);
+                o->rot = q4norm(q4mul(q4axis(AXES[giz_axis], d), giz_rot0));
+            }
+        } else if (axis_param(giz_pos0, a, ro, rd, &v)) {
+            float d = v - giz_start;
+            if (ed.xform == 0) {
+                if (cfg.snap) d = snapf(d, cfg.snap_size);
+                o->pos = v3add(giz_pos0, v3mul(a, d));
+            } else {
+                float s0 = giz_axis == 0 ? giz_scale0.x : giz_axis == 1 ? giz_scale0.y : giz_scale0.z;
+                float k = giz_axis == 1 ? shape_height(o->shape) : 1.0f;
+                float sn = fclamp(s0 + 2 * d / k, 0.05f, 60.0f);
+                if (cfg.snap) sn = fmaxf(snapf(sn, 0.05f), 0.05f);
+                if (giz_axis == 0) o->scale.x = sn; else if (giz_axis == 1) o->scale.y = sn; else o->scale.z = sn;
+            }
+        }
+        laser_len[h] = v3len(v3sub(giz_handle(o, giz_axis), ro)); laser_hit[h] = 1;
+        return 1;
+    }
+    giz_hover[h] = -1;
+    if (!o || (o->flags & OBJ_LOCKED) || ed.tool >= 0 || giz_hand >= 0 || grab_id[0] == o->id || grab_id[1] == o->id) return 0;
+    float best = 1e9f, r = giz_radius(o) * 1.7f;
+    for (int a = 0; a < 3; a++) {
+        V3 oc = v3sub(giz_handle(o, a), ro);
+        float along = v3dot(oc, rd);
+        if (along > 0 && v3dot(oc, oc) - along * along < r * r && along < best) { best = along; giz_hover[h] = a; }
+    }
+    if (giz_hover[h] < 0) return 0;
+    laser_len[h] = best; laser_hit[h] = 1;
+    if (trig_pressed[h]) {
+        giz_hand = h; giz_axis = giz_hover[h];
+        giz_pos0 = o->pos; giz_scale0 = o->scale; giz_rot0 = o->rot; giz_start = 0;
+        if (ed.xform == 1) ring_angle(giz_pos0, giz_axis, ro, rd, &giz_start);
+        else axis_param(giz_pos0, giz_dir(o, giz_axis), ro, rd, &giz_start);
+        world_buzz[h] = 0.5f; plat_sound(SND_GRAB);
+    }
+    return 1;
+}
+
 static void hands_in_world(void) {
     ghost_on = 0;
     for (int h = 0; h < 2; h++) {
         hover_id[h] = 0; laser_len[h] = 0; laser_hit[h] = 0;
-        if (!in.hand[h].active) { grab_id[h] = 0; ed.hand_on[h] = 0; continue; }
+        if (!in.hand[h].active) { grab_id[h] = 0; ed.hand_on[h] = 0; climbing[h] = 0; giz_hover[h] = -1; if (giz_hand == h) giz_hand = -1; continue; }
         V3 ro = ed.aim[h].p, rd = q4rot(ed.aim[h].q, v3(0, 0, -1));
         ed.hand_on[h] = ui_ptr[h].panel >= 0 || ui_dragging(h);
 
+        /* pulling yourself along: hold a grip on nothing and move your hand, and the world comes with it */
+        if (climbing[h]) {
+            if (!grip_down[h]) climbing[h] = 0;
+            else {
+                V3 moved = q4rot(q4axis(v3(0, 1, 0), ed.rig_yaw), v3sub(in.hand[h].grip.p, climb_from[h]));
+                ed.rig_pos = v3sub(ed.rig_pos, moved);
+                ed.rig_pos.y = fclamp(ed.rig_pos.y, 0.0f, 60.0f);
+                climb_from[h] = in.hand[h].grip.p;
+                laser_len[h] = 0;
+                continue;
+            }
+        }
+
         if (ed.hand_on[h]) {
             laser_len[h] = ui_ptr[h].dist < 1e8f ? ui_ptr[h].dist : 0.5f; laser_hit[h] = 1;
-            if (grip_pressed[h] && ui_ptr[h].panel == 0 && panel_grab < 0 && !grab_id[h]) {
+            if (grip_pressed[h] && (ui_ptr[h].panel == 0 || ui_ptr[h].panel == 2) && panel_grab < 0 && !grab_id[h]) {
                 panel_grab = h; panel_rel = pose_mul(pose_inv(ed.aim[h]), ed.main.pose);
                 world_buzz[h] = 0.4f; plat_sound(SND_GRAB);
             }
@@ -484,6 +599,9 @@ static void hands_in_world(void) {
             continue;
         }
 
+        int locked_out = net_locked_out();          /* the room's owner has stopped guests editing */
+        if (!locked_out && gizmo_update(h, ro, rd)) continue;
+
         float t = 0, tp = 0; V3 n;
         Obj *o = pick(ro, rd, 30.0f, &t, &n);
         int plate = ray_plate(ro, rd, &tp);
@@ -491,6 +609,11 @@ static void hands_in_world(void) {
         else if (plate) { laser_len[h] = tp; laser_hit[h] = 1; o = NULL; }
         else { laser_len[h] = 5.0f; o = NULL; }
 
+        if (locked_out) {
+            if (trig_pressed[h] || (grip_pressed[h] && o)) { ed_toast("The room's owner has locked editing."); plat_sound(SND_ERROR); }
+            if (grip_pressed[h] && !o) { climbing[h] = 1; climb_from[h] = in.hand[h].grip.p; }
+            continue;
+        }
         if (ed.tool >= 0) {                     /* placing: show where it would go */
             V3 s = v3(cfg.build_size, cfg.build_size, cfg.build_size);
             V3 pos = placement(h, s, ed.tool);
@@ -522,8 +645,16 @@ static void hands_in_world(void) {
                 grab_id[h] = g->id; grab_rel[h] = pose_mul(pose_inv(ed.aim[h]), op); grab_spin[h] = 0;
                 ed.selected = g->id;
                 world_buzz[h] = 0.5f; plat_sound(SND_GRAB);
+            } else if (!g) {
+                climbing[h] = 1; climb_from[h] = in.hand[h].grip.p;
+                world_buzz[h] = 0.25f;
             }
         }
+    }
+    for (int h = 0; h < 2; h++) {                  /* what the others in the room see of your lasers */
+        int on = in.hand[h].active && !ed.hand_on[h] && laser_len[h] > 0 && !net_locked_out();
+        V3 from = ed.aim[h].p;
+        net_set_aim(h, on, from, v3add(from, v3mul(q4rot(ed.aim[h].q, v3(0, 0, -1)), fminf(laser_len[h], 30.0f))));
     }
 }
 
@@ -571,12 +702,16 @@ static void buttons(void) {
         else { ed.edit = NULL; ed_toast("Panel hidden. Press Y to bring it back."); }
         plat_sound(SND_OPEN);
     }
-    if (btn_hit[1][2] && ed.tool >= 0) { ed.tool = -1; ed_toast("Stopped placing."); }
+    if (btn_hit[1][2]) {                         /* right stick click */
+        if (ed.tool >= 0) { ed.tool = -1; ed_toast("Stopped placing."); }
+        else { ed.xform = (ed.xform + 1) % 3; ed_toast(ed.xform == 0 ? "Handles: move" : ed.xform == 1 ? "Handles: turn" : "Handles: size"); plat_sound(SND_CLICK); }
+    }
 }
 
 static void queue_lines(void) {
     static const float CYAN[4] = {0.31f, 0.89f, 0.96f, 0.95f}, VIOLET[4] = {0.62f, 0.45f, 1.0f, 0.95f};
     gfx_ribbons_clear();
+    gfx_ribbon_layer(1);                           /* your lasers are drawn over the panels, never behind them */
     for (int h = 0; h < 2; h++) {
         if (!in.hand[h].active || laser_len[h] <= 0) continue;
         const float *c = h ? CYAN : VIOLET;
@@ -584,7 +719,35 @@ static void queue_lines(void) {
         V3 a = ed.aim[h].p, b = v3add(a, v3mul(q4rot(ed.aim[h].q, v3(0, 0, -1)), laser_len[h]));
         gfx_ribbon(a, b, laser_hit[h] ? 0.006f : 0.004f, c, end);
     }
+    gfx_ribbon_layer(0);
+    for (int i = 0; i < MAX_PEERS; i++) {          /* the other players' lasers, each in their own colour */
+        Peer *p = &g_peers[i];
+        if (!p->used) continue;
+        unsigned pc = PALETTE[(p->id * 5 + 3) % 15];
+        float c0[4] = {((pc >> 16) & 255) / 255.0f, ((pc >> 8) & 255) / 255.0f, (pc & 255) / 255.0f, 0.9f};
+        float c1[4] = {c0[0], c0[1], c0[2], 0.5f};
+        for (int h = 0; h < 2; h++) if (p->aim_on[h]) gfx_ribbon(p->aim_from[h], p->aim_to[h], 0.014f, c1, c0);
+    }
     Obj *s = scene_find(ed.selected);
+    if (s && !(s->flags & OBJ_LOCKED) && ed.tool < 0 && !net_locked_out()) {       /* the handles' lines */
+        static const float GC[3][4] = {{0.96f, 0.25f, 0.37f, 0.95f}, {0.29f, 0.87f, 0.50f, 0.95f}, {0.23f, 0.51f, 0.96f, 0.95f}};
+        float w = 0.005f + 0.004f * giz_far(s);
+        for (int a = 0; a < 3; a++) {
+            int hot = giz_hover[0] == a || giz_hover[1] == a || (giz_hand >= 0 && giz_axis == a);
+            float c[4] = {GC[a][0], GC[a][1], GC[a][2], hot ? 1.0f : 0.75f};
+            if (ed.xform == 1) {
+                float r = giz_len(s, a);
+                V3 u = AXES[(a + 1) % 3], v = AXES[(a + 2) % 3], prev = v3add(s->pos, v3mul(u, r));
+                for (int k = 1; k <= 48; k++) {
+                    float ang = k / 48.0f * 2 * FX_PI;
+                    V3 pt = v3add(s->pos, v3add(v3mul(u, cosf(ang) * r), v3mul(v, sinf(ang) * r)));
+                    gfx_ribbon(prev, pt, hot ? w * 1.6f : w, c, c); prev = pt;
+                }
+            } else {
+                gfx_ribbon(s->pos, giz_handle(s, a), hot ? w * 1.6f : w, c, c);
+            }
+        }
+    }
     if (s) {
         float c[4] = {0.31f, 0.89f, 0.96f, 0.9f};
         V3 sc = v3(s->scale.x * 1.04f + 0.01f, s->scale.y * shape_height(s->shape) * 1.04f + 0.01f, s->scale.z * 1.04f + 0.01f);
@@ -598,10 +761,11 @@ void app_update(const FrameIn *fi) {
     if (ed.time - fps_t0 >= 0.5) { ed.fps = (float)(frames / (ed.time - fps_t0)); frames = 0; fps_t0 = ed.time; }
     place_panels();
 
-    Panel *panels[2] = {&ed.main, &ed.kb};
-    ui_frame(panels, 2, ed.dt, ed.time);
+    Panel *panels[3] = {&ed.main, &ed.kb, &ed.side};
+    ui_frame(panels, 3, ed.dt, ed.time);
     if (ed.main.visible) {
         ui_begin(0); screens_draw(); ui_end();
+        ui_begin(2); side_draw(); ui_end();
         if (ed.kb.visible) { ui_begin(1); keyboard_draw(); ui_end(); }
     }
     net_listen_rooms(ed.main.visible && ed.tab == TAB_ROOMS);
@@ -678,8 +842,36 @@ static void draw_world(const Cam *c, int viewer) {
         gfx_shape(ed.tool, ghost_pos, q4ident(), v3(s, s, s), v3(((pc >> 16) & 255) / 255.0f, ((pc >> 8) & 255) / 255.0f, (pc & 255) / 255.0f),
                   0.45f, 0.6f);
     }
-    gfx_ribbons_flush(c);
-    if (!viewer) ui_render(c);
+    Obj *sel = scene_find(ed.selected);
+    if (sel && !viewer && !(sel->flags & OBJ_LOCKED) && ed.tool < 0 && !net_locked_out()) {          /* the handles themselves */
+        static const V3 GC[3] = {{0.96f, 0.25f, 0.37f}, {0.29f, 0.87f, 0.50f}, {0.23f, 0.51f, 0.96f}};
+        float r = giz_radius(sel) * 2;
+        for (int a = 0; a < 3; a++) {
+            int hot = giz_hover[0] == a || giz_hover[1] == a || (giz_hand >= 0 && giz_axis == a);
+            float k = hot ? 1.35f : 1.0f;
+            V3 at = giz_handle(sel, a);
+            if (ed.xform == 0) {
+                Q4 q = a == 0 ? q4axis(v3(0, 0, 1), -FX_PI / 2) : a == 1 ? q4ident() : q4axis(v3(1, 0, 0), FX_PI / 2);
+                gfx_shape(SH_CONE, at, q, v3(r * k, r * 1.6f * k, r * k), GC[a], 1, hot ? 1.0f : 0.35f);
+            } else if (ed.xform == 1) {
+                gfx_shape(SH_SPHERE, at, q4ident(), v3(r * k, r * k, r * k), GC[a], 1, hot ? 1.0f : 0.35f);
+            } else {
+                gfx_shape(SH_CUBE, at, sel->rot, v3(r * 0.9f * k, r * 0.9f * k, r * 0.9f * k), GC[a], 1, hot ? 1.0f : 0.35f);
+            }
+        }
+    }
+    for (int i = 0; i < MAX_PEERS; i++)                 /* where each other player's laser lands */
+        if (g_peers[i].used) {
+            unsigned pc = PALETTE[(g_peers[i].id * 5 + 3) % 15];
+            V3 col = v3(((pc >> 16) & 255) / 255.0f, ((pc >> 8) & 255) / 255.0f, (pc & 255) / 255.0f);
+            for (int h = 0; h < 2; h++)
+                if (g_peers[i].aim_on[h]) {
+                    float d = 0.035f + 0.02f * v3len(v3sub(g_peers[i].aim_to[h], c->pos));
+                    gfx_shape(SH_SPHERE, g_peers[i].aim_to[h], q4ident(), v3(d, d, d), col, 1, 1.0f);
+                }
+        }
+    gfx_ribbons_flush(c, viewer ? -1 : 0);
+    if (!viewer) { ui_render(c); gfx_ribbons_flush(c, 1); }
 }
 
 Cam ed_viewer_cam(void) {

@@ -173,7 +173,9 @@ static void tour(void) {
     tap(500, 200);                                 /* first row */
     aim_panel(1, 1100, 560); frames(20); shot("09_objects");
     tap(132, TAB_Y(5));
-    snprintf(ed.server, sizeof ed.server, "flaux-vr.onrender.com");
+    if (getenv("FLAUX_TEST_SERVER")) snprintf(ed.server, sizeof ed.server, "%s", getenv("FLAUX_TEST_SERVER"));      /* a server running for the test */
+    ed.room_public = 1;
+    for (int i = 0; i < 80; i++) { frames(1); usleep(10000); }
     aim_panel(1, 1500, 559); aim_panel(0, 600, 429); frames(20); shot("10_rooms");
     tap(132, TAB_Y(7)); aim_panel(1, 560, 426); frames(20); shot("11_projects");
     tap(560, 426); frames(5);                      /* Save */
@@ -183,6 +185,36 @@ static void tour(void) {
     ed.main.visible = 0; fi.hand[0].active = 0;
     head(-5.5f, 3.2f, 1.5f, v3(0, 1.2f, -3));
     aim_world(1, v3(0, 1.5f, -4.5f)); frames(10); shot("13_world_castle");
+    {   /* the handles on a selected shape: drag the red one to slide it along x */
+        Obj *o = NULL;
+        for (int i = 0; i < g_obj_count; i++) if (g_obj[i].shape == SH_SPHERE) o = &g_obj[i];
+        head(1.2f, 1.7f, 2.2f, o->pos);
+        ed.selected = o->id; ed.tool = -1; ed.xform = 0;
+        fi.hand[0].active = 0;
+        aim_world(1, v3(o->pos.x, o->pos.y + 0.4f, o->pos.z)); frames(3);
+        V3 was = o->pos;
+        float reach = 0.5f * fmaxf(o->scale.x, fmaxf(o->scale.y, o->scale.z)) + 0.16f + 0.07f * v3len(v3sub(o->pos, ed.head.p));
+        V3 handle = v3(o->pos.x + reach, o->pos.y, o->pos.z);
+        aim_world(1, handle); frames(4); shot("16_handles_move");
+        fi.hand[1].trigger = 1; frames(2);
+        aim_world(1, v3(handle.x + 1.0f, handle.y, handle.z)); frames(4);
+        fi.hand[1].trigger = 0; frames(2);
+        fprintf(stderr, "handle drag: x %.2f -> %.2f (y %.2f -> %.2f, z %.2f -> %.2f)\n", (double)was.x, (double)o->pos.x, (double)was.y,
+                (double)o->pos.y, (double)was.z, (double)o->pos.z);
+        ed.xform = 1; aim_world(1, v3(o->pos.x, o->pos.y + 3, o->pos.z)); frames(6); shot("17_handles_turn");
+        ed.xform = 2; frames(6); shot("18_handles_size");
+        ed.xform = 0; ed.selected = 0;
+
+        /* hold a grip on nothing and pull the hand 0.4 m back: you should go 0.4 m forward */
+        head(0, 1.6f, 0, v3(0, 1.45f, -1));
+        aim_world(1, v3(0, 30, -5)); frames(2);
+        V3 rig0 = ed.rig_pos;
+        fi.hand[1].squeeze = 1; frames(2);
+        fi.hand[1].grip.p.z += 0.4f; fi.hand[1].aim.p.z += 0.4f; frames(3);
+        fi.hand[1].squeeze = 0; frames(2);
+        fprintf(stderr, "grip pull: moved %.2f m forward\n", (double)(rig0.z - ed.rig_pos.z));
+        ed_teleport(v3(0, 0, 2));
+    }
     {   /* hold both controllers up in front of the face */
         head(0, 1.6f, 0, v3(0, 1.45f, -1));
         Pose rig = {ed.rig_pos, q4axis(v3(0, 1, 0), ed.rig_yaw)};
@@ -226,23 +258,41 @@ static void room(int host, const char *ip) {
     net_leave();
 }
 
-/* two copies meeting in a room on a server:  flauxvr_test <assets> <out> net <address> <room> <a|b> */
+/* two copies meeting in a room on a server:  flauxvr_test <assets> <out> net <address> <room> <a|b>
+ * a opens the room and builds a tower; b joins, builds a ring and points at the tower; then a
+ * locks the room and b tries to build again (which mustn't stick). */
 static void server_room(const char *address, const char *room_code, int first) {
     head(0, 1.62f, 0, v3(0, 1.0f, -3));
     frames(3);
     ed.main.visible = 0;
     scene_clear(); scene_commit("clear");
-    if (!first) usleep(700000);
-    net_join_server(address, room_code);
-    int built = 0;
-    for (int i = 0; i < 600; i++) {
+    if (!first) { usleep(700000); ed.rig_pos = v3(2.2f, 0, 1.0f); }
+    net_join_server(address, room_code, 1);
+    int step = 0, before_lock = 0;
+    for (int i = 0; i < 900; i++) {
+        if (!first) { fi.hand[0].active = 0; aim_world(1, v3(0, 1.0f, -1.2f)); }
         frames(1); usleep(10000);
-        if (net_mode() == 2 && !built && i > (first ? 60 : 260)) { copilot_run(first ? "a tower of 3 red cubes" : "a ring of 6 gold balls"); built = 1; }
-        if (first && i == 480 && g_obj_count) { scene_remove(g_obj[0].id); scene_commit("del"); }
+        if (net_mode() != 2) continue;
+        if (first && step == 0 && i > 60) { copilot_run("a tower of 3 red cubes"); step = 1; }
+        if (!first && step == 0 && i > 260) { copilot_run("a ring of 6 gold balls"); step = 1; }
+        if (first && step == 1 && i == 480) { head(-0.6f, 1.75f, 0.6f, v3(1.1f, 1.1f, -0.6f)); shot("19_other_player"); }
+        if (first && step == 1 && i == 500) { net_set_lock(1); step = 2; }
+        if (first && step == 2 && i == 700) shot("20_other_player_locked");
+        if (!first && step == 1 && i == 560) { before_lock = g_obj_count; copilot_run("a wall 3 by 2"); step = 2; }
     }
-    fprintf(stderr, "%s: mode %d, %d shapes, %d other player(s), status \"%s\"\n", first ? "first" : "second", net_mode(), g_obj_count,
-            net_peer_count(), g_net_status);
+    fprintf(stderr, "%s: mode %d, %d shapes, %d other player(s), owner %d, locked %d, locked out %d, status \"%s\"\n", first ? "first" : "second",
+            net_mode(), g_obj_count, net_peer_count(), net_is_owner(), net_locked(), net_locked_out(), g_net_status);
+    if (!first) fprintf(stderr, "second: had %d shapes before trying to build while locked, has %d now\n", before_lock, g_obj_count);
     net_leave();
+}
+
+static void list_rooms(const char *address) {
+    frames(2);
+    net_list_public(address);
+    for (int i = 0; i < 300 && g_public_state == 1; i++) { frames(1); usleep(10000); }
+    fprintf(stderr, "public rooms (state %d):", g_public_state);
+    for (int i = 0; i < g_public_count; i++) fprintf(stderr, " %s(%d players, %d shapes)", g_public[i].code, g_public[i].players, g_public[i].shapes);
+    fprintf(stderr, "\n");
 }
 
 int main(int argc, char **argv) {
@@ -269,6 +319,7 @@ int main(int argc, char **argv) {
     if (!strcmp(script, "host")) room(1, NULL);
     else if (!strcmp(script, "join")) room(0, argc > 4 ? argv[4] : "127.0.0.1");
     else if (!strcmp(script, "net") && argc > 6) server_room(argv[4], argv[5], argv[6][0] == 'a');
+    else if (!strcmp(script, "list") && argc > 4) list_rooms(argv[4]);
     else tour();
     return 0;
 }

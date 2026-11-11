@@ -207,7 +207,7 @@ static void screen_home(void) {
     float x1 = CX + 32, x2 = CX + CW * 0.5f + 12, y = 366;
     key_line(x1, y, "Trigger", "Click, select, place a shape");
     key_line(x2, y, "Left stick", "Walk around");
-    key_line(x1, y + 64, "Grip", "Grab a shape, or this panel");
+    key_line(x1, y + 64, "Grip", "Grab a shape or the panel. On nothing: pull yourself along");
     key_line(x2, y + 64, "Right stick", "Turn, and fly up or down");
     key_line(x1, y + 128, "Both grips", "Stretch a shape bigger or smaller");
     key_line(x2, y + 128, "Stick + grab", "Push, pull and spin what you hold");
@@ -516,18 +516,26 @@ static void screen_rooms(void) {
     char buf[128];
     ui_card(CX, 150, CW, 130);
     ui_rect(CX + 32, 190, 20, 20, 10, mode == 1 || mode == 2 ? C_GREEN : mode == 3 ? C_AMBER : C_FAINT);
-    ui_text_fit(CX + 68, 172, 34, CW - 460, C_TEXT, g_net_status);
+    ui_text_fit(CX + 68, 172, 34, CW - 800, C_TEXT, g_net_status);
     const char *ip = net_local_ip();
-    snprintf(buf, sizeof buf, ip[0] ? "This headset's address on the Wi-Fi: %s" : "This headset isn't on a network.", ip);
-    ui_text(CX + 68, 224, 22, C_DIM, buf);
-    if (mode != 0 && ui_button(CR - 352, 182, 320, 66, mode == 1 ? "Close the room" : mode == 3 ? "Stop" : "Leave the room", BTN_DANGER))
+    if (net_locked_out()) snprintf(buf, sizeof buf, "The owner has locked editing. You can look around, but not build.");
+    else snprintf(buf, sizeof buf, ip[0] ? "This headset's address on the Wi-Fi: %s" : "This headset isn't on a network.", ip);
+    ui_text_fit(CX + 68, 224, 22, CW - 800, net_locked_out() ? C_AMBER : C_DIM, buf);
+    if (mode != 0 && ui_button(CR - 292, 182, 260, 66, mode == 1 ? "Close the room" : mode == 3 ? "Stop" : "Leave the room", BTN_DANGER))
         net_leave();
+    if (net_is_owner()) {                      /* your room: you can stop everyone else editing */
+        int locked = net_locked();
+        if (ui_toggle(CR - 700, 188, 380, "Lock editing for guests", &locked)) {
+            net_set_lock(locked);
+            ed_toast(locked ? "Guests can look, but not build. Their cursors are hidden." : "Guests can build again.");
+        }
+    }
 
     /* on this Wi-Fi */
     ui_card(CX, 300, 660, 624);
     ui_text_bold(CX + 28, 318, 28, C_TEXT, "On this Wi-Fi");
     ui_text(CX + 28, 356, 21, C_FAINT, "One headset opens a room. The others see it here.");
-    if (mode == 0 && ui_icon_button(CX + 28, 396, 604, 66, "\xE2\x87\x84", "Open a room on this headset", BTN_NORMAL)) {
+    if (mode == 0 && ui_icon_button(CX + 28, 396, 604, 62, "\xE2\x87\x84", "Open a room on this headset", BTN_NORMAL)) {
         char name[40]; snprintf(name, sizeof name, "%s's room", ed.player);
         net_host(name);
         ed_toast("%s", g_net_status);
@@ -536,55 +544,87 @@ static void screen_rooms(void) {
     for (int i = 0; i < MAX_ROOMS; i++) {
         Room *r = &g_rooms[i];
         if (!r->ip[0]) continue;
-        float y = 482 + n * 88.0f;
-        ui_frame_rect(CX + 24, y, 612, 78, 20, rgba(0x10173C, 0.9f), 1.5f, rgba(0xFFFFFF, 0.10f));
-        ui_text_fit(CX + 48, y + 11, 27, 360, C_TEXT, r->name);
+        float y = 476 + n * 84.0f;
+        ui_frame_rect(CX + 24, y, 612, 74, 20, rgba(0x10173C, 0.9f), 1.5f, rgba(0xFFFFFF, 0.10f));
+        ui_text_fit(CX + 48, y + 9, 26, 360, C_TEXT, r->name);
         snprintf(buf, sizeof buf, "%s   %d player%s", r->ip, r->players, r->players == 1 ? "" : "s");
-        ui_text(CX + 48, y + 45, 21, C_DIM, buf);
-        if (ui_button(CX + 470, y + 11, 150, 56, "Join", BTN_PRIMARY)) net_join(r->ip);
-        if (++n >= 4) break;
+        ui_text(CX + 48, y + 43, 20, C_DIM, buf);
+        if (ui_button(CX + 470, y + 9, 150, 56, "Join", BTN_PRIMARY)) net_join(r->ip);
+        if (++n >= 3) break;
     }
     if (!n) {
         int dots = (int)(ui_time * 2.5) % 4;
         snprintf(buf, sizeof buf, mode == 1 ? "You're hosting. Others will see your room here." : "Looking for rooms nearby%.*s", dots, "...");
-        ui_text_center(CX + 330, 640, 25, C_DIM, buf);
-        if (mode != 1) ui_text_center(CX + 330, 682, 21, C_FAINT, "Nothing yet. Ask a friend to open a room.");
+        ui_text_center(CX + 330, 560, 25, C_DIM, buf);
+        if (mode != 1) ui_text_center(CX + 330, 600, 21, C_FAINT, "Nothing yet. Ask a friend to open a room.");
+    }
+    ui_rect(CX + 28, 740, 604, 2, 1, rgba(0xFFFFFF, 0.08f));
+    ui_text(CX + 28, 758, 21, C_DIM, "Your name");
+    static char name_buf[20];
+    if (ed.edit != name_buf) snprintf(name_buf, sizeof name_buf, "%s", ed.player);
+    if (field(CX + 28, 786, 604, 58, name_buf, (int)sizeof name_buf - 1, "Player")) {
+        if (name_buf[0]) { snprintf(ed.player, sizeof ed.player, "%s", name_buf); net_init(ed.player); ed_save_settings(); }
+    }
+    {   /* who's here */
+        float px = CX + 28;
+        snprintf(buf, sizeof buf, "%s (you)", ed.player);
+        ui_rect(px, 870, 22, 22, 11, C_CYAN);
+        px += 32 + ui_text(px + 32, 867, 22, C_TEXT, buf) + 22;
+        for (int i = 0; i < MAX_PEERS; i++)
+            if (g_peers[i].used && px < CX + 560) {
+                ui_rect(px, 870, 22, 22, 11, rgba(PALETTE[(g_peers[i].id * 5 + 3) % 15], 1));
+                px += 32 + ui_text(px + 32, 867, 22, C_TEXT, g_peers[i].name) + 22;
+            }
     }
 
     /* through a server */
     float x = CX + 680, w = 680;
+    static double listed = -100;
     ui_card(x, 300, w, 624);
     ui_text_bold(x + 28, 318, 28, C_TEXT, "Over the internet");
     ui_text(x + 28, 356, 21, C_FAINT, "Everyone types the same server and the same room code.");
-    ui_text(x + 28, 396, 21, C_DIM, "Server address");
-    int go_now = field(x + 28, 424, w - 56, 62, ed.server, (int)sizeof ed.server - 1, "my-server.onrender.com");
-    ui_text(x + 28, 500, 21, C_DIM, "Room code");
-    go_now |= field(x + 28, 528, w - 252, 62, ed.room_code, (int)sizeof ed.room_code - 1, "FLAUX");
-    if (ui_icon_button(x + w - 208, 528, 180, 62, "\xE2\x87\x84", "Join", BTN_PRIMARY)) go_now = 1;
-    if (go_now) {
-        ed.edit = NULL;
-        net_join_server(ed.server, ed.room_code);
+    ui_text(x + 28, 390, 21, C_DIM, "Server address");
+    int go_now = field(x + 28, 416, w - 56, 58, ed.server, (int)sizeof ed.server - 1, "my-server.onrender.com");
+    if (go_now) listed = -100;
+    ui_text(x + 28, 486, 21, C_DIM, "Room code");
+    go_now |= field(x + 28, 512, 236, 58, ed.room_code, (int)sizeof ed.room_code - 1, "FLAUX");
+    ui_toggle(x + 290, 513, 196, "Public", &ed.room_public);
+    if (ui_icon_button(x + w - 170, 512, 142, 58, "\xE2\x87\x84", "Join", BTN_PRIMARY)) go_now = 1;
+    if (go_now && ed.edit == NULL) {
+        net_join_server(ed.server, ed.room_code, ed.room_public);
         ed_save_settings();
         ed_toast("%s", g_net_status);
     }
-    ui_text(x + 28, 604, 21, C_DIM, "Your name");
-    static char name_buf[20];
-    if (ed.edit != name_buf) snprintf(name_buf, sizeof name_buf, "%s", ed.player);
-    if (field(x + 28, 632, w - 56, 62, name_buf, (int)sizeof name_buf - 1, "Player")) {
-        if (name_buf[0]) { snprintf(ed.player, sizeof ed.player, "%s", name_buf); net_init(ed.player); ed_save_settings(); }
+    ui_text(x + 28, 578, 19, C_FAINT, ed.room_public ? "Public: a room you open shows in the list below, for anyone on this server."
+                                                    : "Private: only people who know the room code can join.");
+
+    /* the server's public rooms */
+    if (ed.server[0] && ui_time - listed > 12.0) { net_list_public(ed.server); listed = ui_time; }
+    ui_rect(x + 28, 614, w - 56, 2, 1, rgba(0xFFFFFF, 0.08f));
+    ui_text_bold(x + 28, 628, 26, C_TEXT, "Public rooms on this server");
+    if (ui_button(x + w - 178, 622, 150, 46, "Refresh", BTN_GHOST)) { net_list_public(ed.server); listed = ui_time; }
+    if (!ed.server[0]) ui_text_center(x + w * 0.5f, 750, 23, C_FAINT, "Type a server address to see its public rooms.");
+    else if (g_public_state == 1 && !g_public_count) ui_text_center(x + w * 0.5f, 750, 23, C_DIM, "Asking the server...");
+    else if (g_public_state == 3) ui_text_center(x + w * 0.5f, 750, 23, C_AMBER, "Couldn't reach that server.");
+    else if (!g_public_count) {
+        ui_text_center(x + w * 0.5f, 736, 23, C_DIM, "No public rooms right now.");
+        ui_text_center(x + w * 0.5f, 772, 20, C_FAINT, "Switch Public on and press Join to open the first one.");
     }
-    ui_text_bold(x + 28, 716, 26, C_TEXT, "Players here");
-    snprintf(buf, sizeof buf, "%s (you)", ed.player);
-    ui_rect(x + 30, 764, 24, 24, 12, C_CYAN);
-    ui_text(x + 68, 761, 24, C_TEXT, buf);
-    int k = 1;
-    for (int i = 0; i < MAX_PEERS && k < 8; i++)
-        if (g_peers[i].used) {
-            float px = x + 30 + (k % 2) * 320.0f, py = 764 + (k / 2) * 38.0f;
-            ui_rect(px, py, 24, 24, 12, rgba(PALETTE[(g_peers[i].id * 5 + 3) % 15], 1));
-            ui_text_fit(px + 38, py - 3, 24, 260, C_TEXT, g_peers[i].name);
-            k++;
+    for (int i = 0; i < g_public_count && i < 3; i++) {
+        float y = 680 + i * 78.0f;
+        ui_frame_rect(x + 24, y, w - 48, 68, 20, rgba(0x10173C, 0.9f), 1.5f, rgba(0xFFFFFF, 0.10f));
+        ui_rect(x + 46, y + 23, 22, 22, 11, C_GREEN);
+        ui_text_fit(x + 84, y + 8, 27, 300, C_TEXT, g_public[i].code);
+        snprintf(buf, sizeof buf, "%d player%s, %d shape%s", g_public[i].players, g_public[i].players == 1 ? "" : "s", g_public[i].shapes,
+                 g_public[i].shapes == 1 ? "" : "s");
+        ui_text(x + 84, y + 40, 19, C_DIM, buf);
+        if (ui_button(x + w - 190, y + 8, 150, 52, "Join", BTN_PRIMARY)) {
+            snprintf(ed.room_code, sizeof ed.room_code, "%s", g_public[i].code);
+            net_join_server(ed.server, ed.room_code, 1);
+            ed_save_settings();
         }
+    }
+    if (g_public_count > 3) { snprintf(buf, sizeof buf, "and %d more", g_public_count - 3); ui_text_right(x + w - 28, 902 - 8, 19, C_FAINT, buf); }
 }
 
 /* ---------- Co-pilot ---------- */
@@ -736,6 +776,68 @@ static void screen_settings(void) {
     static double save_at;
     if (changed) save_at = ui_time + 1.0;
     if (save_at > 0 && ui_time > save_at) { save_at = 0; ed_save_settings(); }
+}
+
+/* ---------- the objects list at the side: always showing ---------- */
+
+static float scroll_side;
+
+void side_draw(void) {
+    ui_glow(0, 0, SW, SH, 44, 60, rgba(0x22B8EE, 0.22f));
+    ui_grad(0, 0, SW, SH, 44, rgba(0x0D1236, 0.99f), rgba(0x070A1E, 0.99f), 0);
+    ui_frame_rect(0, 0, SW, SH, 44, NONE, 2.5f, rgba(0x4FE3F5, 0.5f));
+    char buf[64];
+    ui_text_bold(32, 30, 36, C_TEXT, "Objects");
+    snprintf(buf, sizeof buf, "%d", g_obj_count);
+    float cw = ui_text_width(22, buf) + 30;
+    ui_rect(SW - 32 - cw, 34, cw, 36, 18, rgba(0x2A3470, 1));
+    ui_text_center(SW - 32 - cw * 0.5f, 41, 22, C_CYAN, buf);
+
+    /* what the handles on the selected shape do */
+    static const char *modes[3] = {"Move", "Turn", "Size"};
+    ui_text(32, 88, 20, C_DIM, "Handles on the selected shape");
+    for (int i = 0; i < 3; i++)
+        if (ui_button(32 + i * 154.0f, 118, 146, 56, modes[i], ed.xform == i ? BTN_ON : BTN_NORMAL)) ed.xform = i;
+
+    const float top = 196, h = 610, row = 60;
+    ui_frame_rect(20, top - 8, SW - 40, h + 16, 22, rgba(0x18204A, 0.6f), 1.5f, rgba(0xFFFFFF, 0.08f));
+    if (!g_obj_count) {
+        ui_text_center(SW * 0.5f, top + 250, 25, C_DIM, "Nothing on the plate yet.");
+        ui_text_center(SW * 0.5f, top + 288, 20, C_FAINT, "Shapes you place show up here.");
+    }
+    list_begin(28, top, SW - 56, h, g_obj_count * row, &scroll_side);
+    for (int i = 0; i < g_obj_count; i++) {
+        Obj *o = &g_obj[i];
+        float y = top + i * row - scroll_side;
+        if (y < top - row || y > top + h) continue;
+        int sel = o->id == ed.selected;
+        int hand = ui_hover(28, y, SW - 84, row - 6);
+        if (ui_press(28, y, SW - 84, row - 6)) { ed.selected = sel ? 0 : o->id; sel = !sel; plat_sound(SND_CLICK); }
+        if (sel) ui_grad(32, y, SW - 88, row - 6, 16, rgba(0x7C3AED, 0.85f), rgba(0x22B8EE, 0.85f), 1);
+        else if (hand >= 0) ui_rect(32, y, SW - 88, row - 6, 16, rgba(0xFFFFFF, 0.08f));
+        ui_image(36, y + 2, 50, 50, 0, ed.thumbs, (float)o->shape / SH_COUNT, 1, (float)(o->shape + 1) / SH_COUNT, 0,
+                 rgba((unsigned)(o->r << 16 | o->g << 8 | o->b), 1));
+        ui_text_fit(98, y + 14, 25, 250, C_TEXT, o->name);
+        if (o->flags & OBJ_LOCKED) ui_text_right(SW - 68, y + 17, 19, sel ? C_TEXT : C_AMBER, "locked");
+    }
+    list_end();
+
+    Obj *o = scene_find(ed.selected);
+    float y = 836;
+    if (o) {
+        int locked = o->flags & OBJ_LOCKED;
+        snprintf(buf, sizeof buf, "%.2f, %.2f, %.2f", (double)o->pos.x, (double)o->pos.y, (double)o->pos.z);
+        ui_text_fit(32, y, 24, 250, C_TEXT, o->name);
+        ui_text_right(SW - 32, y + 3, 20, C_DIM, buf);
+        if (ui_icon_button(32, y + 40, 146, 58, "\xE2\x9D\x90", "Copy", BTN_NORMAL)) ed_duplicate_selected();
+        if (ui_button(186, y + 40, 146, 58, locked ? "Unlock" : "Lock", locked ? BTN_ON : BTN_NORMAL)) { o->flags ^= OBJ_LOCKED; scene_commit(locked ? "Unlock" : "Lock"); }
+        if (ui_icon_button(340, y + 40, 148, 58, "\xE2\x9C\x95", "Delete", BTN_DANGER)) ed_delete_selected();
+    } else {
+        ui_text(32, y + 6, 22, C_DIM, "Tap a shape to select it.");
+        ui_text(32, y + 40, 20, C_FAINT, "Then drag its coloured handles to move,");
+        ui_text(32, y + 68, 20, C_FAINT, "turn or size it along one direction.");
+    }
+    ui_text_center(SW * 0.5f, SH - 62, 19, C_FAINT, "Click the right stick to change the handles.");
 }
 
 void screens_draw(void) {

@@ -14,7 +14,10 @@
 // What travels is plain text lines (see ../src/net.c):
 //     room <code>, hello <name>           from a headset when it arrives
 //     you <id>, full, obj..., endfull     to it: its player number and the room's scene
-//     obj <id> ...   del <id>   pose <id> ...     passed on to everyone else in the room
+//     obj <id> ...   del <id>   pose <id> ...   aim <id> ...     passed on to everyone else in the room
+//     room <code> public                  a new room that shows in the list
+//     list                                answered with: rooms, pub <code> <players> <shapes>..., endrooms
+//     owner <id>, lock <0|1>              who opened the room, and whether they've stopped the others editing
 'use strict';
 const http = require('http');
 const crypto = require('crypto');
@@ -23,7 +26,7 @@ const PORT = Number(process.env.PORT) || 8080;
 const MAX_ROOMS = 200, MAX_PLAYERS = 8, MAX_OBJECTS = 2048, MAX_LINE = 4000;
 const EMPTY_ROOM_MINUTES = 30;
 
-const rooms = new Map();          // code -> { objects: Map(id -> line), players: Set(client), emptySince, nextId }
+const rooms = new Map();          // code -> { objects, players, emptySince, nextId, isPublic, owner, locked }
 
 function sendFrame(socket, opcode, payload) {
   const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
@@ -35,12 +38,20 @@ function sendFrame(socket, opcode, payload) {
 }
 const say = (client, text) => sendFrame(client.socket, 1, text);
 
+const tellAll = (room, text) => { for (const p of room.players) if (p.id) say(p, text); };
+
 function leave(client) {
   const room = client.room;
   if (!room) return;
   client.room = null;
   room.players.delete(client);
-  if (room.players.size === 0) room.emptySince = Date.now();
+  if (room.players.size === 0) { room.emptySince = Date.now(); room.owner = 0; room.locked = false; return; }
+  if (room.owner === client.id) {            // the owner left: the longest-standing player takes over, and the room unlocks
+    room.owner = Math.min(...[...room.players].filter(p => p.id).map(p => p.id));
+    if (!Number.isFinite(room.owner)) room.owner = 0;
+    room.locked = false;
+    tellAll(room, `owner ${room.owner}\nlock 0\n`);
+  }
 }
 
 function onLine(client, line) {
@@ -48,16 +59,23 @@ function onLine(client, line) {
   const space = line.indexOf(' ');
   const word = space < 0 ? line : line.slice(0, space), rest = space < 0 ? '' : line.slice(space + 1);
 
+  if (word === 'list' && !client.room) {
+    let out = 'rooms\n';
+    for (const [code, room] of rooms) if (room.isPublic && room.players.size > 0) out += `pub ${code} ${room.players.size} ${room.objects.size}\n`;
+    return say(client, out + 'endrooms\n');
+  }
   if (word === 'room' && !client.room) {
-    const code = rest.trim().toUpperCase();
+    const parts = rest.trim().split(/\s+/);
+    const code = (parts[0] || '').toUpperCase(), wantPublic = parts[1] === 'public';
     if (!/^[A-Z0-9_-]{1,20}$/.test(code)) { say(client, 'sorry Room codes are letters and numbers, like FLAUX\n'); return client.socket.end(); }
     let room = rooms.get(code);
     if (!room) {
       if (rooms.size >= MAX_ROOMS) { say(client, 'sorry This server is full. Try again later.\n'); return client.socket.end(); }
-      room = { objects: new Map(), players: new Set(), emptySince: 0, nextId: 2 };
+      room = { objects: new Map(), players: new Set(), emptySince: 0, nextId: 2, isPublic: wantPublic, owner: 0, locked: false };
       rooms.set(code, room);
     }
     if (room.players.size >= MAX_PLAYERS) { say(client, `sorry Room ${code} is full (${MAX_PLAYERS} players)\n`); return client.socket.end(); }
+    if (room.players.size === 0) room.isPublic = wantPublic;      // whoever reopens an empty room decides
     client.room = room; client.code = code;
     room.players.add(client);
     return;
@@ -70,12 +88,20 @@ function onLine(client, line) {
     client.name = rest.trim().slice(0, 19);
     let all = `you ${client.id}\nfull\n`;
     for (const obj of room.objects.values()) all += obj + '\n';
+    if (!room.owner) room.owner = client.id;
     say(client, all + 'endfull\n');
+    tellAll(room, `owner ${room.owner}\nlock ${room.locked ? 1 : 0}\n`);
     console.log(`${client.name || 'someone'} joined ${client.code} (${room.players.size} there, ${room.objects.size} shapes)`);
     return;
   }
   if (!client.id) return;
 
+  if (word === 'lock') {
+    if (client.id !== room.owner) return;
+    room.locked = rest.trim() === '1';
+    return tellAll(room, `lock ${room.locked ? 1 : 0}\n`);
+  }
+  if ((word === 'obj' || word === 'del') && room.locked && client.id !== room.owner) return;     // guests can't edit just now
   if (word === 'obj') {
     const id = rest.split(' ', 1)[0];
     if (!/^\d+$/.test(id)) return;
@@ -83,7 +109,7 @@ function onLine(client, line) {
     room.objects.set(id, line);
   } else if (word === 'del') {
     room.objects.delete(rest.trim());
-  } else if (word !== 'pose') {
+  } else if (word !== 'pose' && word !== 'aim') {
     return;                                  // nothing else is passed on
   }
   for (const other of room.players) if (other !== client && other.id) say(other, line + '\n');
