@@ -894,6 +894,16 @@ head. Your hands:
 Try [`examples/3d/vr_garden.flx`](examples/3d/vr_garden.flx): hold the
 trigger to grow flowers where your hand is.
 
+### Flaux VR: build inside the headset
+
+**[Flaux VR](vr/README.md)** is an app for Meta Quest headsets. You stand on a
+plate among the stars and build with your hands: pick shapes and colours from
+a floating panel, grab and stretch them, watch your build from outside in the
+scene viewer, build with friends on the same Wi-Fi, and save your build as a
+Flaux program.
+
+![Flaux VR's panel, floating above the plate](docs/images/flaux_vr.png)
+
 ---
 
 ## Game controllers
