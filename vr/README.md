@@ -65,6 +65,14 @@ llvm-addr2line -f -e build/symbols/libflauxvr-2.4.0.so 0x1A2B4
 | **Y** (or the menu button) | hide or show the panel |
 | **A** / **B** | undo / redo |
 
+## Play mode
+
+Press **Play** (on the panel, bottom left) to put the editor away and walk
+about in what you built. The left stick walks, the right stick turns, and
+**A** jumps. You stand on the plate and on top of shapes, bump into ones too
+tall to step onto, and fall off edges (you're put back if you fall off the
+plate). **Y** goes back to building.
+
 ## The panel
 
 Beside the panel, a slim **objects list** is always showing: every shape

@@ -396,7 +396,7 @@ static int egl_init(void) {
 
 /* ---------- OpenXR ---------- */
 
-#define MAX_IMAGES 16
+#define MAX_IMAGES 32
 typedef struct {
     XrSwapchain handle; int w, h; uint32_t count;
     XrSwapchainImageOpenGLESKHR images[MAX_IMAGES];
@@ -552,10 +552,14 @@ static int xr_init(void) {
     plat_stage("xr-eyes");
 
     /* the floor is y = 0 where the headset knows where the floor is */
-    uint32_t nspaces = 0; XrReferenceSpaceType spaces[16];
-    xrEnumerateReferenceSpaces(xr_session, 16, &nspaces, spaces);
+    uint32_t nspaces = 0;
     int has_stage = 0;
-    for (uint32_t i = 0; i < nspaces; i++) if (spaces[i] == XR_REFERENCE_SPACE_TYPE_STAGE) has_stage = 1;
+    if (XR_OK(xrEnumerateReferenceSpaces(xr_session, 0, &nspaces, NULL)) && nspaces > 0) {
+        XrReferenceSpaceType *spaces = calloc(nspaces, sizeof *spaces);
+        if (XR_OK(xrEnumerateReferenceSpaces(xr_session, nspaces, &nspaces, spaces)))
+            for (uint32_t i = 0; i < nspaces; i++) if (spaces[i] == XR_REFERENCE_SPACE_TYPE_STAGE) has_stage = 1;
+        free(spaces);
+    } else has_stage = 1;                        /* couldn't ask: try the floor space, and fall back if it's refused */
     XrReferenceSpaceCreateInfo rs = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
     rs.poseInReferenceSpace.orientation.w = 1;
     rs.referenceSpaceType = has_stage ? XR_REFERENCE_SPACE_TYPE_STAGE : XR_REFERENCE_SPACE_TYPE_LOCAL;
@@ -572,12 +576,22 @@ static int xr_init(void) {
     XrViewConfigurationView vc[2] = {{XR_TYPE_VIEW_CONFIGURATION_VIEW}, {XR_TYPE_VIEW_CONFIGURATION_VIEW}};
     if (!XR_OK(xrEnumerateViewConfigurationViews(xr_instance, xr_system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 2, &nviews, vc)) || nviews != 2)
         return 0;
-    uint32_t nformats = 0; int64_t formats[64];
-    xrEnumerateSwapchainFormats(xr_session, 64, &nformats, formats);
-    int64_t format = 0;
+    /* Which colour formats the headset offers.  Ask how many there are first: a Quest 3 offers more
+     * than fit in a small fixed list, and then the whole request fails and gives back nothing. */
+    uint32_t nformats = 0;
+    int64_t *formats = NULL, format = 0;
+    if (XR_OK(xrEnumerateSwapchainFormats(xr_session, 0, &nformats, NULL)) && nformats > 0) {
+        formats = calloc(nformats, sizeof *formats);
+        if (!XR_OK(xrEnumerateSwapchainFormats(xr_session, nformats, &nformats, formats))) nformats = 0;
+    } else nformats = 0;
+    LOGI("the headset offers %u colour formats", nformats);
     for (uint32_t i = 0; i < nformats && !format; i++) if (formats[i] == GL_SRGB8_ALPHA8) format = formats[i];
     for (uint32_t i = 0; i < nformats && !format; i++) if (formats[i] == GL_RGBA8) format = formats[i];
-    if (!format) { LOGE("the headset offers no colour format Flaux VR can draw to"); return 0; }
+    free(formats);
+    if (!format) {                              /* couldn't find out: every headset has this one, so try it */
+        LOGI("no colour format found in the list; trying sRGB anyway");
+        format = GL_SRGB8_ALPHA8;
+    }
     g_encode = format == GL_RGBA8;        /* an sRGB picture does the colour conversion itself */
     for (int e = 0; e < 2; e++) {
         XrSwapchainCreateInfo si = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
@@ -594,7 +608,12 @@ static int xr_init(void) {
         }
         eyes[e].w = (int)si.width; eyes[e].h = (int)si.height;
         for (int i = 0; i < MAX_IMAGES; i++) eyes[e].images[i].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR;
-        if (!XR_OK(xrEnumerateSwapchainImages(eyes[e].handle, MAX_IMAGES, &eyes[e].count, (XrSwapchainImageBaseHeader *)eyes[e].images)))
+        uint32_t nimages = 0;
+        if (!XR_OK(xrEnumerateSwapchainImages(eyes[e].handle, 0, &nimages, NULL)) || nimages == 0 || nimages > MAX_IMAGES) {
+            LOGE("an eye wants %u pictures; Flaux VR can keep up to %d", nimages, MAX_IMAGES);
+            return 0;
+        }
+        if (!XR_OK(xrEnumerateSwapchainImages(eyes[e].handle, nimages, &eyes[e].count, (XrSwapchainImageBaseHeader *)eyes[e].images)))
             return 0;
         glGenFramebuffers((GLsizei)eyes[e].count, eyes[e].fbo);
         for (uint32_t i = 0; i < eyes[e].count; i++) {

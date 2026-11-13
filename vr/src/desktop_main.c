@@ -241,6 +241,25 @@ static void tour(void) {
         fprintf(stderr, "thumbsticks: moved %.2f m, turned %.2f\n", (double)v3len(v3sub(ed.rig_pos, rig2)), (double)(ed.rig_yaw - yaw2));
         ed_teleport(v3(0, 0, 2));
     }
+    {   /* play mode: walk, jump, bump into a wall, stop */
+        ed_teleport(v3(0, 0, 2)); head(0, 1.6f, 0, v3(0, 1.2f, -3));
+        fi.hand[0].active = fi.hand[1].active = 1; fi.hand[0].sx = fi.hand[0].sy = fi.hand[1].sx = fi.hand[1].sy = 0;
+        for (int h = 0; h < 2; h++) { fi.hand[h].aim = fi.hand[h].grip = fi.head; fi.hand[h].aim.p.y = fi.hand[h].grip.p.y = 1.1f; fi.hand[h].aim.p.x = fi.hand[h].grip.p.x = h ? 0.2f : -0.2f; }
+        ed_play(1); frames(30);
+        V3 at0 = ed.rig_pos;
+        fi.hand[0].sy = 1; frames(36); fi.hand[0].sy = 0; frames(2);
+        fprintf(stderr, "play: walked %.2f m forward, panel %s\n", (double)(at0.z - ed.rig_pos.z), ed.main.visible ? "showing" : "hidden");
+        float top = 0; fi.hand[1].a = 1; frames(1); fi.hand[1].a = 0;
+        for (int i = 0; i < 80; i++) { frames(1); if (ed.rig_pos.y > top) top = ed.rig_pos.y; }
+        fprintf(stderr, "play: jumped %.2f m high, landed at %.2f\n", (double)top, (double)ed.rig_pos.y);
+        shot("21_play");
+        V3 at1 = ed.rig_pos;
+        fi.hand[0].sy = 1; frames(400); fi.hand[0].sy = 0; frames(2);        /* keep walking: the castle wall is in the way */
+        fprintf(stderr, "play: walked on %.2f m, then stopped at z %.2f (the wall is at about -3)\n", (double)(at1.z - ed.rig_pos.z), (double)(ed.rig_pos.z));
+        fi.hand[0].b = 1; frames(1); fi.hand[0].b = 0; frames(3);
+        fprintf(stderr, "play: after Y, playing %d, panel %s\n", ed.playing, ed.main.visible ? "showing" : "hidden");
+        ed.main.visible = 0;
+    }
     {   /* hold both controllers up in front of the face */
         head(0, 1.6f, 0, v3(0, 1.45f, -1));
         Pose rig = {ed.rig_pos, q4axis(v3(0, 1, 0), ed.rig_yaw)};

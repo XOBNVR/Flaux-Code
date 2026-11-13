@@ -123,6 +123,7 @@ static void chrome(void) {
         ui_text(x + 20, y + 16, 32, c, icons[i]);
         ui_text(x + 70, y + 19, 28, c, names[i]);
     }
+    if (ui_icon_button(30, PH - 178, 204, 62, "\xE2\x96\xB6", "Play", BTN_PRIMARY)) ed_play(1);
     if (ui_icon_button(30, PH - 104, 98, 60, "\xE2\x86\xB6", NULL, scene_can_undo() ? BTN_NORMAL : BTN_GHOST)) {
         if (scene_undo()) ed_toast("Undone."); else ed_toast("Nothing to undo.");
     }
@@ -199,7 +200,7 @@ static void screen_home(void) {
     float w = (CW - 40) / 3;
     if (big_card(CX, 150, w, 120, "\xE2\x9C\x9A", "Start building", "Pick a shape and place it", 0x4FE3F5)) go(TAB_BUILD);
     if (big_card(CX + w + 20, 150, w, 120, "\xE2\x97\x86", "Assets", "Ready-made models to place", 0xA78BFA)) go(TAB_ASSETS);
-    if (big_card(CX + (w + 20) * 2, 150, w, 120, "\xE2\x87\x84", "Build together", "On your Wi-Fi or a server", 0xF472B6)) go(TAB_ROOMS);
+    if (big_card(CX + (w + 20) * 2, 150, w, 120, "\xE2\x96\xB6", "Play", "Walk and jump in your build", 0x4ADE80)) ed_play(1);
 
     ui_card(CX, 290, CW, 404);
     ui_text_bold(CX + 32, 308, 30, C_TEXT, "Controls");
@@ -213,8 +214,8 @@ static void screen_home(void) {
     key_line(x2, y + 128, "Right stick click", "Change which handles show");
     key_line(x1, y + 192, "X", "Bring this panel to you");
     key_line(x2, y + 192, "Y", "Hide or show the panel");
-    key_line(x1, y + 256, "A", "Undo");
-    key_line(x2, y + 256, "B", "Redo");
+    key_line(x1, y + 256, "A / B", "Undo / redo");
+    key_line(x2, y + 256, "Play", "Stick walks, A jumps, Y stops");
 
     /* what's on the plate, shape by shape */
     float pw = 840;

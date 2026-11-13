@@ -549,6 +549,105 @@ static int giz_hot(int k, int a) {
     return giz_hover[0] == k * 3 + a || giz_hover[1] == k * 3 + a || (giz_hand >= 0 && giz_kind == k && giz_axis == a);
 }
 
+/* ---------- play mode ----------
+ * The panels, lasers and handles are put away, and you walk about in what you built: the left
+ * stick walks, the right stick turns, A jumps.  You stand on the plate and on top of shapes, bump
+ * into ones too tall to step onto, and fall off edges.  Y (or X, or the menu button) goes back to
+ * building. */
+
+static float play_fall;               /* how fast you're falling (or rising, just after a jump) */
+static int play_grounded, play_turned;
+
+/* the box a shape takes up, as wide as it can be when turned */
+static void obj_box(const Obj *o, V3 *lo, V3 *hi) {
+    float hy = 0.5f * o->scale.y * shape_height(o->shape), hx = 0.5f * o->scale.x, hz = 0.5f * o->scale.z;
+    V3 ax = q4rot(o->rot, v3(hx, 0, 0)), ay = q4rot(o->rot, v3(0, hy, 0)), az = q4rot(o->rot, v3(0, 0, hz));
+    V3 e = v3(fabsf(ax.x) + fabsf(ay.x) + fabsf(az.x), fabsf(ax.y) + fabsf(ay.y) + fabsf(az.y), fabsf(ax.z) + fabsf(ay.z) + fabsf(az.z));
+    *lo = v3sub(o->pos, e); *hi = v3add(o->pos, e);
+}
+
+/* the highest thing to stand on under a spot, no higher than you could step up to */
+static float ground_under(float x, float z, float feet) {
+    float best = (fabsf(x) <= PLATE * 0.5f && fabsf(z) <= PLATE * 0.5f && feet > -0.4f) ? 0.0f : -1000.0f;
+    for (int i = 0; i < g_obj_count; i++) {
+        V3 lo, hi; obj_box(&g_obj[i], &lo, &hi);
+        const float r = 0.15f;
+        if (x < lo.x - r || x > hi.x + r || z < lo.z - r || z > hi.z + r) continue;
+        if (hi.y <= feet + 0.4f && hi.y > best) best = hi.y;
+    }
+    return best;
+}
+
+/* is there something in the way of your body at a spot? */
+static int blocked_at(float x, float z, float feet) {
+    for (int i = 0; i < g_obj_count; i++) {
+        V3 lo, hi; obj_box(&g_obj[i], &lo, &hi);
+        const float r = 0.22f;
+        if (x < lo.x - r || x > hi.x + r || z < lo.z - r || z > hi.z + r) continue;
+        if (hi.y > feet + 0.4f && lo.y < feet + 1.5f) return 1;
+    }
+    return 0;
+}
+
+void ed_play(int on) {
+    if (on == ed.playing) return;
+    ed.playing = on;
+    ed.edit = NULL; ed.tool = -1;
+    grab_id[0] = grab_id[1] = 0; climbing[0] = climbing[1] = 0; giz_hand = -1; panel_grab = -1;
+    play_fall = 0; play_grounded = 0;
+    if (on) {
+        ed.main.visible = 0;
+        ed.selected = 0;
+        if (ed.rig_pos.y < 0) ed.rig_pos.y = 0;
+    } else {
+        ed.rig_pos.y = fmaxf(ed.rig_pos.y, 0.0f);
+        ed_summon_panel();
+        ed_toast("Back to building.");
+    }
+    plat_sound(SND_OPEN);
+}
+
+static void play_update(void) {
+    for (int h = 0; h < 2; h++) { hover_id[h] = 0; laser_len[h] = 0; laser_hit[h] = 0; giz_hover[h] = -1; ed.hand_on[h] = 0; net_set_aim(h, 0, v3(0, 0, 0), v3(0, 0, 0)); }
+    ghost_on = 0;
+    HandIn *l = &in.hand[0], *r = &in.hand[1];
+    float yaw = ed_front_yaw();
+    V3 feet = v3(ed.head.p.x, ed.rig_pos.y, ed.head.p.z);
+
+    /* walk: slide along whatever is in the way */
+    float sx = l->active && fabsf(l->sx) > 0.15f ? l->sx : 0, sy = l->active && fabsf(l->sy) > 0.15f ? l->sy : 0;
+    V3 step = v3mul(v3add(v3mul(v3(-sinf(yaw), 0, -cosf(yaw)), sy), v3mul(v3(cosf(yaw), 0, -sinf(yaw)), sx)), cfg.speed * ed.dt);
+    if (step.x != 0 && !blocked_at(feet.x + step.x, feet.z, feet.y)) { ed.rig_pos.x += step.x; feet.x += step.x; }
+    if (step.z != 0 && !blocked_at(feet.x, feet.z + step.z, feet.y)) { ed.rig_pos.z += step.z; feet.z += step.z; }
+
+    /* turn in steps, about where you stand */
+    if (r->active && !play_turned && fabsf(r->sx) > 0.7f) {
+        V3 before = pose_pt(rig(), in.head.p);
+        ed.rig_yaw += r->sx > 0 ? -FX_PI / 6 : FX_PI / 6;
+        V3 after = pose_pt(rig(), in.head.p);
+        ed.rig_pos.x += before.x - after.x; ed.rig_pos.z += before.z - after.z;
+        play_turned = 1;
+    }
+    if (!r->active || fabsf(r->sx) < 0.3f) play_turned = 0;
+
+    /* jump, fall, land */
+    if (btn_hit[1][0] && play_grounded) { play_fall = 4.0f; play_grounded = 0; plat_sound(SND_GRAB); }
+    float ground = ground_under(feet.x, feet.z, ed.rig_pos.y);
+    if (!play_grounded || ed.rig_pos.y > ground + 0.001f) {
+        play_fall -= 12.0f * ed.dt;
+        ed.rig_pos.y += play_fall * ed.dt;
+        play_grounded = 0;
+        if (ed.rig_pos.y <= ground && play_fall <= 0) { ed.rig_pos.y = ground; play_fall = 0; play_grounded = 1; }
+    } else {
+        ed.rig_pos.y = ground; play_fall = 0;        /* stepping up onto low things */
+    }
+    if (ed.rig_pos.y < -25.0f) {                     /* fell off the plate: back to the middle */
+        ed.rig_pos.y = 6.0f; play_fall = 0;
+        ed.rig_pos.x += 0 - feet.x; ed.rig_pos.z += 2.0f - feet.z;
+        plat_sound(SND_ERROR);
+    }
+}
+
 static void hands_in_world(void) {
     ghost_on = 0;
     for (int h = 0; h < 2; h++) {
@@ -676,6 +775,10 @@ static void hands_in_world(void) {
 }
 
 static void buttons(void) {
+    if (ed.playing) {                              /* Y, X or the menu button stops playing; A jumps (see play_update) */
+        if (btn_hit[0][0] || btn_hit[0][1] || btn_hit[0][3]) ed_play(0);
+        return;
+    }
     if (btn_hit[1][0]) {                         /* A */
         if (scene_undo()) { ed_toast("Undone."); plat_sound(SND_CLICK); if (!scene_find(ed.selected)) ed.selected = 0; }
         else ed_toast("Nothing to undo.");
@@ -704,7 +807,8 @@ static void buttons(void) {
 static void queue_lines(void) {
     static const float CYAN[4] = {0.31f, 0.89f, 0.96f, 0.95f}, VIOLET[4] = {0.62f, 0.45f, 1.0f, 0.95f};
     gfx_ribbons_clear();
-    gfx_ribbon_layer(1);                           /* your lasers are drawn over the panels, never behind them */
+    gfx_ribbon_layer(1);
+    if (ed.playing) { gfx_ribbon_layer(0); goto others; }                           /* your lasers are drawn over the panels, never behind them */
     for (int h = 0; h < 2; h++) {
         if (!in.hand[h].active || laser_len[h] <= 0) continue;
         const float *c = h ? CYAN : VIOLET;
@@ -713,6 +817,7 @@ static void queue_lines(void) {
         gfx_ribbon(a, b, laser_hit[h] ? 0.006f : 0.004f, c, end);
     }
     gfx_ribbon_layer(0);
+others:
     for (int i = 0; i < MAX_PEERS; i++) {          /* the other players' lasers, each in their own colour */
         Peer *p = &g_peers[i];
         if (!p->used) continue;
@@ -721,7 +826,7 @@ static void queue_lines(void) {
         float c1[4] = {c0[0], c0[1], c0[2], 0.5f};
         for (int h = 0; h < 2; h++) if (p->aim_on[h]) gfx_ribbon(p->aim_from[h], p->aim_to[h], 0.014f, c1, c0);
     }
-    Obj *s = scene_find(ed.selected);
+    Obj *s = ed.playing ? NULL : scene_find(ed.selected);
     if (s && !(s->flags & OBJ_LOCKED) && ed.tool < 0 && !net_locked_out()) {       /* the handles' lines */
         static const float GC[3][4] = {{0.96f, 0.25f, 0.37f, 0.95f}, {0.29f, 0.87f, 0.50f, 0.95f}, {0.23f, 0.51f, 0.96f, 0.95f}};
         float w = 0.005f + 0.004f * giz_far(s);
@@ -757,6 +862,7 @@ void app_update(const FrameIn *fi) {
     if (ed.time - fps_t0 >= 0.5) { ed.fps = (float)(frames / (ed.time - fps_t0)); frames = 0; fps_t0 = ed.time; }
     place_panels();
 
+    if (ed.playing) ed.main.visible = 0;
     Panel *panels[3 + CURSORS] = {&ed.main, &ed.kb, &ed.side};
     for (int i = 0; i < CURSORS; i++) {            /* each other player's arrow, on a little panel of its own that faces you */
         Peer *p = &g_peers[i / 2];
@@ -783,7 +889,7 @@ void app_update(const FrameIn *fi) {
     }
     net_listen_rooms(ed.main.visible && ed.tab == TAB_ROOMS);
 
-    hands_in_world();
+    if (ed.playing) play_update(); else hands_in_world();
     buttons();
     if (ed.v_follow) ed.v_target = v3lerp(ed.v_target, v3(ed.head.p.x, ed.head.p.y - 0.5f, ed.head.p.z), fclamp(ed.dt * 4, 0, 1));
     if (ed.selected && !scene_find(ed.selected)) ed.selected = 0;
@@ -837,7 +943,7 @@ static void draw_world(const Cam *c, int viewer) {
     gfx_shapes_begin(c, t);
     for (int i = 0; i < g_obj_count; i++) {
         const Obj *o = &g_obj[i];
-        float glow = o->id == ed.selected ? 0.75f : (o->id == hover_id[0] || o->id == hover_id[1]) ? 0.3f : 0.0f;
+        float glow = ed.playing ? 0.0f : o->id == ed.selected ? 0.75f : (o->id == hover_id[0] || o->id == hover_id[1]) ? 0.3f : 0.0f;
         gfx_shape(o->shape, o->pos, o->rot, o->scale, obj_color(o), 1, glow);
     }
     for (int i = 0; i < MAX_PEERS; i++)

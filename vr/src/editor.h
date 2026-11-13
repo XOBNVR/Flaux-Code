@@ -31,6 +31,7 @@ typedef struct {
     Panel main, kb, side;        /* side: the list of objects, always showing */
     int xform;                    /* what the handles on the selected shape do: 0 move, 1 turn, 2 size */
     int room_public;
+    int playing;                  /* play mode: the editor is put away and you walk about in your build */
     char project[32], data_dir[256], player[20];
     double time; float dt, fps;
     RT viewer; float v_yaw, v_pitch, v_dist; V3 v_target; int v_follow;
@@ -54,6 +55,7 @@ void ed_duplicate_selected(void);
 V3 ed_front_point(float dist);          /* a spot on the plate in front of you */
 float ed_front_yaw(void);
 void ed_teleport(V3 p);
+void ed_play(int on);
 Cam ed_viewer_cam(void);
 void ed_viewer_pick(float u, float v);
 void ed_save_settings(void);
