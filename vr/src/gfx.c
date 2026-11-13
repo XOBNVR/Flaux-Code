@@ -395,6 +395,7 @@ static void bake_nebula(void) {
 }
 
 void gfx_init(void) {
+    plat_stage("shaders");
     p_nebula = gfx_program(VS_FULL, FS_NEBULA, "nebula");
     p_sky = gfx_program(VS_FULL, FS_SKY, "sky");
     p_stars = gfx_program(VS_STARS, FS_STARS, "stars");
@@ -407,9 +408,12 @@ void gfx_init(void) {
     u_shape_color = glGetUniformLocation(p_shape, "u_color"); u_shape_alpha = glGetUniformLocation(p_shape, "u_alpha");
     u_shape_glow = glGetUniformLocation(p_shape, "u_glow"); u_shadow_model = glGetUniformLocation(p_shadow, "u_model");
     glGenVertexArrays(1, &vao_empty);
+    plat_stage("meshes");
     build_meshes();
+    plat_stage("stars");
     build_stars();
-    bake_nebula();
+    plat_stage("nebula");
+    if (!plat_skip("nebula")) bake_nebula();
     glGenVertexArrays(1, &vao_ribbon); glBindVertexArray(vao_ribbon);
     glGenBuffers(1, &vbo_ribbon); glBindBuffer(GL_ARRAY_BUFFER, vbo_ribbon);
     glEnableVertexAttribArray(0); glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 32, (void *)0);

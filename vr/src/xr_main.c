@@ -8,6 +8,8 @@
 #include "editor.h"
 
 #include <EGL/egl.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -51,7 +53,7 @@ static struct android_app *g_app;
 #include <dlfcn.h>
 #include <signal.h>
 #include <ucontext.h>
-static int crash_fd = -1;
+static int crash_fd = -1, crash_note_fd = -1;
 static uintptr_t lib_base;
 
 static void crash_hex(const char *label, uintptr_t v) {
@@ -60,6 +62,17 @@ static void crash_hex(const char *label, uintptr_t v) {
     for (int i = 60; i >= 0; i -= 4) buf[n++] = "0123456789abcdef"[(v >> i) & 15];
     buf[n++] = '\n';
     if (write(crash_fd, buf, (size_t)n) < 0) return;
+}
+
+static void crash_note(const char *label, uintptr_t v) {       /* short: it gets shown as text in the headset */
+    char buf[32]; int n = 0, started = 0;
+    while (label[n]) { buf[n] = label[n]; n++; }
+    for (int i = 60; i >= 0; i -= 4) {
+        int d = (int)((v >> i) & 15);
+        if (d || started || i == 0) { buf[n++] = "0123456789ABCDEF"[d]; started = 1; }
+    }
+    buf[n++] = ' ';
+    if (crash_note_fd >= 0 && write(crash_note_fd, buf, (size_t)n) < 0) crash_note_fd = -1;
 }
 
 static void on_crash(int sig, siginfo_t *info, void *context) {
@@ -75,6 +88,15 @@ static void on_crash(int sig, siginfo_t *info, void *context) {
 #endif
         crash_hex("libbase ", lib_base);
         fsync(crash_fd);
+    }
+    if (crash_note_fd >= 0) {
+        crash_note("SIG ", (uintptr_t)sig);
+#ifdef __aarch64__
+        ucontext_t *uc2 = context;                 /* where in libflauxvr.so (or outside it: then the number is huge) */
+        crash_note("PC ", (uintptr_t)uc2->uc_mcontext.pc - lib_base);
+        crash_note("LR ", (uintptr_t)uc2->uc_mcontext.regs[30] - lib_base);
+#endif
+        fsync(crash_note_fd);
     }
     signal(sig, SIG_DFL);        /* then let Android report it the usual way */
     raise(sig);
@@ -184,6 +206,160 @@ void plat_sound(int id) { (void)id; }
 static void sound_init(void) {}
 #endif
 
+/* ---------- starting in steps ----------
+ * Each step of starting up is written to boot.txt before it's done.  If the app dies, the next
+ * start reads which step it was: a step the app can live without (sound, smooth edges, the
+ * controller models...) is left out from then on, and either way the headset shows, in big plain
+ * letters drawn without any shaders, where it stopped, so it can simply be read out. */
+
+static char boot_dir[400], boot_last[64], boot_crash[96], boot_skips[256];
+static int boot_tries;                /* starts in a row that stopped at the same step (0: last time was fine) */
+static int boot_hold;                 /* frames left to show the notice; -1: stay on it */
+static const char *boot_lines[5]; static int boot_line_count;
+static char boot_text[5][48];
+
+static int boot_optional(const char *stage) {
+    static const char *const names[] = {"sound", "smooth-edges", "nebula", "thumbnails", "controllers"};
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) if (!strcmp(stage, names[i])) return 1;
+    return 0;
+}
+
+static void boot_write(const char *name, const char *text) {
+    if (!boot_dir[0]) return;
+    char path[480]; snprintf(path, sizeof path, "%s/%s", boot_dir, name);
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fputs(text, f);
+    fflush(f); fsync(fileno(f));
+    fclose(f);
+}
+
+static void boot_read(const char *name, char *out, size_t n) {
+    out[0] = 0;
+    char path[480]; snprintf(path, sizeof path, "%s/%s", boot_dir, name);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    size_t k = fread(out, 1, n - 1, f);
+    out[k] = 0;
+    fclose(f);
+    for (char *c = out; *c; c++) if (*c == '\n' || *c == '\r') *c = ' ';
+    while (k > 0 && out[k - 1] == ' ') out[--k] = 0;
+}
+
+void plat_stage(const char *name) {
+    LOGI("step: %s", name);
+    boot_write("boot.txt", name);
+}
+
+int plat_skip(const char *name) {
+    char key[40]; snprintf(key, sizeof key, " %s ", name);
+    return strstr(boot_skips, key) != NULL;
+}
+
+static void boot_begin(const char *dir) {
+    snprintf(boot_dir, sizeof boot_dir, "%s", dir ? dir : "");
+    if (!boot_dir[0]) return;
+    char skips[240];
+    boot_read("boot.txt", boot_last, sizeof boot_last);
+    boot_read("crash.txt", boot_crash, sizeof boot_crash);
+    boot_read("skip.txt", skips, sizeof skips);
+    snprintf(boot_skips, sizeof boot_skips, " %s ", skips);
+    if (!strcmp(boot_last, "done") || !strcmp(boot_last, "notice")) boot_last[0] = 0;       /* last time went fine */
+    if (boot_last[0]) {
+        char tries[96], was[64] = ""; int n = 0;
+        boot_read("tries.txt", tries, sizeof tries);
+        sscanf(tries, "%d %63s", &n, was);
+        boot_tries = strcmp(was, boot_last) == 0 ? n + 1 : 1;
+        snprintf(tries, sizeof tries, "%d %s", boot_tries, boot_last);
+        boot_write("tries.txt", tries);
+        LOGI("last start stopped at \"%s\" %s (%d in a row)", boot_last, boot_crash, boot_tries);
+        if (boot_optional(boot_last) && !plat_skip(boot_last)) {
+            snprintf(skips + strlen(skips), sizeof skips - strlen(skips), " %s", boot_last);
+            boot_write("skip.txt", skips);
+            snprintf(boot_skips, sizeof boot_skips, " %s ", skips);
+        }
+    }
+    else boot_write("tries.txt", "0 -");
+    boot_write("crash.txt", "");
+#ifdef __ANDROID__
+    char path[480]; snprintf(path, sizeof path, "%s/crash.txt", boot_dir);
+    crash_note_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+#endif
+    plat_stage("egl");
+}
+
+/* what to show before the editor itself is up */
+static void boot_notice(void) {
+    static const char *const core_after[] = {"shaders", "meshes", "stars", "font", "scene", "viewer", "project", "first-update", "first-draw"};
+    int app_step = 0;
+    for (size_t i = 0; i < sizeof core_after / sizeof core_after[0]; i++) if (!strcmp(boot_last, core_after[i])) app_step = 1;
+    snprintf(boot_text[0], sizeof boot_text[0], "FLAUX VR " FX_VERSION);
+    boot_line_count = 2;
+    if (!boot_last[0]) {
+        snprintf(boot_text[1], sizeof boot_text[1], "STARTING");
+        boot_hold = 12;
+    } else {
+        snprintf(boot_text[1], sizeof boot_text[1], "LAST START STOPPED AT");
+        snprintf(boot_text[2], sizeof boot_text[2], "%.40s", boot_last);
+        snprintf(boot_text[3], sizeof boot_text[3], "%.44s", boot_crash[0] ? boot_crash : "NO CRASH NOTE");
+        if (boot_optional(boot_last)) { snprintf(boot_text[4], sizeof boot_text[4], "LEAVING THAT OUT NOW"); boot_hold = 320; }
+        else if (app_step) { snprintf(boot_text[4], sizeof boot_text[4], "TELL CLAUDE THESE LINES"); boot_hold = -1; }
+        else { snprintf(boot_text[4], sizeof boot_text[4], "TRYING AGAIN"); boot_hold = 320; }
+        boot_line_count = 5;
+        if (boot_hold < 0) boot_write("boot.txt", "notice");      /* the start after this one tries afresh */
+    }
+    for (int i = 0; i < 5; i++) boot_lines[i] = boot_text[i];
+}
+
+/* five-by-seven letters, one byte per column, lowest bit at the top */
+static const unsigned char *letter(char c) {
+    static const unsigned char digits[10][5] = {
+        {0x3E, 0x51, 0x49, 0x45, 0x3E}, {0x00, 0x42, 0x7F, 0x40, 0x00}, {0x42, 0x61, 0x51, 0x49, 0x46}, {0x21, 0x41, 0x45, 0x4B, 0x31},
+        {0x18, 0x14, 0x12, 0x7F, 0x10}, {0x27, 0x45, 0x45, 0x45, 0x39}, {0x3C, 0x4A, 0x49, 0x49, 0x30}, {0x01, 0x71, 0x09, 0x05, 0x03},
+        {0x36, 0x49, 0x49, 0x49, 0x36}, {0x06, 0x49, 0x49, 0x29, 0x1E}};
+    static const unsigned char letters[26][5] = {
+        {0x7E, 0x11, 0x11, 0x11, 0x7E}, {0x7F, 0x49, 0x49, 0x49, 0x36}, {0x3E, 0x41, 0x41, 0x41, 0x22}, {0x7F, 0x41, 0x41, 0x22, 0x1C},
+        {0x7F, 0x49, 0x49, 0x49, 0x41}, {0x7F, 0x09, 0x09, 0x09, 0x01}, {0x3E, 0x41, 0x49, 0x49, 0x7A}, {0x7F, 0x08, 0x08, 0x08, 0x7F},
+        {0x00, 0x41, 0x7F, 0x41, 0x00}, {0x20, 0x40, 0x41, 0x3F, 0x01}, {0x7F, 0x08, 0x14, 0x22, 0x41}, {0x7F, 0x40, 0x40, 0x40, 0x40},
+        {0x7F, 0x02, 0x0C, 0x02, 0x7F}, {0x7F, 0x04, 0x08, 0x10, 0x7F}, {0x3E, 0x41, 0x41, 0x41, 0x3E}, {0x7F, 0x09, 0x09, 0x09, 0x06},
+        {0x3E, 0x41, 0x51, 0x21, 0x5E}, {0x7F, 0x09, 0x19, 0x29, 0x46}, {0x46, 0x49, 0x49, 0x49, 0x31}, {0x01, 0x01, 0x7F, 0x01, 0x01},
+        {0x3F, 0x40, 0x40, 0x40, 0x3F}, {0x1F, 0x20, 0x40, 0x20, 0x1F}, {0x3F, 0x40, 0x38, 0x40, 0x3F}, {0x63, 0x14, 0x08, 0x14, 0x63},
+        {0x07, 0x08, 0x70, 0x08, 0x07}, {0x61, 0x51, 0x49, 0x45, 0x43}};
+    static const unsigned char dash[5] = {0x08, 0x08, 0x08, 0x08, 0x08}, dot[5] = {0x00, 0x60, 0x60, 0x00, 0x00},
+                               colon[5] = {0x00, 0x36, 0x36, 0x00, 0x00}, blank[5] = {0, 0, 0, 0, 0};
+    if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+    if (c >= '0' && c <= '9') return digits[c - '0'];
+    if (c >= 'A' && c <= 'Z') return letters[c - 'A'];
+    return c == '-' || c == '_' ? dash : c == '.' ? dot : c == ':' ? colon : blank;
+}
+
+/* the notice, into one eye's picture: nothing but clearing little squares */
+static void boot_draw(GLuint fbo, int w, int h) {
+    int cell = h / 230 < 1 ? 1 : h / 230;
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glViewport(0, 0, w, h);
+    glDisable(GL_SCISSOR_TEST); glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.010f, 0.014f, 0.050f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glEnable(GL_SCISSOR_TEST);
+    for (int l = 0; l < boot_line_count; l++) {
+        const char *text = boot_lines[l];
+        int n = (int)strlen(text);
+        int x0 = (w - n * 6 * cell) / 2, y0 = h / 2 + (boot_line_count * 5 - l * 10) * cell;
+        if (l == 2 || l == 3) glClearColor(0.25f, 0.85f, 0.95f, 1.0f); else glClearColor(0.9f, 0.9f, 1.0f, 1.0f);
+        for (int i = 0; i < n; i++) {
+            const unsigned char *g = letter(text[i]);
+            for (int cx = 0; cx < 5; cx++)
+                for (int cy = 0; cy < 7; cy++)
+                    if (g[cx] & (1 << cy)) {
+                        glScissor(x0 + (i * 6 + cx) * cell, y0 - (cy + 1) * cell, cell, cell);
+                        glClear(GL_COLOR_BUFFER_BIT);
+                    }
+        }
+    }
+    glDisable(GL_SCISSOR_TEST);
+}
+
 /* ---------- OpenGL ES ---------- */
 
 static EGLDisplay egl_dpy = EGL_NO_DISPLAY;
@@ -232,7 +408,7 @@ static XrSystemId xr_system;
 static XrSession xr_session;
 static XrSpace xr_stage, xr_view, xr_aim[2], xr_grip[2];
 static XrSessionState xr_state = XR_SESSION_STATE_UNKNOWN;
-static int xr_running, xr_focused, g_ready, frames_drawn;
+static int xr_running, xr_focused, g_ready, g_resumed, frames_drawn;
 static uint32_t last_image;
 static Eye eyes[2];
 static GLuint ms_fbo, ms_color, ms_depth;
@@ -319,6 +495,7 @@ static int xr_make_actions(void) {
 
 static int xr_init(void) {
     LOGI("OpenXR: starting");
+    plat_stage("xr-loader");
     XrInstanceCreateInfo ci = {XR_TYPE_INSTANCE_CREATE_INFO};
 #ifdef __ANDROID__
     /* the loader has to be told about Android before anything else */
@@ -340,15 +517,20 @@ static int xr_init(void) {
     snprintf(ci.applicationInfo.applicationName, sizeof ci.applicationInfo.applicationName, "Flaux VR");
     snprintf(ci.applicationInfo.engineName, sizeof ci.applicationInfo.engineName, "Flaux");
     ci.applicationInfo.applicationVersion = 2; ci.applicationInfo.engineVersion = 2;
-    ci.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
     ci.enabledExtensionCount = 2; ci.enabledExtensionNames = exts;
-    if (!XR_OK(xrCreateInstance(&ci, &xr_instance))) return 0;
+    plat_stage("xr-instance");
+    ci.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
+    if (!XR_OK(xrCreateInstance(&ci, &xr_instance))) {
+        ci.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
+        if (!XR_OK(xrCreateInstance(&ci, &xr_instance))) return 0;
+    }
     LOGI("OpenXR: instance made");
 
     XrSystemGetInfo gi = {XR_TYPE_SYSTEM_GET_INFO};
     gi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     if (!XR_OK(xrGetSystem(xr_instance, &gi, &xr_system))) return 0;
     LOGI("OpenXR: headset found");
+    plat_stage("xr-session");
 
     /* OpenXR insists on being asked this before a session is made (extension calls are looked up by name) */
     XrResult (*get_requirements)(XrInstance, XrSystemId, XrGraphicsRequirementsOpenGLESKHR *) = NULL;
@@ -367,6 +549,7 @@ static int xr_init(void) {
     sc.next = &gb; sc.systemId = xr_system;
     if (!XR_OK(xrCreateSession(xr_instance, &sc, &xr_session))) return 0;
     LOGI("OpenXR: session made");
+    plat_stage("xr-eyes");
 
     /* the floor is y = 0 where the headset knows where the floor is */
     uint32_t nspaces = 0; XrReferenceSpaceType spaces[16];
@@ -377,7 +560,10 @@ static int xr_init(void) {
     rs.poseInReferenceSpace.orientation.w = 1;
     rs.referenceSpaceType = has_stage ? XR_REFERENCE_SPACE_TYPE_STAGE : XR_REFERENCE_SPACE_TYPE_LOCAL;
     if (!has_stage) rs.poseInReferenceSpace.position.y = -1.5f;      /* guess: your eyes started 1.5 m up */
-    if (!XR_OK(xrCreateReferenceSpace(xr_session, &rs, &xr_stage))) return 0;
+    if (!XR_OK(xrCreateReferenceSpace(xr_session, &rs, &xr_stage))) {
+        rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL; rs.poseInReferenceSpace.position.y = -1.5f; has_stage = 0;
+        if (!XR_OK(xrCreateReferenceSpace(xr_session, &rs, &xr_stage))) return 0;
+    }
     rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW; rs.poseInReferenceSpace.position.y = 0;
     if (!XR_OK(xrCreateReferenceSpace(xr_session, &rs, &xr_view))) return 0;
 
@@ -399,7 +585,13 @@ static int xr_init(void) {
         si.format = format; si.sampleCount = 1;
         si.width = vc[e].recommendedImageRectWidth; si.height = vc[e].recommendedImageRectHeight;
         si.faceCount = 1; si.arraySize = 1; si.mipCount = 1;
-        if (!XR_OK(xrCreateSwapchain(xr_session, &si, &eyes[e].handle))) return 0;
+        if (!XR_OK(xrCreateSwapchain(xr_session, &si, &eyes[e].handle))) {
+            int64_t other = format == GL_SRGB8_ALPHA8 ? GL_RGBA8 : GL_SRGB8_ALPHA8;
+            if (e != 0) return 0;
+            LOGI("that colour format was refused; trying 0x%x", (unsigned)other);
+            format = other; g_encode = format == GL_RGBA8; si.format = format;
+            if (!XR_OK(xrCreateSwapchain(xr_session, &si, &eyes[e].handle))) return 0;
+        }
         eyes[e].w = (int)si.width; eyes[e].h = (int)si.height;
         for (int i = 0; i < MAX_IMAGES; i++) eyes[e].images[i].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR;
         if (!XR_OK(xrEnumerateSwapchainImages(eyes[e].handle, MAX_IMAGES, &eyes[e].count, (XrSwapchainImageBaseHeader *)eyes[e].images)))
@@ -415,7 +607,9 @@ static int xr_init(void) {
 
     /* smooth edges: draw into a multisampled buffer, then copy to the eye's picture */
     GLint max_samples = 1; glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
+    plat_stage("smooth-edges");
     int samples = max_samples >= 4 ? 4 : max_samples;
+    if (plat_skip("smooth-edges")) samples = 1;
     if (getenv("FLAUX_NO_MSAA")) samples = 1;
     glGenFramebuffers(1, &ms_fbo); glBindFramebuffer(GL_FRAMEBUFFER, ms_fbo);
     glGenRenderbuffers(1, &ms_color); glBindRenderbuffer(GL_RENDERBUFFER, ms_color);
@@ -439,9 +633,10 @@ static int xr_init(void) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     LOGI("drawing buffers ready (GL error 0x%x)", glGetError());
 
+    plat_stage("xr-controls");
     int actions = xr_make_actions();
-    LOGI("OpenXR: controls %s", actions ? "ready" : "FAILED");
-    return actions;
+    LOGI("OpenXR: controls %s", actions ? "ready" : "FAILED (carrying on without controllers)");
+    return 1;
 }
 
 static Pose to_pose(XrPosef p) {
@@ -481,7 +676,7 @@ static void xr_events(void) {
                 bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
                 xr_running = XR_OK(xrBeginSession(xr_session, &bi));
             } else if (xr_state == XR_SESSION_STATE_STOPPING) {
-                app_pause();
+                if (g_ready) app_pause();
                 xrEndSession(xr_session); xr_running = 0;
             } else if (xr_state == XR_SESSION_STATE_EXITING || xr_state == XR_SESSION_STATE_LOSS_PENDING) {
                 g_quit = 1;
@@ -494,8 +689,22 @@ static void xr_events(void) {
     }
 }
 
+static const char *g_dir;
+#ifndef __ANDROID__
+__attribute__((unused)) static void unused_on_pc(void) { (void)g_resumed; }
+#endif
+
+static void start_editor(void) {
+    plat_stage("sound");
+    if (!plat_skip("sound")) sound_init();
+    app_init(g_dir);
+    g_ready = 1;
+    LOGI("ready; projects are kept in %s", g_dir);
+}
+
 static void xr_frame(void) {
     static XrTime last_time; static double clock_s; static FrameIn fi;
+    static int first_update = 1, first_draw = 1, said_done;
     XrFrameState fs = {XR_TYPE_FRAME_STATE};
     if (!XR_OK(xrWaitFrame(xr_session, NULL, &fs))) { usleep(10000); return; }
     if (!XR_OK(xrBeginFrame(xr_session, NULL))) return;
@@ -543,8 +752,15 @@ static void xr_frame(void) {
 
             if (frames_drawn < 2) LOGI("frame %d: head at %.2f %.2f %.2f, hands %d %d", frames_drawn, (double)fi.head.p.x, (double)fi.head.p.y,
                                        (double)fi.head.p.z, fi.hand[0].active, fi.hand[1].active);
-            app_update(&fi);
-            app_prerender();
+            if (!g_ready) {                       /* the notice is up; when its time is over, start the editor */
+                if (boot_hold > 0) boot_hold--;
+                else if (boot_hold == 0) start_editor();
+            }
+            if (g_ready) {
+                if (first_update) { plat_stage("first-update"); first_update = 0; }
+                app_update(&fi);
+                app_prerender();
+            }
             if (frames_drawn < 2) LOGI("frame %d: updated", frames_drawn);
 
             for (int e = 0; e < 2; e++) {
@@ -556,7 +772,10 @@ static void xr_frame(void) {
                 ev.pose = to_pose(views[e].pose);
                 ev.l = views[e].fov.angleLeft; ev.r = views[e].fov.angleRight; ev.u = views[e].fov.angleUp; ev.d = views[e].fov.angleDown;
                 ev.w = eyes[e].w; ev.h = eyes[e].h;
-                if (ms_fbo) {
+                if (g_ready && first_draw) { plat_stage("first-draw"); first_draw = 0; }
+                if (!g_ready) {
+                    boot_draw(eyes[e].fbo[index], ev.w, ev.h);
+                } else if (ms_fbo) {
                     app_render(&ev, ms_fbo);
                     glBindFramebuffer(GL_READ_FRAMEBUFFER, ms_fbo);
                     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, eyes[e].fbo[index]);
@@ -574,7 +793,7 @@ static void xr_frame(void) {
                 drawn++;
             }
 
-            for (int h = 0; h < 2; h++) {
+            for (int h = 0; h < 2 && g_ready; h++) {
                 float amount = app_haptic(h);
                 if (amount <= 0.01f || !synced) continue;
                 XrHapticVibration vib = {XR_TYPE_HAPTIC_VIBRATION};
@@ -589,6 +808,7 @@ static void xr_frame(void) {
     end.displayTime = fs.predictedDisplayTime; end.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     if (drawn == 2) {
         frames_drawn++;
+        if (g_ready && !first_draw && said_done < 5 && ++said_done == 5) plat_stage("done");
         layer.space = xr_stage; layer.viewCount = 2; layer.views = pv;
         end.layerCount = 1; end.layers = layers;
     }
@@ -600,7 +820,7 @@ static void xr_frame(void) {
 
 static void shutdown_all(int ok) {
     if (ok) {
-        app_pause();
+        if (g_ready) app_pause();
         if (xr_running && xr_state == XR_SESSION_STATE_STOPPING) xrEndSession(xr_session);
     }
     if (xr_session) xrDestroySession(xr_session);
@@ -617,7 +837,8 @@ static void shutdown_all(int ok) {
 
 static void on_cmd(struct android_app *app, int32_t cmd) {
     switch (cmd) {
-    case APP_CMD_PAUSE: if (g_ready) app_pause(); break;
+    case APP_CMD_RESUME: g_resumed = 1; break;
+    case APP_CMD_PAUSE: g_resumed = 0; if (g_ready) app_pause(); break;
     case APP_CMD_DESTROY: g_quit = 1; break;
     default: break;
     }
@@ -635,15 +856,22 @@ void android_main(struct android_app *app) {
     }
     watch_for_crashes();
     LOGI("Flaux VR " FX_VERSION " starting");
+    g_dir = dir ? dir : "/data/local/tmp";
+    boot_begin(dir);
+    if (boot_tries % 2 == 1) {                    /* it stopped early last time: this time, wait until the app is in front */
+        LOGI("waiting to be in front before starting OpenXR");
+        for (int waited = 0; waited < 40 && !g_resumed && !app->destroyRequested; waited++) {
+            int events; struct android_poll_source *src = NULL;
+            while (ALooper_pollOnce(100, NULL, &events, (void **)&src) >= 0) { if (src) src->process(app, src); src = NULL; }
+        }
+    }
 
     int ok = egl_init() && xr_init();
     if (ok) {
-        sound_init();
-        LOGI("sound ready; starting the editor");
-        app_init(dir ? dir : "/data/local/tmp");
-        g_ready = 1;
-        LOGI("ready; projects are kept in %s", dir);
+        plat_stage("xr-wait");                   /* the editor itself starts a moment after the first pictures */
+        boot_notice();
     } else {
+        boot_write("boot.txt", "openxr-refused");
         LOGE("Flaux VR couldn't start. It needs a headset with OpenXR (a Meta Quest).");
         ANativeActivity_finish(app->activity);
     }
@@ -672,10 +900,23 @@ void android_main(struct android_app *app) {
 int main(int argc, char **argv) {
     int want = argc > 2 ? atoi(argv[2]) : 200;
     const char *dir = argc > 1 ? argv[1] : "build/xr_data";
+    mkdir(dir, 0775);
+    g_dir = dir;
+    boot_begin(dir);
     if (!(egl_init() && xr_init())) { LOGE("couldn't start"); shutdown_all(0); return 1; }
-    sound_init();
-    app_init(dir);
-    g_ready = 1;
+    plat_stage("xr-wait");
+    boot_notice();
+    if (getenv("FLAUX_NOTICE_PICTURE")) {          /* see the notice at a headset's size */
+        RT big; rt_create(&big, 1024, 1024, 1);
+        boot_draw(big.fbo, 1024, 1024);
+        unsigned char *px = malloc(1024 * 1024 * 4);
+        glBindFramebuffer(GL_FRAMEBUFFER, big.fbo);
+        glReadPixels(0, 0, 1024, 1024, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        FILE *f = fopen(getenv("FLAUX_NOTICE_PICTURE"), "wb");
+        fprintf(f, "P6\n1024 1024\n255\n");
+        for (int y = 1023; y >= 0; y--) for (int x = 0; x < 1024; x++) fwrite(px + ((size_t)y * 1024 + x) * 4, 1, 3, f);
+        fclose(f); free(px);
+    }
     int frames = 0;
     for (int spins = 0; spins < 3000 && frames < want && !g_quit; spins++) {
         xr_events();

@@ -27,6 +27,8 @@ void *plat_asset(const char *name, size_t *size) {
 }
 void plat_log(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vfprintf(stderr, fmt, ap); va_end(ap); fputc('\n', stderr); }
 void plat_sound(int id) { if (id >= 0 && id < SND_COUNT) sounds[id]++; }
+void plat_stage(const char *name) { (void)name; }
+int plat_skip(const char *name) { (void)name; return 0; }
 
 static Q4 look(V3 d) {
     d = v3norm(d);

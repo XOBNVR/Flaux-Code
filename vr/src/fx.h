@@ -19,7 +19,7 @@
 #include <string.h>
 #include <GLES3/gl3.h>
 
-#define FX_VERSION "2.3.0"
+#define FX_VERSION "2.4.0"
 #define FX_PI 3.14159265358979f
 
 /* ---------- maths ---------- */
@@ -125,6 +125,8 @@ typedef struct { Pose pose; float l, r, u, d; int w, h; } EyeView;   /* fov angl
 void *plat_asset(const char *name, size_t *size);   /* malloc'd; NULL if missing */
 void plat_log(const char *fmt, ...);
 void plat_sound(int id);
+void plat_stage(const char *name);      /* "I'm about to do this": if the app dies here, the next start knows where */
+int plat_skip(const char *name);        /* this step crashed the app last time: leave it out */
 enum { SND_CLICK, SND_PLACE, SND_DELETE, SND_GRAB, SND_ERROR, SND_OPEN, SND_COUNT };
 
 /* ---------- the app (editor.c) ---------- */

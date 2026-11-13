@@ -29,12 +29,25 @@ It needs the two Touch controllers (you see them in your hands, with a laser fro
 
 ### If it won't start
 
-Flaux VR writes down what it's doing as it starts, in
-`Android/data/com.xobnvr.flaux/files/log.txt` on the headset. Plug the headset
-into a computer, allow file access in the headset, and open that file (or run
-`adb logcat -s FlauxVR`). The last line says how far it got; if it crashed,
-the file ends with `CRASH` and where. If there's no `log.txt` at all, the app
-never got as far as running.
+Flaux VR starts in small steps and remembers which step it was on. If it
+closes, **start it again**:
+
+- If the step it died on is one it can live without (sound, smooth edges,
+  the nebula, the controller models), it leaves that out from now on and
+  tells you so for a few seconds.
+- Otherwise it stays on a dark screen with a few lines of big text saying
+  where it stopped, instead of closing again. Read those lines out to
+  whoever is fixing it. Starting once more tries afresh.
+
+The same steps are written to
+`Android/data/com.xobnvr.flaux/files/log.txt` on the headset (or see
+`adb logcat -s FlauxVR`), with `boot.txt` (the last step) and `crash.txt`
+beside it. `build.sh` keeps an unstripped copy of the library in
+`build/symbols/` to turn a `PC` number from the notice into a line of code:
+
+```
+llvm-addr2line -f -e build/symbols/libflauxvr-2.4.0.so 0x1A2B4
+```
 
 ## Controls
 

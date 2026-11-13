@@ -369,14 +369,22 @@ void app_init(const char *data_dir) {
     load_settings();
 
     gfx_init();
+    plat_stage("font");
     ui_init();
+    plat_stage("scene");
     scene_init();
     net_init(ed.player);
+    plat_stage("viewer");
     rt_create(&ed.viewer, 1308, 816, 4);
-    gfx_thumbnails(&ed.thumbs);
-    controller_model[0] = gfx_model_load("controllers/left.fxm");
-    controller_model[1] = gfx_model_load("controllers/right.fxm");
-    if (controller_model[0] < 0 || controller_model[1] < 0) plat_log("controller models missing: drawing simple ones");
+    plat_stage("thumbnails");
+    if (!plat_skip("thumbnails")) gfx_thumbnails(&ed.thumbs);
+    plat_stage("controllers");
+    if (!plat_skip("controllers")) {
+        controller_model[0] = gfx_model_load("controllers/left.fxm");
+        controller_model[1] = gfx_model_load("controllers/right.fxm");
+    }
+    if (controller_model[0] < 0 || controller_model[1] < 0) plat_log("no controller models: drawing simple ones");
+    plat_stage("project");
 
     ed.main.pw = PW; ed.main.ph = PH; ed.kb.pw = KW; ed.kb.ph = KH;
     ed.side.pw = SW; ed.side.ph = SH; ed.side.pose = pose_ident();

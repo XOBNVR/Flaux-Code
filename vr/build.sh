@@ -38,6 +38,7 @@ ANDROID_NDK="$ANDROID_NDK" ./tools/get_mbedtls.sh android
     -u ANativeActivity_onCreate -Wl,--gc-sections -Wl,--no-undefined -Wl,-z,max-page-size=16384 \
     -o "$OUT/lib/arm64-v8a/libflauxvr.so"
 cp "$OUT/lib/arm64-v8a/libflauxvr.so" "$OUT/libflauxvr.unstripped.so"      # to look up a crash address from log.txt
+mkdir -p build/symbols && cp "$OUT/libflauxvr.unstripped.so" "build/symbols/libflauxvr-$(sed -n 's/.*versionName="\(.*\)".*/\1/p' AndroidManifest.xml).so"
 "$TC/bin/llvm-strip" --strip-unneeded "$OUT/lib/arm64-v8a/libflauxvr.so"
 cp prebuilt/arm64-v8a/libopenxr_loader.so "$OUT/lib/arm64-v8a/"
 
