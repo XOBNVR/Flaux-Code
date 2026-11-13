@@ -550,13 +550,17 @@ static int giz_hot(int k, int a) {
 }
 
 /* ---------- play mode ----------
- * The panels, lasers and handles are put away, and you walk about in what you built: the left
- * stick walks, the right stick turns, A jumps.  You stand on the plate and on top of shapes, bump
- * into ones too tall to step onto, and fall off edges.  Y (or X, or the menu button) goes back to
- * building. */
+ * The panels, lasers and handles are put away, and you move through what you built with your
+ * arms: put a hand on the plate or on a shape and it grips there, so moving that hand moves your
+ * body the other way.  Push down to rise, push back to go forward, swing and let go to fly: you
+ * keep the speed you had, and gravity brings you down.  The right stick turns you in steps.
+ * Y (or X, or the menu button) goes back to building. */
 
-static float play_fall;               /* how fast you're falling (or rising, just after a jump) */
-static int play_grounded, play_turned;
+#define HAND_R 0.07f                  /* how near a hand must be to a surface to grip it */
+static V3 play_vel;
+static int hand_on_surface[2], play_turned;
+static V3 hand_anchor[2], hand_normal[2];
+static V3 push_history[5]; static int push_count;
 
 /* the box a shape takes up, as wide as it can be when turned */
 static void obj_box(const Obj *o, V3 *lo, V3 *hi) {
@@ -589,12 +593,36 @@ static int blocked_at(float x, float z, float feet) {
     return 0;
 }
 
+/* Is a hand at p touching something?  If so: where on the surface it rests, and which way is out. */
+static int hand_touch(V3 p, V3 *at, V3 *normal) {
+    float deepest = 0; int hit = 0;
+    if (fabsf(p.x) <= PLATE * 0.5f && fabsf(p.z) <= PLATE * 0.5f && p.y < HAND_R && p.y > -0.5f) {
+        hit = 1; deepest = HAND_R - p.y; *at = v3(p.x, HAND_R, p.z); *normal = v3(0, 1, 0);
+    }
+    for (int i = 0; i < g_obj_count; i++) {
+        V3 lo, hi; obj_box(&g_obj[i], &lo, &hi);
+        if (p.x < lo.x - HAND_R || p.x > hi.x + HAND_R || p.y < lo.y - HAND_R || p.y > hi.y + HAND_R || p.z < lo.z - HAND_R || p.z > hi.z + HAND_R)
+            continue;
+        /* the nearest face is the one the hand came in through */
+        float d[6] = {p.x - (lo.x - HAND_R), (hi.x + HAND_R) - p.x, p.y - (lo.y - HAND_R), (hi.y + HAND_R) - p.y, p.z - (lo.z - HAND_R), (hi.z + HAND_R) - p.z};
+        int f = 0;
+        for (int k = 1; k < 6; k++) if (d[k] < d[f]) f = k;
+        if (hit && d[f] <= deepest) continue;
+        hit = 1; deepest = d[f];
+        *at = p; *normal = v3(0, 0, 0);
+        if (f == 0) { at->x = lo.x - HAND_R; normal->x = -1; } else if (f == 1) { at->x = hi.x + HAND_R; normal->x = 1; }
+        else if (f == 2) { at->y = lo.y - HAND_R; normal->y = -1; } else if (f == 3) { at->y = hi.y + HAND_R; normal->y = 1; }
+        else if (f == 4) { at->z = lo.z - HAND_R; normal->z = -1; } else { at->z = hi.z + HAND_R; normal->z = 1; }
+    }
+    return hit;
+}
+
 void ed_play(int on) {
     if (on == ed.playing) return;
     ed.playing = on;
     ed.edit = NULL; ed.tool = -1;
     grab_id[0] = grab_id[1] = 0; climbing[0] = climbing[1] = 0; giz_hand = -1; panel_grab = -1;
-    play_fall = 0; play_grounded = 0;
+    play_vel = v3(0, 0, 0); hand_on_surface[0] = hand_on_surface[1] = 0; push_count = 0;
     if (on) {
         ed.main.visible = 0;
         ed.selected = 0;
@@ -610,40 +638,78 @@ void ed_play(int on) {
 static void play_update(void) {
     for (int h = 0; h < 2; h++) { hover_id[h] = 0; laser_len[h] = 0; laser_hit[h] = 0; giz_hover[h] = -1; ed.hand_on[h] = 0; net_set_aim(h, 0, v3(0, 0, 0), v3(0, 0, 0)); }
     ghost_on = 0;
-    HandIn *l = &in.hand[0], *r = &in.hand[1];
-    float yaw = ed_front_yaw();
-    V3 feet = v3(ed.head.p.x, ed.rig_pos.y, ed.head.p.z);
+    const float dt = ed.dt;
+    HandIn *r = &in.hand[1];
 
-    /* walk: slide along whatever is in the way */
-    float sx = l->active && fabsf(l->sx) > 0.15f ? l->sx : 0, sy = l->active && fabsf(l->sy) > 0.15f ? l->sy : 0;
-    V3 step = v3mul(v3add(v3mul(v3(-sinf(yaw), 0, -cosf(yaw)), sy), v3mul(v3(cosf(yaw), 0, -sinf(yaw)), sx)), cfg.speed * ed.dt);
-    if (step.x != 0 && !blocked_at(feet.x + step.x, feet.z, feet.y)) { ed.rig_pos.x += step.x; feet.x += step.x; }
-    if (step.z != 0 && !blocked_at(feet.x, feet.z + step.z, feet.y)) { ed.rig_pos.z += step.z; feet.z += step.z; }
-
-    /* turn in steps, about where you stand */
+    /* turn in steps, about where you stand (a turn lets go of whatever you were holding) */
     if (r->active && !play_turned && fabsf(r->sx) > 0.7f) {
         V3 before = pose_pt(rig(), in.head.p);
         ed.rig_yaw += r->sx > 0 ? -FX_PI / 6 : FX_PI / 6;
         V3 after = pose_pt(rig(), in.head.p);
         ed.rig_pos.x += before.x - after.x; ed.rig_pos.z += before.z - after.z;
+        play_vel = q4rot(q4axis(v3(0, 1, 0), r->sx > 0 ? -FX_PI / 6 : FX_PI / 6), play_vel);
+        hand_on_surface[0] = hand_on_surface[1] = 0;
         play_turned = 1;
     }
     if (!r->active || fabsf(r->sx) < 0.3f) play_turned = 0;
 
-    /* jump, fall, land */
-    if (btn_hit[1][0] && play_grounded) { play_fall = 4.0f; play_grounded = 0; plat_sound(SND_GRAB); }
-    float ground = ground_under(feet.x, feet.z, ed.rig_pos.y);
-    if (!play_grounded || ed.rig_pos.y > ground + 0.001f) {
-        play_fall -= 12.0f * ed.dt;
-        ed.rig_pos.y += play_fall * ed.dt;
-        play_grounded = 0;
-        if (ed.rig_pos.y <= ground && play_fall <= 0) { ed.rig_pos.y = ground; play_fall = 0; play_grounded = 1; }
+    /* carry on the way you were going, with gravity; slide along whatever your body meets */
+    int holding = hand_on_surface[0] || hand_on_surface[1];
+    if (!holding) play_vel.y -= 9.8f * dt;
+    V3 head = pose_pt(rig(), in.head.p);
+    V3 step = holding ? v3(0, 0, 0) : v3mul(play_vel, dt);      /* while a hand grips, only your hands move you */
+    if (blocked_at(head.x + step.x, head.z, ed.rig_pos.y)) { step.x = 0; play_vel.x = 0; }
+    if (blocked_at(head.x + step.x, head.z + step.z, ed.rig_pos.y)) { step.z = 0; play_vel.z = 0; }
+    ed.rig_pos = v3add(ed.rig_pos, step);
+
+    /* hands: one on a surface grips there, and your body goes wherever keeps it there */
+    V3 push = v3(0, 0, 0); int pushing = 0;
+    for (int h = 0; h < 2; h++) {
+        if (!in.hand[h].active) { hand_on_surface[h] = 0; continue; }
+        V3 p = pose_pt(rig(), in.hand[h].grip.p), at, n;
+        if (hand_on_surface[h]) {
+            V3 off = v3sub(p, hand_anchor[h]);
+            if (v3dot(off, hand_normal[h]) > 0.045f || v3len(off) > 0.7f) hand_on_surface[h] = 0;       /* lifted off */
+            else { push = v3add(push, v3sub(hand_anchor[h], p)); pushing++; }
+        } else if (hand_touch(p, &at, &n)) {
+            (void)at;
+            hand_on_surface[h] = 1; hand_anchor[h] = p; hand_normal[h] = n;      /* it grips right where it touched */
+            pushing++;
+            world_buzz[h] = 0.5f; plat_sound(SND_CLICK);
+        }
+    }
+    if (pushing) {
+        push = v3mul(push, 1.0f / pushing);
+        float len = v3len(push);
+        if (len > 0.6f) push = v3mul(push, 0.6f / len);
+        head = pose_pt(rig(), in.head.p);
+        if (blocked_at(head.x + push.x, head.z, ed.rig_pos.y)) push.x = 0;
+        if (blocked_at(head.x + push.x, head.z + push.z, ed.rig_pos.y)) push.z = 0;
+        ed.rig_pos = v3add(ed.rig_pos, push);
+        /* the speed you leave with is the speed of your last few pushes */
+        if (push_count < 5) push_history[push_count++] = v3mul(push, 1.0f / dt);
+        else { memmove(push_history, push_history + 1, sizeof(V3) * 4); push_history[4] = v3mul(push, 1.0f / dt); }
+        V3 mean = v3(0, 0, 0);
+        for (int i = 0; i < push_count; i++) mean = v3add(mean, push_history[i]);
+        play_vel = v3mul(mean, 1.0f / push_count);
+        float speed = v3len(play_vel);
+        if (speed > 7.5f) play_vel = v3mul(play_vel, 7.5f / speed);
     } else {
-        ed.rig_pos.y = ground; play_fall = 0;        /* stepping up onto low things */
+        push_count = 0;
+    }
+
+    /* the ground under you */
+    head = pose_pt(rig(), in.head.p);
+    float ground = ground_under(head.x, head.z, ed.rig_pos.y);
+    if (ed.rig_pos.y <= ground) {
+        ed.rig_pos.y = ground;
+        if (play_vel.y < 0) play_vel.y = 0;
+        if (!pushing) { float k = expf(-9.0f * dt); play_vel.x *= k; play_vel.z *= k; }      /* feet on the ground: you stop */
     }
     if (ed.rig_pos.y < -25.0f) {                     /* fell off the plate: back to the middle */
-        ed.rig_pos.y = 6.0f; play_fall = 0;
-        ed.rig_pos.x += 0 - feet.x; ed.rig_pos.z += 2.0f - feet.z;
+        ed.rig_pos.y = 4.0f; play_vel = v3(0, 0, 0);
+        ed.rig_pos.x += 0 - head.x; ed.rig_pos.z += 2.0f - head.z;
+        hand_on_surface[0] = hand_on_surface[1] = 0;
         plat_sound(SND_ERROR);
     }
 }

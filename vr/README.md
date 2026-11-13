@@ -67,11 +67,21 @@ llvm-addr2line -f -e build/symbols/libflauxvr-2.4.0.so 0x1A2B4
 
 ## Play mode
 
-Press **Play** (on the panel, bottom left) to put the editor away and walk
-about in what you built. The left stick walks, the right stick turns, and
-**A** jumps. You stand on the plate and on top of shapes, bump into ones too
-tall to step onto, and fall off edges (you're put back if you fall off the
-plate). **Y** goes back to building.
+Press **Play** (on the panel, bottom left) to put the editor away and move
+through what you built with your arms. There's no walking with the
+thumbstick: put a hand on the plate or on a shape and it grips there, so
+moving that hand moves your body the other way.
+
+- **Push back** along the floor to go forward; alternate hands to run.
+- **Push down** to rise; push down hard with both hands to jump.
+- **Swing and let go** to fly: you keep your speed, and gravity brings you
+  down.
+- Grip the side or top of a shape to pull yourself up onto it.
+- The **right stick** turns you in steps.
+
+You stand on the plate and on top of shapes, bump into ones too tall to step
+onto, and are put back if you fall off the plate. **Y** goes back to
+building.
 
 ## The panel
 

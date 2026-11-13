@@ -200,7 +200,7 @@ static void screen_home(void) {
     float w = (CW - 40) / 3;
     if (big_card(CX, 150, w, 120, "\xE2\x9C\x9A", "Start building", "Pick a shape and place it", 0x4FE3F5)) go(TAB_BUILD);
     if (big_card(CX + w + 20, 150, w, 120, "\xE2\x97\x86", "Assets", "Ready-made models to place", 0xA78BFA)) go(TAB_ASSETS);
-    if (big_card(CX + (w + 20) * 2, 150, w, 120, "\xE2\x96\xB6", "Play", "Walk and jump in your build", 0x4ADE80)) ed_play(1);
+    if (big_card(CX + (w + 20) * 2, 150, w, 120, "\xE2\x96\xB6", "Play", "Push off with your hands", 0x4ADE80)) ed_play(1);
 
     ui_card(CX, 290, CW, 404);
     ui_text_bold(CX + 32, 308, 30, C_TEXT, "Controls");
@@ -215,7 +215,7 @@ static void screen_home(void) {
     key_line(x1, y + 192, "X", "Bring this panel to you");
     key_line(x2, y + 192, "Y", "Hide or show the panel");
     key_line(x1, y + 256, "A / B", "Undo / redo");
-    key_line(x2, y + 256, "Play", "Stick walks, A jumps, Y stops");
+    key_line(x2, y + 256, "Play", "Push off surfaces with your hands. Y stops");
 
     /* what's on the plate, shape by shape */
     float pw = 840;
