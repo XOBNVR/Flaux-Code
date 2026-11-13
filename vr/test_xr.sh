@@ -15,7 +15,7 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/flaux-xdg}"
 mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"
 rm -rf build/xr_data
 if ! pgrep -x monado-service >/dev/null; then
-    rm -f "$XDG_RUNTIME_DIR"/monado_comp_ipc
+    rm -f "$XDG_RUNTIME_DIR"/monado_comp_ipc "$XDG_RUNTIME_DIR"/monado.pid      # left behind if it was killed
     (sleep 100000 2>/dev/null | XRT_COMPOSITOR_NULL=1 monado-service >build/monado.log 2>&1) >/dev/null 2>&1 &     # it wants a live stdin
     sleep 3
 fi
